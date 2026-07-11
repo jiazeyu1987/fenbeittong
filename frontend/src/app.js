@@ -1,4 +1,4 @@
-import { api } from './api.js';
+﻿import { api } from './api.js';
 
 const fields = {
   accountBookNumber: document.querySelector('#accountBookNumber'),
@@ -40,6 +40,7 @@ const state = {
   currentStatus: null,
   syncedDocuments: [],
   selectedSourceIds: new Set(),
+  visibleColumnKeys: new Set(['status', 'sourceCode', 'requester', 'department', 'expenseCategories', 'amount', 'interfaceSource', 'time']),
   sortField: 'time',
   sortDirection: 'desc',
   lastPreview: null,
@@ -53,6 +54,8 @@ const statusBadge = document.querySelector('#statusBadge');
 const resultOutput = document.querySelector('#resultOutput');
 const resultSummary = document.querySelector('#resultSummary');
 const sourceIdInput = document.querySelector('#sourceIdInput');
+const searchFieldSelect = document.querySelector('#searchFieldSelect');
+const matchModeSelect = document.querySelector('#matchModeSelect');
 const sourceSearchInput = document.querySelector('#sourceSearchInput');
 const paginationSummary = document.querySelector('#paginationSummary');
 const recordsTable = document.querySelector('#recordsTable');
@@ -61,6 +64,7 @@ const voucherPreviewBody = document.querySelector('#voucherPreviewBody');
 const sourceQueueBody = document.querySelector('#sourceQueueBody');
 const selectAllRowsCheckbox = document.querySelector('#selectAllRowsCheckbox');
 const financeQueuePanel = document.querySelector('#financeQueuePanel');
+const columnSettingsPanel = document.querySelector('#columnSettingsPanel');
 const saveConfirmPanel = document.querySelector('#saveConfirmPanel');
 const saveConfirmSummary = document.querySelector('#saveConfirmSummary');
 const saveRiskNotice = document.querySelector('#saveRiskNotice');
@@ -77,10 +81,12 @@ controls.viewVoucher.addEventListener('click', run(queryProcess));
 controls.queryLedger.addEventListener('click', () => renderSourceQueue(state.syncedDocuments));
 controls.resetLedger.addEventListener('click', () => {
   sourceSearchInput.value = '';
+  searchFieldSelect.value = 'sourceCode';
+  matchModeSelect.value = 'contains';
   renderSourceQueue(state.syncedDocuments);
 });
 controls.exportLedger.addEventListener('click', exportLedgerCsv);
-controls.columnSettings.addEventListener('click', () => show({ columns: visibleLedgerColumns() }, '当前列表字段已按财务处理场景固定展示。'));
+controls.columnSettings.addEventListener('click', toggleColumnSettings);
 controls.saveConfig.addEventListener('click', run(saveConfig));
 controls.sync.addEventListener('click', run(syncFenbeitong));
 controls.runScheduler.addEventListener('click', run(runSchedulerOnce));
@@ -93,6 +99,7 @@ controls.listRecords.addEventListener('click', run(refreshRecords));
 controls.primaryAction.addEventListener('click', run(runPrimaryAction));
 sourceQueueBody.addEventListener('change', run(toggleQueuedDocument));
 selectAllRowsCheckbox.addEventListener('change', () => toggleAllVisibleDocuments(selectAllRowsCheckbox.checked));
+columnSettingsPanel.addEventListener('change', run(updateVisibleColumn));
 financeQueuePanel.addEventListener('click', (event) => {
   const sortButton = event.target.closest('button[data-sort-field]');
   if (!sortButton) {
@@ -106,19 +113,19 @@ sourceSearchInput.addEventListener('keydown', (event) => {
   }
 });
 sourceIdInput.addEventListener('input', () => {
-  invalidatePreview('预览已失效：来源单据已变化，请重新预览凭证。');
+  invalidatePreview('棰勮宸插け鏁堬細鏉ユ簮鍗曟嵁宸插彉鍖栵紝璇烽噸鏂伴瑙堝嚟璇併€?);
   renderActionState();
 });
 for (const field of Object.values(fields)) {
   field.addEventListener('input', () => {
-    invalidatePreview('预览已失效：凭证关键字段已变化，请重新预览凭证。');
+    invalidatePreview('棰勮宸插け鏁堬細鍑瘉鍏抽敭瀛楁宸插彉鍖栵紝璇烽噸鏂伴瑙堝嚟璇併€?);
     renderActionState();
   });
 }
 
 run(async () => {
   await api.health();
-  statusBadge.textContent = '后端已连接';
+  statusBadge.textContent = '鍚庣宸茶繛鎺?;
   statusBadge.classList.add('ok');
   await loadTemplate();
   await refreshAll();
@@ -130,30 +137,30 @@ async function loadTemplate() {
   state.configSaved = false;
   renderConfigValidation();
   renderActionState();
-  show(template, '已载入默认凭证参数，请保存配置后开始同步。');
+  show(template, '宸茶浇鍏ラ粯璁ゅ嚟璇佸弬鏁帮紝璇蜂繚瀛橀厤缃悗寮€濮嬪悓姝ャ€?);
 }
 
 async function saveConfig() {
   const saved = await api.saveConfig(readConfig());
   state.configSaved = true;
   renderConfigValidation();
-  show(saved, '配置已保存，可以立即同步分贝通数据。');
+  show(saved, '閰嶇疆宸蹭繚瀛橈紝鍙互绔嬪嵆鍚屾鍒嗚礉閫氭暟鎹€?);
   await refreshAll();
 }
 
 async function syncFenbeitong() {
   const result = await api.syncFenbeitong();
   selectFirstRecord(result.records);
-  invalidatePreview('预览已失效：同步结果已变化，请重新预览凭证。');
-  show(result, `同步完成，新增或更新 ${result.records.length} 张来源单据。`);
+  invalidatePreview('棰勮宸插け鏁堬細鍚屾缁撴灉宸插彉鍖栵紝璇烽噸鏂伴瑙堝嚟璇併€?);
+  show(result, `鍚屾瀹屾垚锛屾柊澧炴垨鏇存柊 ${result.records.length} 寮犳潵婧愬崟鎹€俙);
   await refreshAll();
 }
 
 async function runSchedulerOnce() {
   const result = await api.runSchedulerOnce();
   selectFirstRecord(result.sync.records);
-  invalidatePreview('预览已失效：同步结果已变化，请重新预览凭证。');
-  show(result, `定时任务已手动运行，本次同步 ${result.sync.records.length} 张来源单据。`);
+  invalidatePreview('棰勮宸插け鏁堬細鍚屾缁撴灉宸插彉鍖栵紝璇烽噸鏂伴瑙堝嚟璇併€?);
+  show(result, `瀹氭椂浠诲姟宸叉墜鍔ㄨ繍琛岋紝鏈鍚屾 ${result.sync.records.length} 寮犳潵婧愬崟鎹€俙);
   await refreshAll();
 }
 
@@ -177,7 +184,7 @@ async function prepare() {
   const record = await api.prepare(buildVoucherRequest());
   sourceIdInput.value = record.sourceId;
   state.preparedSourceIds.add(record.sourceId);
-  show(record, '已生成待保存凭证。本地记录已保留幂等键和内容哈希。');
+  show(record, '宸茬敓鎴愬緟淇濆瓨鍑瘉銆傛湰鍦拌褰曞凡淇濈暀骞傜瓑閿拰鍐呭鍝堝笇銆?);
   await refreshAll();
 }
 
@@ -200,7 +207,7 @@ async function generateVoucherFromLedger() {
     state.preparedSourceIds.add(preparedRecord.sourceId);
     prepared.push(preparedRecord);
   }
-  show({ count: prepared.length, records: prepared }, `已生成 ${prepared.length} 张待保存凭证。`);
+  show({ count: prepared.length, records: prepared }, `宸茬敓鎴?${prepared.length} 寮犲緟淇濆瓨鍑瘉銆俙);
   await refreshAll();
 }
 
@@ -223,7 +230,7 @@ async function pushSelectedToErp() {
     state.pushedSourceIds.add(saved.sourceId);
     pushed.push(saved);
   }
-  show({ count: pushed.length, records: pushed }, `已保存 ${pushed.length} 张ERP草稿凭证，等待财务人工审核。`);
+  show({ count: pushed.length, records: pushed }, `宸蹭繚瀛?${pushed.length} 寮燛RP鑽夌鍑瘉锛岀瓑寰呰储鍔′汉宸ュ鏍搞€俙);
   await refreshAll();
 }
 
@@ -243,7 +250,7 @@ async function pushErp() {
 }
 
 async function queryProcess() {
-  show(await api.getProcess(requiredSourceId()), '已查询到本地处理记录。');
+  show(await api.getProcess(requiredSourceId()), '宸叉煡璇㈠埌鏈湴澶勭悊璁板綍銆?);
 }
 
 async function refreshAll() {
@@ -266,7 +273,7 @@ async function refreshRecords() {
   state.pushedSourceIds = new Set(records.filter((record) => record.processStage === 'ERP_PUSHED').map((record) => record.sourceId));
   renderSourceQueue(state.syncedDocuments);
   if (records.length === 0) {
-    recordsTable.innerHTML = '<tr><td colspan="5">暂无记录，请先同步分贝通数据。</td></tr>';
+    recordsTable.innerHTML = '<tr><td colspan="5">鏆傛棤璁板綍锛岃鍏堝悓姝ュ垎璐濋€氭暟鎹€?/td></tr>';
     return;
   }
   recordsTable.innerHTML = records.map((record) => `
@@ -283,13 +290,13 @@ async function refreshRecords() {
 async function refreshLogs() {
   const logs = await api.listLogs();
   if (logs.length === 0) {
-    logsList.textContent = '暂无日志';
+    logsList.textContent = '鏆傛棤鏃ュ織';
     return;
   }
   logsList.innerHTML = logs.slice(0, 8).map((log) => `
     <div class="log-item">
       <strong>${escapeHtml(logLabel(log.action))}</strong>
-      <span>${escapeHtml(log.status)} · ${escapeHtml(log.createdAt)}</span>
+      <span>${escapeHtml(log.status)} 路 ${escapeHtml(log.createdAt)}</span>
     </div>
   `).join('');
 }
@@ -307,7 +314,7 @@ async function runPrimaryAction() {
   } else if (action === 'push') {
     await pushErp();
   } else {
-    throw new Error('当前没有可执行的主操作，请先检查配置和来源单据。');
+    throw new Error('褰撳墠娌℃湁鍙墽琛岀殑涓绘搷浣滐紝璇峰厛妫€鏌ラ厤缃拰鏉ユ簮鍗曟嵁銆?);
   }
 }
 
@@ -319,7 +326,7 @@ async function toggleQueuedDocument(event) {
   const sourceId = checkbox.dataset.sourceId;
   const record = state.syncedDocuments.find((item) => item.sourceId === sourceId);
   if (!record) {
-    throw new Error(`待处理单据不存在：${sourceId}`);
+    throw new Error(`寰呭鐞嗗崟鎹笉瀛樺湪锛?{sourceId}`);
   }
   if (checkbox.checked) {
     state.selectedSourceIds.add(sourceId);
@@ -331,12 +338,12 @@ async function toggleQueuedDocument(event) {
       setActiveSourceRecord(nextRecord, true);
     } else {
       sourceIdInput.value = '';
-      invalidatePreview('预览已失效：已取消选择来源单据，请重新选择后预览凭证。');
+      invalidatePreview('棰勮宸插け鏁堬細宸插彇娑堥€夋嫨鏉ユ簮鍗曟嵁锛岃閲嶆柊閫夋嫨鍚庨瑙堝嚟璇併€?);
     }
   }
   renderSourceQueue(state.syncedDocuments);
   renderActionState();
-  show({ selectedCount: state.selectedSourceIds.size, lastSelected: record }, `已选择 ${state.selectedSourceIds.size} 张来源单据。`);
+  show({ selectedCount: state.selectedSourceIds.size, lastSelected: record }, `宸查€夋嫨 ${state.selectedSourceIds.size} 寮犳潵婧愬崟鎹€俙);
 }
 
 function toggleAllVisibleDocuments(checked) {
@@ -353,7 +360,7 @@ function toggleAllVisibleDocuments(checked) {
     setActiveSourceRecord(firstSelected, true);
   } else {
     sourceIdInput.value = '';
-    invalidatePreview('预览已失效：已取消选择来源单据，请重新选择后预览凭证。');
+    invalidatePreview('棰勮宸插け鏁堬細宸插彇娑堥€夋嫨鏉ユ簮鍗曟嵁锛岃閲嶆柊閫夋嫨鍚庨瑙堝嚟璇併€?);
   }
   renderSourceQueue(state.syncedDocuments);
   renderActionState();
@@ -369,7 +376,7 @@ function setActiveSourceRecord(record, invalidate) {
   sourceIdInput.value = record.sourceId;
   fields.mockFixedJson.value = record.fixedJson || fields.mockFixedJson.value;
   if (invalidate) {
-    invalidatePreview('预览已失效：已切换来源单据，请重新预览凭证。');
+    invalidatePreview('棰勮宸插け鏁堬細宸插垏鎹㈡潵婧愬崟鎹紝璇烽噸鏂伴瑙堝嚟璇併€?);
   }
 }
 
@@ -383,8 +390,8 @@ function renderSelectAllState(visibleRecords) {
 }
 
 function renderStatus(status) {
-  document.querySelector('#fenbeitongMode').textContent = status.mode.fenbeitong === 'real' ? '已启用' : '待启用';
-  document.querySelector('#kingdeeMode').textContent = status.mode.kingdee === 'real' ? '已启用' : '待启用';
+  document.querySelector('#fenbeitongMode').textContent = status.mode.fenbeitong === 'real' ? '宸插惎鐢? : '寰呭惎鐢?;
+  document.querySelector('#kingdeeMode').textContent = status.mode.kingdee === 'real' ? '宸插惎鐢? : '寰呭惎鐢?;
   document.querySelector('#fenbeitongReady').textContent = readinessText(status.readiness.fenbeitong);
   document.querySelector('#kingdeeReady').textContent = readinessText(status.readiness.kingdee);
   document.querySelector('#syncedCount').textContent = status.summary.counts.syncedDocuments;
@@ -394,9 +401,9 @@ function renderStatus(status) {
   document.querySelector('#riskCount').textContent = status.summary.counts.pushedVouchers;
   const batch = status.summary.latestBatch;
   const mockReplacement = Boolean(batch?.mockReplacement || status.mode.kingdee === 'mock' || status.mode.fenbeitong === 'mock');
-  document.querySelector('#mockReplacement').textContent = mockReplacement ? '未启用' : '已启用';
+  document.querySelector('#mockReplacement').textContent = mockReplacement ? '鏈惎鐢? : '宸插惎鐢?;
   document.querySelector('#mockReason').textContent = interfaceReason(batch?.mockReason, mockReplacement);
-  document.querySelector('#schedulerEnabled').textContent = status.scheduler.enabled ? '开启' : '关闭';
+  document.querySelector('#schedulerEnabled').textContent = status.scheduler.enabled ? '寮€鍚? : '鍏抽棴';
   document.querySelector('#schedulerDetail').textContent = schedulerSummary(status.scheduler);
   document.querySelector('#environmentWarning').textContent = environmentWarning(status);
   document.querySelector('#syncBatchSummary').textContent = syncBatchSummary(batch);
@@ -409,19 +416,19 @@ function renderNextAction(status) {
   const sourceId = sourceIdInput.value.trim();
   const prepared = state.preparedSourceIds.has(sourceId) || status.summary.counts.preparedVouchers > 0;
   const pushed = state.pushedSourceIds.has(sourceId) || status.summary.counts.pushedVouchers > 0;
-  let text = '请先保存配置，确保账簿、凭证字、期间、科目和核算维度可用。';
+  let text = '璇峰厛淇濆瓨閰嶇疆锛岀‘淇濊处绨裤€佸嚟璇佸瓧銆佹湡闂淬€佺鐩拰鏍哥畻缁村害鍙敤銆?;
   if (pushed) {
-    text = '已有 ERP 暂存结果，下一步由财务在金蝶中人工审核。';
+    text = '宸叉湁 ERP 鏆傚瓨缁撴灉锛屼笅涓€姝ョ敱璐㈠姟鍦ㄩ噾铦朵腑浜哄伐瀹℃牳銆?;
   } else if (prepared && state.lastPreview?.balanced) {
-    text = '已生成待保存凭证，确认保存前信息后可保存为 ERP 暂存凭证。';
+    text = '宸茬敓鎴愬緟淇濆瓨鍑瘉锛岀‘璁や繚瀛樺墠淇℃伅鍚庡彲淇濆瓨涓?ERP 鏆傚瓨鍑瘉銆?;
   } else if (state.lastPreview?.balanced) {
-    text = '凭证已预览且借贷平衡，下一步生成待保存凭证。';
+    text = '鍑瘉宸查瑙堜笖鍊熻捶骞宠　锛屼笅涓€姝ョ敓鎴愬緟淇濆瓨鍑瘉銆?;
   } else if (sourceId) {
-    text = '已选择来源单据，下一步预览凭证并确认借贷平衡。';
+    text = '宸查€夋嫨鏉ユ簮鍗曟嵁锛屼笅涓€姝ラ瑙堝嚟璇佸苟纭鍊熻捶骞宠　銆?;
   } else if (status.summary.counts.syncedDocuments > 0) {
-    text = '已有待处理单据，请先在队列中选择一张单据。';
+    text = '宸叉湁寰呭鐞嗗崟鎹紝璇峰厛鍦ㄩ槦鍒椾腑閫夋嫨涓€寮犲崟鎹€?;
   } else if (state.configSaved) {
-    text = '配置已保存，下一步立即同步分贝通数据。';
+    text = '閰嶇疆宸蹭繚瀛橈紝涓嬩竴姝ョ珛鍗冲悓姝ュ垎璐濋€氭暟鎹€?;
   }
   document.querySelector('#nextActionText').textContent = text;
 }
@@ -442,27 +449,27 @@ function renderActionState() {
   const reason = getActionBlockReason({ sourceId, prepared, pushed });
 
   let action = 'save-config';
-  let label = '保存配置';
+  let label = '淇濆瓨閰嶇疆';
   let disabled = false;
   if (state.configSaved && state.syncedDocuments.length === 0) {
     action = 'sync';
-    label = '立即同步分贝通数据';
+    label = '绔嬪嵆鍚屾鍒嗚礉閫氭暟鎹?;
   } else if (state.configSaved && !sourceId) {
     action = 'preview';
-    label = '先选择待处理单据';
+    label = '鍏堥€夋嫨寰呭鐞嗗崟鎹?;
     disabled = true;
   } else if (state.configSaved && (!state.lastPreview?.balanced || !previewFresh)) {
     action = 'preview';
-    label = state.previewInvalidReason ? '重新预览凭证' : '预览凭证';
+    label = state.previewInvalidReason ? '閲嶆柊棰勮鍑瘉' : '棰勮鍑瘉';
   } else if (state.configSaved && !prepared) {
     action = 'prepare';
-    label = '生成待保存凭证';
+    label = '鐢熸垚寰呬繚瀛樺嚟璇?;
   } else if (state.configSaved && !pushed) {
     action = 'push';
-    label = '保存ERP草稿';
+    label = '淇濆瓨ERP鑽夌';
   } else if (pushed) {
     action = 'done';
-    label = '已保存，等待财务人工审核';
+    label = '宸蹭繚瀛橈紝绛夊緟璐㈠姟浜哄伐瀹℃牳';
     disabled = true;
   }
   controls.primaryAction.dataset.action = action;
@@ -473,42 +480,42 @@ function renderActionState() {
 
 function getActionBlockReason({ sourceId, prepared, pushed }) {
   if (!state.configSaved) {
-    return '未满足原因：请先保存配置，确保账簿、凭证字、科目和核算维度可用。';
+    return '鏈弧瓒冲師鍥狅細璇峰厛淇濆瓨閰嶇疆锛岀‘淇濊处绨裤€佸嚟璇佸瓧銆佺鐩拰鏍哥畻缁村害鍙敤銆?;
   }
   if (state.syncedDocuments.length === 0) {
-    return '未满足原因：还没有同步到分贝通单据，请先执行同步。';
+    return '鏈弧瓒冲師鍥狅細杩樻病鏈夊悓姝ュ埌鍒嗚礉閫氬崟鎹紝璇峰厛鎵ц鍚屾銆?;
   }
   if (!sourceId) {
-    return '未满足原因：请先在待处理单据队列中选择一张单据。';
+    return '鏈弧瓒冲師鍥狅細璇峰厛鍦ㄥ緟澶勭悊鍗曟嵁闃熷垪涓€夋嫨涓€寮犲崟鎹€?;
   }
   if (state.previewInvalidReason) {
     return state.previewInvalidReason;
   }
   if (!state.lastPreview?.balanced) {
-    return '未满足原因：请先预览凭证，并确认借贷平衡、税额和科目映射。';
+    return '鏈弧瓒冲師鍥狅細璇峰厛棰勮鍑瘉锛屽苟纭鍊熻捶骞宠　銆佺◣棰濆拰绉戠洰鏄犲皠銆?;
   }
   if (!prepared) {
-    return '当前可生成待保存凭证；系统将保留幂等键和内容哈希，避免重复入账。';
+    return '褰撳墠鍙敓鎴愬緟淇濆瓨鍑瘉锛涚郴缁熷皢淇濈暀骞傜瓑閿拰鍐呭鍝堝笇锛岄伩鍏嶉噸澶嶅叆璐︺€?;
   }
   if (!pushed) {
     return state.currentStatus?.mode.kingdee === 'real'
-      ? '当前可保存到金蝶测试账套；只保存暂存凭证，不提交、不审核、不过账。'
-      : '当前外部ERP接口未启用，系统仅保存本地处理结果，不写入正式ERP。';
+      ? '褰撳墠鍙繚瀛樺埌閲戣澏娴嬭瘯璐﹀锛涘彧淇濆瓨鏆傚瓨鍑瘉锛屼笉鎻愪氦銆佷笉瀹℃牳銆佷笉杩囪处銆?
+      : '褰撳墠澶栭儴ERP鎺ュ彛鏈惎鐢紝绯荤粺浠呬繚瀛樻湰鍦板鐞嗙粨鏋滐紝涓嶅啓鍏ユ寮廍RP銆?;
   }
-  return '该单据已保存，下一步由财务在金蝶中人工审核。';
+  return '璇ュ崟鎹凡淇濆瓨锛屼笅涓€姝ョ敱璐㈠姟鍦ㄩ噾铦朵腑浜哄伐瀹℃牳銆?;
 }
 
 function renderConfigValidation() {
   const checks = [
-    ['账簿编码', Boolean(fields.accountBookNumber.value.trim()), '写入 GL_VOUCHER 的 FAccountBookID'],
-    ['凭证字编码', Boolean(fields.voucherGroupNumber.value.trim()), '写入 GL_VOUCHER 的 FVOUCHERGROUPID'],
-    ['凭证日期和期间', Boolean(fields.mockVoucherDate.value && fields.mockYear.value && fields.mockPeriod.value), '写入日期、年度和期间'],
-    ['费用科目映射', isJsonObject(fields.categoryAccountNumbers.value), '分贝通费用类型映射到借方科目'],
-    ['币别映射', isJsonObject(fields.currencyNumbers.value), '分贝通币别映射到 ERP 币别'],
-    ['贷方核算维度', isJsonObject(fields.creditDetailNumbers.value), '对方科目核算维度']
+    ['璐︾翱缂栫爜', Boolean(fields.accountBookNumber.value.trim()), '鍐欏叆 GL_VOUCHER 鐨?FAccountBookID'],
+    ['鍑瘉瀛楃紪鐮?, Boolean(fields.voucherGroupNumber.value.trim()), '鍐欏叆 GL_VOUCHER 鐨?FVOUCHERGROUPID'],
+    ['鍑瘉鏃ユ湡鍜屾湡闂?, Boolean(fields.mockVoucherDate.value && fields.mockYear.value && fields.mockPeriod.value), '鍐欏叆鏃ユ湡銆佸勾搴﹀拰鏈熼棿'],
+    ['璐圭敤绉戠洰鏄犲皠', isJsonObject(fields.categoryAccountNumbers.value), '鍒嗚礉閫氳垂鐢ㄧ被鍨嬫槧灏勫埌鍊熸柟绉戠洰'],
+    ['甯佸埆鏄犲皠', isJsonObject(fields.currencyNumbers.value), '鍒嗚礉閫氬竵鍒槧灏勫埌 ERP 甯佸埆'],
+    ['璐锋柟鏍哥畻缁村害', isJsonObject(fields.creditDetailNumbers.value), '瀵规柟绉戠洰鏍哥畻缁村害']
   ];
   document.querySelector('#configValidationList').innerHTML = checks.map(([label, ok, detail]) =>
-    `<li class="${ok ? 'ok' : 'pending'}">${escapeHtml(label)}：${ok ? '通过' : '待补齐'}，${escapeHtml(detail)}</li>`
+    `<li class="${ok ? 'ok' : 'pending'}">${escapeHtml(label)}锛?{ok ? '閫氳繃' : '寰呰ˉ榻?}锛?{escapeHtml(detail)}</li>`
   ).join('');
 }
 
@@ -519,7 +526,8 @@ function renderSourceQueue(records) {
   }
   renderSelectAllState(visibleRecords);
   if (visibleRecords.length === 0) {
-    sourceQueueBody.innerHTML = '<tr><td colspan="9">暂无待处理单据，请先同步分贝通数据。</td></tr>';
+    sourceQueueBody.innerHTML = `<tr><td colspan="${visibleLedgerColumns().length}">暂无符合条件的报销单，请调整查询条件或先同步分贝通。</td></tr>`;
+    renderColumnVisibility();
     renderFinanceReview(state.lastPreview);
     return;
   }
@@ -528,18 +536,19 @@ function renderSourceQueue(records) {
     const selected = state.selectedSourceIds.has(record.sourceId);
     return `
     <tr class="${selected ? 'selected' : ''}">
-      <td><input class="row-checkbox" type="checkbox" data-source-id="${escapeHtml(record.sourceId)}" aria-label="选择 ${escapeHtml(displaySourceCode(record))}" ${selected ? 'checked' : ''} /></td>
-      <td><span class="status-tag">${escapeHtml(queueStatus(record))}</span></td>
-      <td>${escapeHtml(displaySourceCode(record))}</td>
-      <td>${escapeHtml(displayRequester(record, summary.requester))}</td>
-      <td>${escapeHtml(summary.department)}</td>
-      <td>${escapeHtml(displayExpenseCategories(record, summary.expenseCategories))}</td>
-      <td class="amount">${formatMoney(summary.totalAmount)}</td>
-      <td>${escapeHtml(record.mockReplacement ? '接口未启用' : '正式接口')}</td>
-      <td>${escapeHtml(summary.createTime || record.updateTime || '')}</td>
+      <td><input class="row-checkbox" type="checkbox" data-source-id="${escapeHtml(record.sourceId)}" aria-label="閫夋嫨 ${escapeHtml(displaySourceCode(record))}" ${selected ? 'checked' : ''} /></td>
+      ${renderLedgerCell('status', `<span class="status-tag">${escapeHtml(queueStatus(record))}</span>`)}
+      ${renderLedgerCell('sourceCode', escapeHtml(displaySourceCode(record)))}
+      ${renderLedgerCell('requester', escapeHtml(displayRequester(record, summary.requester)))}
+      ${renderLedgerCell('department', escapeHtml(summary.department))}
+      ${renderLedgerCell('expenseCategories', escapeHtml(displayExpenseCategories(record, summary.expenseCategories)))}
+      ${renderLedgerCell('amount', formatMoney(summary.totalAmount), 'amount')}
+      ${renderLedgerCell('interfaceSource', escapeHtml(record.mockReplacement ? '接口未启用' : '正式接口'))}
+      ${renderLedgerCell('time', escapeHtml(summary.createTime || record.updateTime || ''))}
     </tr>
   `;
   }).join('');
+  renderColumnVisibility();
   renderFinanceReview(state.lastPreview);
 }
 
@@ -550,16 +559,36 @@ function filterLedgerRecords(records) {
   }
   return records.filter((record) => {
     const summary = buildSourceSummary(record);
-    return [
-      record.sourceId,
-      record.sourceCode,
-      displaySourceCode(record),
-      displayRequester(record, summary.requester),
-      summary.department,
-      displayExpenseCategories(record, summary.expenseCategories),
-      queueStatus(record)
-    ].some((value) => String(value || '').toLowerCase().includes(keyword));
+    return matchesLedgerQuery(
+      ledgerSearchValue(record, summary, searchFieldSelect.value),
+      keyword,
+      matchModeSelect.value
+    );
   });
+}
+
+function ledgerSearchValue(record, summary, field) {
+  if (field === 'requester') {
+    return displayRequester(record, summary.requester);
+  }
+  if (field === 'department') {
+    return summary.department;
+  }
+  if (field === 'status') {
+    return queueStatus(record);
+  }
+  return displaySourceCode(record);
+}
+
+function matchesLedgerQuery(value, keyword, mode) {
+  const normalizedValue = String(value || '').toLowerCase();
+  if (mode === 'equals') {
+    return normalizedValue === keyword;
+  }
+  if (mode === 'notEquals') {
+    return normalizedValue !== keyword;
+  }
+  return normalizedValue.includes(keyword);
 }
 
 function sortLedgerRecords(records) {
@@ -599,7 +628,68 @@ function setLedgerSort(field) {
 }
 
 function visibleLedgerColumns() {
-  return ['操作', '单据状态', '来源单号', '报销人', '部门', '费用类型', '金额', '接口来源', '更新时间'];
+  return ['操作', ...ledgerColumnDefinitions()
+    .filter((column) => state.visibleColumnKeys.has(column.key))
+    .map((column) => column.label)];
+}
+
+function renderLedgerCell(key, content, className = '') {
+  if (!state.visibleColumnKeys.has(key)) {
+    return '';
+  }
+  return `<td data-column-key="${key}" class="${className}">${content}</td>`;
+}
+
+function ledgerColumnDefinitions() {
+  return [
+    { key: 'status', label: '单据状态' },
+    { key: 'sourceCode', label: '来源单号' },
+    { key: 'requester', label: '报销人' },
+    { key: 'department', label: '部门' },
+    { key: 'expenseCategories', label: '费用类型' },
+    { key: 'amount', label: '金额' },
+    { key: 'interfaceSource', label: '接口来源' },
+    { key: 'time', label: '更新时间' }
+  ];
+}
+
+function visibleColumnKeys() {
+  return [...state.visibleColumnKeys];
+}
+
+function toggleColumnSettings() {
+  columnSettingsPanel.hidden = !columnSettingsPanel.hidden;
+}
+
+function updateVisibleColumn(event) {
+  const checkbox = event.target.closest('input[data-column-toggle]');
+  if (!checkbox) {
+    return;
+  }
+  const key = checkbox.dataset.columnToggle;
+  if (checkbox.checked) {
+    state.visibleColumnKeys.add(key);
+  } else {
+    state.visibleColumnKeys.delete(key);
+  }
+  if (state.visibleColumnKeys.size === 0) {
+    state.visibleColumnKeys.add(key);
+    checkbox.checked = true;
+    throw new Error('至少保留一个显示字段。');
+  }
+  renderSourceQueue(state.syncedDocuments);
+}
+
+function renderColumnVisibility() {
+  for (const definition of ledgerColumnDefinitions()) {
+    const visible = state.visibleColumnKeys.has(definition.key);
+    document.querySelectorAll(`[data-column-key="${definition.key}"]`).forEach((element) => {
+      element.hidden = !visible;
+    });
+  }
+  columnSettingsPanel.querySelectorAll('input[data-column-toggle]').forEach((checkbox) => {
+    checkbox.checked = state.visibleColumnKeys.has(checkbox.dataset.columnToggle);
+  });
 }
 
 function exportLedgerCsv() {
@@ -616,7 +706,7 @@ function exportLedgerCsv() {
         summary.department,
         displayExpenseCategories(record, summary.expenseCategories),
         formatMoney(summary.totalAmount),
-        record.mockReplacement ? '接口未启用' : '正式接口',
+        record.mockReplacement ? '鎺ュ彛鏈惎鐢? : '姝ｅ紡鎺ュ彛',
         summary.createTime || record.updateTime || ''
       ];
     })
@@ -626,15 +716,15 @@ function exportLedgerCsv() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `报销单列表-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.download = `鎶ラ攢鍗曞垪琛?${new Date().toISOString().slice(0, 10)}.csv`;
   link.click();
   URL.revokeObjectURL(url);
-  show({ count: rows.length }, `已导出 ${rows.length} 条报销单列表数据。`);
+  show({ count: rows.length }, `宸插鍑?${rows.length} 鏉℃姤閿€鍗曞垪琛ㄦ暟鎹€俙);
 }
 
 function renderVoucherPreview(preview) {
   renderFinanceReview(preview);
-  document.querySelector('#previewBalanced').textContent = preview.balanced ? '是' : '否';
+  document.querySelector('#previewBalanced').textContent = preview.balanced ? '鏄? : '鍚?;
   document.querySelector('#previewDebitTotal').textContent = formatMoney(preview.debitTotal);
   document.querySelector('#previewCreditTotal').textContent = formatMoney(preview.creditTotal);
   document.querySelector('#previewLineCount').textContent = preview.financialSummary.lineCount;
@@ -664,13 +754,13 @@ function renderFinanceReview(preview) {
     const summary = preview.sourceSummary || {};
     financeReviewSummary.innerHTML = `
       <dl>
-        <div><dt>来源单号</dt><dd>${escapeHtml(selectedRecord ? displaySourceCode(selectedRecord) : preview.sourceCode || '-')}</dd></div>
-        <div><dt>报销人</dt><dd>${escapeHtml(selectedRecord ? displayRequester(selectedRecord, summary.requester) : summary.requester || '-')}</dd></div>
-        <div><dt>部门</dt><dd>${escapeHtml(summary.department || '-')}</dd></div>
-        <div><dt>期间</dt><dd>${escapeHtml(`${preview.financialSummary.year} 年 ${preview.financialSummary.period} 期`)}</dd></div>
-        <div><dt>借贷平衡</dt><dd>${preview.balanced ? '是' : '否'}，借方 ${formatMoney(preview.debitTotal)} / 贷方 ${formatMoney(preview.creditTotal)}</dd></div>
-        <div><dt>税额</dt><dd>可抵扣税额 ${formatMoney(preview.taxSummary?.deductibleTaxAmount || 0)}</dd></div>
-        <div><dt>草稿规则</dt><dd>只保存金蝶暂存凭证，不提交、不审核、不过账。</dd></div>
+        <div><dt>鏉ユ簮鍗曞彿</dt><dd>${escapeHtml(selectedRecord ? displaySourceCode(selectedRecord) : preview.sourceCode || '-')}</dd></div>
+        <div><dt>鎶ラ攢浜?/dt><dd>${escapeHtml(selectedRecord ? displayRequester(selectedRecord, summary.requester) : summary.requester || '-')}</dd></div>
+        <div><dt>閮ㄩ棬</dt><dd>${escapeHtml(summary.department || '-')}</dd></div>
+        <div><dt>鏈熼棿</dt><dd>${escapeHtml(`${preview.financialSummary.year} 骞?${preview.financialSummary.period} 鏈焋)}</dd></div>
+        <div><dt>鍊熻捶骞宠　</dt><dd>${preview.balanced ? '鏄? : '鍚?}锛屽€熸柟 ${formatMoney(preview.debitTotal)} / 璐锋柟 ${formatMoney(preview.creditTotal)}</dd></div>
+        <div><dt>绋庨</dt><dd>鍙姷鎵ｇ◣棰?${formatMoney(preview.taxSummary?.deductibleTaxAmount || 0)}</dd></div>
+        <div><dt>鑽夌瑙勫垯</dt><dd>鍙繚瀛橀噾铦舵殏瀛樺嚟璇侊紝涓嶆彁浜ゃ€佷笉瀹℃牳銆佷笉杩囪处銆?/dd></div>
       </dl>
     `;
     return;
@@ -680,33 +770,33 @@ function renderFinanceReview(preview) {
     const summary = buildSourceSummary(selectedRecord);
     financeReviewSummary.innerHTML = `
       <dl>
-        <div><dt>来源单号</dt><dd>${escapeHtml(displaySourceCode(selectedRecord))}</dd></div>
-        <div><dt>报销人</dt><dd>${escapeHtml(displayRequester(selectedRecord, summary.requester))}</dd></div>
-        <div><dt>部门</dt><dd>${escapeHtml(summary.department)}</dd></div>
-        <div><dt>费用类型</dt><dd>${escapeHtml(displayExpenseCategories(selectedRecord, summary.expenseCategories))}</dd></div>
-        <div><dt>报销金额</dt><dd>${formatMoney(summary.totalAmount)}</dd></div>
-        <div><dt>下一步</dt><dd>点击预览凭证，确认科目、辅助核算、税额和借贷平衡。</dd></div>
+        <div><dt>鏉ユ簮鍗曞彿</dt><dd>${escapeHtml(displaySourceCode(selectedRecord))}</dd></div>
+        <div><dt>鎶ラ攢浜?/dt><dd>${escapeHtml(displayRequester(selectedRecord, summary.requester))}</dd></div>
+        <div><dt>閮ㄩ棬</dt><dd>${escapeHtml(summary.department)}</dd></div>
+        <div><dt>璐圭敤绫诲瀷</dt><dd>${escapeHtml(displayExpenseCategories(selectedRecord, summary.expenseCategories))}</dd></div>
+        <div><dt>鎶ラ攢閲戦</dt><dd>${formatMoney(summary.totalAmount)}</dd></div>
+        <div><dt>涓嬩竴姝?/dt><dd>鐐瑰嚮棰勮鍑瘉锛岀‘璁ょ鐩€佽緟鍔╂牳绠椼€佺◣棰濆拰鍊熻捶骞宠　銆?/dd></div>
       </dl>
     `;
     return;
   }
 
-  financeReviewSummary.textContent = '请先从报销单列表选择一张单据。';
+  financeReviewSummary.textContent = '璇峰厛浠庢姤閿€鍗曞垪琛ㄩ€夋嫨涓€寮犲崟鎹€?;
 }
 
 function renderVoucherValidation(preview) {
   const checks = preview ? [
-    ['账簿编码', Boolean(preview.financialSummary.accountBookNumber), `将写入 ${preview.financialSummary.accountBookNumber}`],
-    ['凭证字编码', Boolean(preview.financialSummary.voucherGroupNumber), `将写入 ${preview.financialSummary.voucherGroupNumber}`],
-    ['会计期间', Boolean(preview.financialSummary.year && preview.financialSummary.period), `${preview.financialSummary.year} 年 ${preview.financialSummary.period} 期`],
-    ['借贷平衡', preview.balanced, `借方 ${formatMoney(preview.debitTotal)} / 贷方 ${formatMoney(preview.creditTotal)}`],
-    ['税额拆分', Number(preview.taxSummary?.deductibleTaxAmount || 0) >= 0, `可抵扣税额 ${formatMoney(preview.taxSummary?.deductibleTaxAmount || 0)}`],
-    ['科目映射', preview.voucherLines.every((line) => Boolean(line.accountNumber)), '每条分录都有科目编码']
+    ['璐︾翱缂栫爜', Boolean(preview.financialSummary.accountBookNumber), `灏嗗啓鍏?${preview.financialSummary.accountBookNumber}`],
+    ['鍑瘉瀛楃紪鐮?, Boolean(preview.financialSummary.voucherGroupNumber), `灏嗗啓鍏?${preview.financialSummary.voucherGroupNumber}`],
+    ['浼氳鏈熼棿', Boolean(preview.financialSummary.year && preview.financialSummary.period), `${preview.financialSummary.year} 骞?${preview.financialSummary.period} 鏈焋],
+    ['鍊熻捶骞宠　', preview.balanced, `鍊熸柟 ${formatMoney(preview.debitTotal)} / 璐锋柟 ${formatMoney(preview.creditTotal)}`],
+    ['绋庨鎷嗗垎', Number(preview.taxSummary?.deductibleTaxAmount || 0) >= 0, `鍙姷鎵ｇ◣棰?${formatMoney(preview.taxSummary?.deductibleTaxAmount || 0)}`],
+    ['绉戠洰鏄犲皠', preview.voucherLines.every((line) => Boolean(line.accountNumber)), '姣忔潯鍒嗗綍閮芥湁绉戠洰缂栫爜']
   ] : [
-    ['凭证预览', false, '请先选择单据并点击预览凭证']
+    ['鍑瘉棰勮', false, '璇峰厛閫夋嫨鍗曟嵁骞剁偣鍑婚瑙堝嚟璇?]
   ];
   voucherValidationList.innerHTML = checks.map(([label, ok, detail]) =>
-    `<li class="${ok ? 'ok' : 'pending'}">${escapeHtml(label)}：${ok ? '通过' : '待验证'}，${escapeHtml(detail)}</li>`
+    `<li class="${ok ? 'ok' : 'pending'}">${escapeHtml(label)}锛?{ok ? '閫氳繃' : '寰呴獙璇?}锛?{escapeHtml(detail)}</li>`
   ).join('');
 }
 
@@ -719,63 +809,63 @@ function renderPreviewHashSummary(preview) {
     return;
   }
   if (!preview) {
-    previewHashSummary.textContent = '尚未生成凭证预览。';
+    previewHashSummary.textContent = '灏氭湭鐢熸垚鍑瘉棰勮銆?;
     return;
   }
-  previewHashSummary.textContent = `当前预览内容哈希：${preview.contentHash}；关键字段变化后必须重新预览。`;
+  previewHashSummary.textContent = `褰撳墠棰勮鍐呭鍝堝笇锛?{preview.contentHash}锛涘叧閿瓧娈靛彉鍖栧悗蹇呴』閲嶆柊棰勮銆俙;
 }
 
 function renderSaveConfirmation(preview) {
   if (!preview) {
     saveConfirmPanel.hidden = true;
-    saveConfirmSummary.textContent = '请先预览凭证。';
+    saveConfirmSummary.textContent = '璇峰厛棰勮鍑瘉銆?;
     return;
   }
   saveConfirmPanel.hidden = false;
   saveConfirmSummary.textContent = [
-    `来源单据 ${preview.sourceCode}`,
-    `报销人 ${preview.sourceSummary?.requester || '-'}`,
-    `部门 ${preview.sourceSummary?.department || '-'}`,
-    `账簿 ${fields.accountBookNumber.value}`,
-    `凭证字 ${fields.voucherGroupNumber.value}`,
-    `${fields.mockYear.value} 年 ${fields.mockPeriod.value} 期`,
-    `借方 ${formatMoney(preview.debitTotal)}`,
-    `贷方 ${formatMoney(preview.creditTotal)}`,
-    `可抵扣税额 ${formatMoney(preview.taxSummary?.deductibleTaxAmount || 0)}`,
-    `${preview.financialSummary.lineCount} 条分录`
-  ].join('；');
+    `鏉ユ簮鍗曟嵁 ${preview.sourceCode}`,
+    `鎶ラ攢浜?${preview.sourceSummary?.requester || '-'}`,
+    `閮ㄩ棬 ${preview.sourceSummary?.department || '-'}`,
+    `璐︾翱 ${fields.accountBookNumber.value}`,
+    `鍑瘉瀛?${fields.voucherGroupNumber.value}`,
+    `${fields.mockYear.value} 骞?${fields.mockPeriod.value} 鏈焋,
+    `鍊熸柟 ${formatMoney(preview.debitTotal)}`,
+    `璐锋柟 ${formatMoney(preview.creditTotal)}`,
+    `鍙姷鎵ｇ◣棰?${formatMoney(preview.taxSummary?.deductibleTaxAmount || 0)}`,
+    `${preview.financialSummary.lineCount} 鏉″垎褰昤
+  ].join('锛?);
   saveRiskNotice.textContent = state.currentStatus?.mode.kingdee === 'real'
-    ? '将写入金蝶测试账套并只保存为暂存凭证，不提交、不审核、不过账。'
-    : '当前外部ERP接口未启用，系统仅保存本地处理结果，不写入正式ERP。';
+    ? '灏嗗啓鍏ラ噾铦舵祴璇曡处濂楀苟鍙繚瀛樹负鏆傚瓨鍑瘉锛屼笉鎻愪氦銆佷笉瀹℃牳銆佷笉杩囪处銆?
+    : '褰撳墠澶栭儴ERP鎺ュ彛鏈惎鐢紝绯荤粺浠呬繚瀛樻湰鍦板鐞嗙粨鏋滐紝涓嶅啓鍏ユ寮廍RP銆?;
 }
 
 function schedulerSummary(scheduler) {
   const interval = `${scheduler.intervalSeconds}s`;
-  const pushMode = scheduler.autoPushErp ? '自动推送 ERP' : '仅同步';
-  const lastRun = scheduler.lastRunAt ? `最近 ${scheduler.lastRunAt}` : '尚未运行';
-  return `${interval} · ${pushMode} · ${lastRun}`;
+  const pushMode = scheduler.autoPushErp ? '鑷姩鎺ㄩ€?ERP' : '浠呭悓姝?;
+  const lastRun = scheduler.lastRunAt ? `鏈€杩?${scheduler.lastRunAt}` : '灏氭湭杩愯';
+  return `${interval} 路 ${pushMode} 路 ${lastRun}`;
 }
 
 function syncBatchSummary(batch) {
   if (!batch) {
-    return '尚未产生同步批次。';
+    return '灏氭湭浜х敓鍚屾鎵规銆?;
   }
-  const interfaceText = batch.mockReplacement ? `接口状态：${interfaceReason(batch.mockReason, true)}` : '真实接口';
-  return `最近批次 ${batch.batchId}：${batch.status}，成功 ${batch.successCount}/${batch.totalCount}，失败 ${batch.failCount}，${interfaceText}。重复单据按来源 ID 和内容哈希幂等更新。`;
+  const interfaceText = batch.mockReplacement ? `鎺ュ彛鐘舵€侊細${interfaceReason(batch.mockReason, true)}` : '鐪熷疄鎺ュ彛';
+  return `鏈€杩戞壒娆?${batch.batchId}锛?{batch.status}锛屾垚鍔?${batch.successCount}/${batch.totalCount}锛屽け璐?${batch.failCount}锛?{interfaceText}銆傞噸澶嶅崟鎹寜鏉ユ簮 ID 鍜屽唴瀹瑰搱甯屽箓绛夋洿鏂般€俙;
 }
 
 function interfaceReason(reason, replacementEnabled) {
   if (!replacementEnabled) {
-    return '真实接口已启用';
+    return '鐪熷疄鎺ュ彛宸插惎鐢?;
   }
   const normalized = String(reason || '').toLowerCase();
   if (normalized.includes('fenbeitong') || normalized.includes('access token')) {
-    return '分贝通授权未配置';
+    return '鍒嗚礉閫氭巿鏉冩湭閰嶇疆';
   }
   if (normalized.includes('kingdee') || normalized.includes('erp')) {
-    return 'ERP接口未启用';
+    return 'ERP鎺ュ彛鏈惎鐢?;
   }
-  return reason ? String(reason) : '外部接口未全部启用';
+  return reason ? String(reason) : '澶栭儴鎺ュ彛鏈叏閮ㄥ惎鐢?;
 }
 
 function displaySourceCode(record) {
@@ -788,23 +878,23 @@ function displayRequester(record, requester) {
 
 function displayExpenseCategories(record, categories) {
   return String(categories || '-')
-    .replaceAll('Travel', '差旅费')
-    .replaceAll('Office', '办公费')
+    .replaceAll('Travel', '宸梾璐?)
+    .replaceAll('Office', '鍔炲叕璐?)
     .replaceAll(' / ', ' / ');
 }
 
 function environmentWarning(status) {
   if (status.mode.kingdee === 'mock') {
-    return '当前外部ERP接口未启用，保存动作仅记录处理结果，不写入正式ERP。';
+    return '褰撳墠澶栭儴ERP鎺ュ彛鏈惎鐢紝淇濆瓨鍔ㄤ綔浠呰褰曞鐞嗙粨鏋滐紝涓嶅啓鍏ユ寮廍RP銆?;
   }
-  return '当前外部接口已启用，保存动作会写入配置的ERP账套，请先确认凭证预览。';
+  return '褰撳墠澶栭儴鎺ュ彛宸插惎鐢紝淇濆瓨鍔ㄤ綔浼氬啓鍏ラ厤缃殑ERP璐﹀锛岃鍏堢‘璁ゅ嚟璇侀瑙堛€?;
 }
 
 function readinessText(readiness) {
   if (readiness.ready) {
-    return '连接参数完整';
+    return '杩炴帴鍙傛暟瀹屾暣';
   }
-  return readiness.missing.length > 0 ? `缺少 ${readiness.missing.length} 项配置` : '待确认';
+  return readiness.missing.length > 0 ? `缂哄皯 ${readiness.missing.length} 椤归厤缃甡 : '寰呯‘璁?;
 }
 
 function applyTemplate(template) {
@@ -837,7 +927,7 @@ function invalidatePreview(reason) {
 
 function ensurePreviewFresh() {
   if (!state.lastPreview || !isPreviewFresh()) {
-    throw new Error('预览已失效，请重新预览凭证。');
+    throw new Error('棰勮宸插け鏁堬紝璇烽噸鏂伴瑙堝嚟璇併€?);
   }
 }
 
@@ -864,7 +954,7 @@ function buildSourceSummary(record) {
     return {
       requester: data.user?.name || data.user?.code || '-',
       department: data.user?.department_name || data.user?.department_code || '-',
-      expenseCategories: expenses.map((expense) => expense.cost_category?.name || expense.cost_category?.code || '未分类').join(' / ') || '-',
+      expenseCategories: expenses.map((expense) => expense.cost_category?.name || expense.cost_category?.code || '鏈垎绫?).join(' / ') || '-',
       totalAmount: Number(data.total_amount || 0),
       createTime: data.create_time || data.reimb_time || ''
     };
@@ -872,7 +962,7 @@ function buildSourceSummary(record) {
     return {
       requester: '-',
       department: '-',
-      expenseCategories: 'JSON 解析失败',
+      expenseCategories: 'JSON 瑙ｆ瀽澶辫触',
       totalAmount: 0
     };
   }
@@ -881,13 +971,13 @@ function buildSourceSummary(record) {
 function queueStatus(record) {
   const sourceId = record.sourceId;
   if (state.pushedSourceIds.has(sourceId)) {
-    return '已保存ERP';
+    return '宸蹭繚瀛楨RP';
   }
   if (state.preparedSourceIds.has(sourceId)) {
-    return '已生成';
+    return '宸茬敓鎴?;
   }
   if (state.lastPreview?.sourceId === sourceId) {
-    return '已预览';
+    return '宸查瑙?;
   }
   return stageName(record.processStage);
 }
@@ -897,12 +987,12 @@ function readConfig() {
     accountBookNumber: fields.accountBookNumber.value,
     voucherGroupNumber: fields.voucherGroupNumber.value,
     templateErpFid: fields.templateErpFid.value,
-    currencyNumbers: parseJson(fields.currencyNumbers.value, '币别映射'),
-    categoryAccountNumbers: parseJson(fields.categoryAccountNumbers.value, '费用科目映射'),
+    currencyNumbers: parseJson(fields.currencyNumbers.value, '甯佸埆鏄犲皠'),
+    categoryAccountNumbers: parseJson(fields.categoryAccountNumbers.value, '璐圭敤绉戠洰鏄犲皠'),
     departmentDetailField: 'FDETAILID__FFLEX5',
     employeeDetailField: 'FDETAILID__FFLEX7',
     creditAccountNumber: '1002.01',
-    creditDetailNumbers: parseJson(fields.creditDetailNumbers.value, '贷方核算维度'),
+    creditDetailNumbers: parseJson(fields.creditDetailNumbers.value, '璐锋柟鏍哥畻缁村害'),
     exchangeRateTypeNumber: 'HLTX01_SYS',
     exchangeRate: 1,
     splitDeductibleTax: true,
@@ -914,7 +1004,7 @@ function buildVoucherRequest() {
   const fixedJson = fields.mockFixedJson.value.trim();
   const sourceId = sourceIdInput.value.trim();
   if (!fixedJson && !sourceId) {
-    throw new Error('请先同步分贝通并选择待处理单据，或保留来源数据样例。');
+    throw new Error('璇峰厛鍚屾鍒嗚礉閫氬苟閫夋嫨寰呭鐞嗗崟鎹紝鎴栦繚鐣欐潵婧愭暟鎹牱渚嬨€?);
   }
   return {
     fixedJson: fixedJson || undefined,
@@ -945,14 +1035,14 @@ function parseJson(text, label) {
     }
     return value;
   } catch {
-    throw new Error(`${label} 必须是 JSON 对象`);
+    throw new Error(`${label} 蹇呴』鏄?JSON 瀵硅薄`);
   }
 }
 
 function requiredSourceId() {
   const sourceId = sourceIdInput.value.trim();
   if (!sourceId) {
-    throw new Error('请先同步分贝通并选择待处理单据。');
+    throw new Error('璇峰厛鍚屾鍒嗚礉閫氬苟閫夋嫨寰呭鐞嗗崟鎹€?);
   }
   return sourceId;
 }
@@ -975,36 +1065,36 @@ function selectFirstRecord(records) {
 }
 
 function buildPreviewSummary(preview) {
-  return `凭证预览完成：借方 ${formatMoney(preview.debitTotal)}，贷方 ${formatMoney(preview.creditTotal)}，分录 ${preview.financialSummary.lineCount} 条，状态为未审核草稿。`;
+  return `鍑瘉棰勮瀹屾垚锛氬€熸柟 ${formatMoney(preview.debitTotal)}锛岃捶鏂?${formatMoney(preview.creditTotal)}锛屽垎褰?${preview.financialSummary.lineCount} 鏉★紝鐘舵€佷负鏈鏍歌崏绋裤€俙;
 }
 
 function draftOnlyWarning(record) {
   if (record.erpMockReplacement) {
-    return '处理结果已保存。外部ERP接口启用前，不写入正式ERP凭证。';
+    return '澶勭悊缁撴灉宸蹭繚瀛樸€傚閮‥RP鎺ュ彛鍚敤鍓嶏紝涓嶅啓鍏ユ寮廍RP鍑瘉銆?;
   }
-  return '已保存为 ERP 暂存凭证，未审核 / 未过账 / 需人工审核。';
+  return '宸蹭繚瀛樹负 ERP 鏆傚瓨鍑瘉锛屾湭瀹℃牳 / 鏈繃璐?/ 闇€浜哄伐瀹℃牳銆?;
 }
 
 function stageName(stage) {
   const names = {
-    PREPARED: '已生成待保存凭证',
-    ERP_PUSHED: '已保存草稿',
-    SYNCED: '已同步'
+    PREPARED: '宸茬敓鎴愬緟淇濆瓨鍑瘉',
+    ERP_PUSHED: '宸蹭繚瀛樿崏绋?,
+    SYNCED: '宸插悓姝?
   };
   return names[stage] || stage || '-';
 }
 
 function logLabel(action) {
   const labels = {
-    CONFIG_SAVE: '保存配置',
-    SOURCE_SYNC: '同步来源单据',
-    SYNC_START: '开始同步',
-    SYNC_FINISH: '同步完成',
-    VOUCHER_PREPARE: '生成待保存凭证',
-    ERP_PUSH: '保存到 ERP',
-    SCHEDULER_RUN_START: '定时任务开始',
-    SCHEDULER_RUN_FINISH: '定时任务完成',
-    SCHEDULER_DISABLED: '定时任务关闭'
+    CONFIG_SAVE: '淇濆瓨閰嶇疆',
+    SOURCE_SYNC: '鍚屾鏉ユ簮鍗曟嵁',
+    SYNC_START: '寮€濮嬪悓姝?,
+    SYNC_FINISH: '鍚屾瀹屾垚',
+    VOUCHER_PREPARE: '鐢熸垚寰呬繚瀛樺嚟璇?,
+    ERP_PUSH: '淇濆瓨鍒?ERP',
+    SCHEDULER_RUN_START: '瀹氭椂浠诲姟寮€濮?,
+    SCHEDULER_RUN_FINISH: '瀹氭椂浠诲姟瀹屾垚',
+    SCHEDULER_DISABLED: '瀹氭椂浠诲姟鍏抽棴'
   };
   return labels[action] || action;
 }
@@ -1020,17 +1110,17 @@ function showError(step, error) {
     code: error.code || 'FRONTEND_ERROR',
     detail: error.detail || {},
     step
-  }, `失败步骤：${step}；错误编码：${error.code || 'FRONTEND_ERROR'}；原因：${error.message}；请根据错误明细修正配置或来源单据后重试。`);
+  }, `澶辫触姝ラ锛?{step}锛涢敊璇紪鐮侊細${error.code || 'FRONTEND_ERROR'}锛涘師鍥狅細${error.message}锛涜鏍规嵁閿欒鏄庣粏淇閰嶇疆鎴栨潵婧愬崟鎹悗閲嶈瘯銆俙);
 }
 
 function summarizeValue(value) {
   if (value?.error) {
-    return `操作失败：${value.error}`;
+    return `鎿嶄綔澶辫触锛?{value.error}`;
   }
   if (value?.sourceCode) {
-    return `处理完成：${value.sourceCode}`;
+    return `澶勭悊瀹屾垚锛?{value.sourceCode}`;
   }
-  return '操作完成，技术详情已更新。';
+  return '鎿嶄綔瀹屾垚锛屾妧鏈鎯呭凡鏇存柊銆?;
 }
 
 function run(fn) {
@@ -1038,7 +1128,7 @@ function run(fn) {
     try {
       await fn(event);
     } catch (error) {
-      showError(fn.name || '操作', error);
+      showError(fn.name || '鎿嶄綔', error);
     } finally {
       renderActionState();
     }

@@ -19,3 +19,19 @@ GREEN: `npm run test:frontend` -> PASS, 8/8 tests passed.
 GREEN: `npm run test:backend` -> PASS, 15/15 tests passed.
 
 GREEN: `npm run build` -> PASS, dist created.
+
+BDD: Toolbar controls have real effects -> Given the finance toolbar is visible When finance selects a query field, match mode, or visible columns Then the list filtering and displayed columns change according to those controls.
+
+RED: `npm run test:frontend` -> FAIL, toolbar selects and display-fields button did not yet have executable controls.
+
+GREEN: `npm run test:frontend` -> PASS, 8/8 tests passed.
+
+GREEN: `npm run test:contract` -> PASS, 7/7 tests passed.
+
+GREEN: `npm run test:e2e` -> PASS, 1/1 tests passed.
+
+GREEN: `npm run build` -> PASS, dist created.
+
+GREEN: `npm run test:backend` -> PASS, 15/15 tests passed.
+
+GREEN: `validate_frontend_feature.py --evidence doc/tasks/20260712-production-finance-ui/frontend-feature-evidence.md` -> PASS.
