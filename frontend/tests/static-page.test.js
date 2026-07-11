@@ -64,11 +64,13 @@ test('frontend visible copy remains readable Chinese without mojibake', () => {
   const html = readFileSync('frontend/src/index.html', 'utf8');
   const app = readFileSync('frontend/src/app.js', 'utf8');
   for (const text of [html, app]) {
-    assert.doesNotMatch(text, /鍒|閫|铦|鏆|璐|绋|棰|寰|姝|俙|榻|€\?/);
+    assert.doesNotMatch(text, /鍒|閫|铦|鏆|璐|绋|棰|寰|姝|俙|榻|€\?|鈧|缁|妫|瀵|濮/);
   }
   assert.match(html, /待处理单据队列/);
   assert.match(html, /老师验收清单/);
+  assert.match(html, /Mock 保存 ERP 草稿/);
   assert.match(app, /失败步骤/);
+  assert.match(app, /预览已失效/);
 });
 
 test('frontend api points only to local mock backend', () => {
@@ -80,12 +82,14 @@ test('frontend api points only to local mock backend', () => {
 
 test('frontend api exposes formal product workflow endpoints', () => {
   const api = readFileSync('frontend/src/api.js', 'utf8');
+  const contract = readFileSync('docs/api-contract.md', 'utf8');
   assert.match(api, /system\/status/);
   assert.match(api, /api\/ready/);
   assert.match(api, /scheduler\/status/);
   assert.match(api, /scheduler\/run-once/);
   assert.match(api, /fenbeitong-voucher\/sync/);
   assert.match(api, /fenbeitong-voucher\/synced-documents/);
+  assert.match(contract, /GET `\/api\/fenbeitong-voucher\/synced-documents`/);
   assert.match(api, /fenbeitong-voucher\/push-erp/);
   assert.match(api, /operations\/logs/);
 });

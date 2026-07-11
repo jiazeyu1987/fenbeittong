@@ -73,6 +73,10 @@ Creates a local prepared process record. This does not call real Kingdee.
 
 Runs the Fenbeitong adapter. In `FENBEITONG_MODE=mock`, it loads the fixed JSON fixture. In `real` mode, missing real interface configuration fails fast.
 
+## GET `/api/fenbeitong-voucher/synced-documents`
+
+Returns the local queue of synced Fenbeitong source documents. Records include source id, source code, source mode, mock replacement marker, batch id, process stage, fixed JSON and timestamps. This endpoint is used by the frontend queue before voucher preview.
+
 ## POST `/api/fenbeitong-voucher/push-erp`
 
 Runs the Kingdee adapter. In `KINGDEE_MODE=mock`, it simulates a saved draft voucher. In `real` mode, missing real interface configuration fails fast.

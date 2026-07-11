@@ -54,6 +54,7 @@ export function parseFenbeitongDetail(fixedJson) {
     throw new Error('data.expenses must not be empty');
   }
 
+  const invoiceIds = new Set();
   document.expenses = document.expenses.map((expense, index) => {
     const invoices = Array.isArray(expense.invoices) ? expense.invoices.map((invoice, invoiceIndex) => ({
       id: invoice.id || `INV-${index + 1}-${invoiceIndex + 1}`,
@@ -61,6 +62,24 @@ export function parseFenbeitongDetail(fixedJson) {
       taxAmount: money(invoice.tax_amount || 0, 'invoice.tax_amount'),
       deductibleTaxAmount: money(invoice.deductible_tax_amount || 0, 'invoice.deductible_tax_amount')
     })) : [];
+    for (const invoice of invoices) {
+      if (invoiceIds.has(invoice.id)) {
+        throw new Error(`duplicate invoice id: ${invoice.id}`);
+      }
+      invoiceIds.add(invoice.id);
+      if (invoice.totalAmount < 0) {
+        throw new Error(`invoice total amount must not be negative: ${invoice.id}`);
+      }
+      if (invoice.taxAmount < 0) {
+        throw new Error(`invoice tax amount must not be negative: ${invoice.id}`);
+      }
+      if (invoice.deductibleTaxAmount < 0) {
+        throw new Error(`invoice deductible tax amount must not be negative: ${invoice.id}`);
+      }
+      if (invoice.deductibleTaxAmount > invoice.taxAmount) {
+        throw new Error(`deductible tax amount for ${invoice.id} must not exceed tax amount`);
+      }
+    }
     return {
       id: requireText(expense.id || `EXP-${index + 1}`, `data.expenses[${index}].id`),
       categoryCode: requireText(expense.cost_category?.code, `data.expenses[${index}].cost_category.code`),
@@ -96,6 +115,7 @@ export function buildVoucherPreview(input) {
   if (!Number.isInteger(period) || period <= 0) {
     throw new Error('period must be a positive integer');
   }
+  assertVoucherDateMatchesPeriod(voucherDate, year, period);
 
   const currencyNumber = config.currencyNumbers?.[document.currencyCode];
   if (!currencyNumber) {
@@ -290,13 +310,31 @@ function voucherLine({ explanation, accountNumber, currencyNumber, debit, credit
 
 function buildDetail(config, document) {
   const detail = {};
+  if (config.departmentDetailField && !document.departmentCode) {
+    throw new Error('department detail dimension is required');
+  }
   if (config.departmentDetailField && document.departmentCode) {
     detail[config.departmentDetailField] = { FNumber: document.departmentCode };
+  }
+  if (config.employeeDetailField && !document.userCode) {
+    throw new Error('employee detail dimension is required');
   }
   if (config.employeeDetailField && document.userCode) {
     detail[config.employeeDetailField] = { FNumber: document.userCode };
   }
   return detail;
+}
+
+function assertVoucherDateMatchesPeriod(voucherDate, year, period) {
+  const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(voucherDate);
+  if (!matched) {
+    throw new Error('voucherDate must use YYYY-MM-DD');
+  }
+  const dateYear = Number(matched[1]);
+  const datePeriod = Number(matched[2]);
+  if (dateYear !== year || datePeriod !== period) {
+    throw new Error(`voucherDate ${voucherDate} does not match year/period ${year}/${period}`);
+  }
 }
 
 function round(value) {

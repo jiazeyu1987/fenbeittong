@@ -157,6 +157,9 @@ export function markPushedToErp(sourceId, erpResult) {
   if (!record) {
     throw new Error(`prepared record is missing for ${sourceId}`);
   }
+  if (record.processStage === 'ERP_PUSHED' || record.erpFid || record.erpNumber) {
+    throw new Error(`voucher for ${sourceId} already pushed to ERP`);
+  }
   const nextRecord = {
     ...record,
     processStatus: 30,

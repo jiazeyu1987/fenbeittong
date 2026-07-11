@@ -28,9 +28,9 @@
           <small>来自分贝通报销单</small>
         </article>
         <article class="metric">
-          <span>ERP 暂存成功</span>
+          <span>ERP 保存结果</span>
           <strong id="pushedCount">0</strong>
-          <small>只保存，不审核不过账</small>
+          <small>区分 mock 模拟和真实保存</small>
         </article>
         <article class="metric">
           <span>数据源模式</span>
@@ -67,13 +67,14 @@
           <li data-step="sync"><strong>2 同步分贝通</strong><span>立即同步或测试一次定时任务，生成来源单据。</span></li>
           <li data-step="preview"><strong>3 预览凭证</strong><span>确认借贷平衡、期间、税额和分录数量。</span></li>
           <li data-step="prepare"><strong>4 生成待保存凭证</strong><span>生成本地待保存记录，保留幂等键和内容哈希。</span></li>
-          <li data-step="push"><strong>5 保存到金蝶</strong><span>保存为 ERP 暂存凭证，后续由财务人工审核。</span></li>
+          <li data-step="push"><strong>5 保存到金蝶</strong><span>Mock 保存 ERP 草稿或保存金蝶测试账套草稿，后续由财务人工审核。</span></li>
         </ol>
         <div class="next-action">
           <span>建议下一步</span>
           <strong id="nextActionText">当前未同步分贝通数据，建议先点击立即同步分贝通数据。</strong>
         </div>
         <div id="syncBatchSummary" class="batch-summary">尚未产生同步批次。</div>
+        <div id="previewHashSummary" class="hash-summary">尚未生成凭证预览。</div>
         <button id="primaryActionButton" class="primary-action">立即同步分贝通数据</button>
         <p id="actionBlockReason" class="block-reason">请先保存配置并同步分贝通数据。</p>
         <div class="actions">
@@ -83,7 +84,7 @@
           <button id="runSchedulerButton" class="secondary">测试一次定时任务</button>
           <button id="previewButton" class="secondary">预览凭证</button>
           <button id="prepareButton" class="secondary">生成待保存凭证</button>
-          <button id="pushErpButton">模拟保存到 ERP</button>
+          <button id="pushErpButton">Mock 保存 ERP 草稿</button>
         </div>
       </section>
 
@@ -110,7 +111,7 @@
               </tr>
             </thead>
             <tbody id="sourceQueueBody">
-              <tr><td colspan="8">暂无待处理单据，请先同步分贝通数据。</td></tr>
+              <tr><td colspan="9">暂无待处理单据，请先同步分贝通数据。</td></tr>
             </tbody>
           </table>
         </div>

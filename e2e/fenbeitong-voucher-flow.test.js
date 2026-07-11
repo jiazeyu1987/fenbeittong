@@ -77,6 +77,16 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
     assert.equal(pushBody.data.erpFid, 'MOCK-KINGDEE-FID');
     assert.equal(pushBody.data.erpMockReplacement, true);
 
+    const duplicatePushBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/push-erp`, {
+      sourceId: syncBody.data.records[0].sourceId,
+      voucherDate: template.mockVoucherDate,
+      year: template.mockYear,
+      period: template.mockPeriod,
+      config: template
+    });
+    assert.equal(duplicatePushBody.success, false);
+    assert.match(duplicatePushBody.error.message, /already pushed to ERP/);
+
     const queryResponse = await fetch(`${baseUrl}/api/fenbeitong-voucher/process/MOCK-REIMB-001`);
     const queryBody = await queryResponse.json();
     assert.equal(queryBody.data.sourceId, 'MOCK-REIMB-001');

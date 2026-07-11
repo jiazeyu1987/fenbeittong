@@ -43,3 +43,51 @@ test('missing category account mapping fails before payload generation', () => {
     config
   }), /category account mapping is missing/);
 });
+
+test('voucher date must match accounting year and period', () => {
+  assert.throws(() => buildVoucherPreview({
+    fixedJson: template.mockFixedJson,
+    voucherDate: '2026-08-01',
+    year: template.mockYear,
+    period: template.mockPeriod,
+    config: template
+  }), /voucherDate .* does not match year\/period/);
+});
+
+test('invoice tax anomalies fail before voucher payload generation', () => {
+  const root = JSON.parse(template.mockFixedJson);
+  root.data.expenses[0].invoices[0].tax_amount = 1;
+  root.data.expenses[0].invoices[0].deductible_tax_amount = 2;
+  assert.throws(() => buildVoucherPreview({
+    fixedJson: JSON.stringify(root),
+    voucherDate: template.mockVoucherDate,
+    year: template.mockYear,
+    period: template.mockPeriod,
+    config: template
+  }), /deductible tax amount .* must not exceed tax amount/);
+});
+
+test('duplicate invoice ids fail fast', () => {
+  const root = JSON.parse(template.mockFixedJson);
+  const duplicate = structuredClone(root.data.expenses[0].invoices[0]);
+  root.data.expenses[0].invoices.push(duplicate);
+  assert.throws(() => buildVoucherPreview({
+    fixedJson: JSON.stringify(root),
+    voucherDate: template.mockVoucherDate,
+    year: template.mockYear,
+    period: template.mockPeriod,
+    config: template
+  }), /duplicate invoice id/);
+});
+
+test('required detail dimensions fail fast for expense lines', () => {
+  const root = JSON.parse(template.mockFixedJson);
+  root.data.user.department_code = '';
+  assert.throws(() => buildVoucherPreview({
+    fixedJson: JSON.stringify(root),
+    voucherDate: template.mockVoucherDate,
+    year: template.mockYear,
+    period: template.mockPeriod,
+    config: template
+  }), /department detail dimension is required/);
+});

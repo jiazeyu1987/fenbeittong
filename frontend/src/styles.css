@@ -166,6 +166,7 @@ h2 {
 }
 
 .batch-summary,
+.hash-summary,
 .confirm-panel {
   margin-top: 12px;
   border: 1px solid #dbeafe;
@@ -174,6 +175,14 @@ h2 {
   color: #1e3a8a;
   padding: 12px;
   line-height: 1.5;
+}
+
+.hash-summary {
+  border-color: #e5e7eb;
+  background: #f8fafc;
+  color: #475467;
+  font-family: Consolas, monospace;
+  font-size: 13px;
 }
 
 .primary-action {
@@ -360,9 +369,15 @@ th {
   color: #475467;
 }
 
+tr.selected td {
+  background: #ecfdf3;
+}
+
 td.amount,
 th.amount {
   text-align: right;
+  min-width: 110px;
+  font-variant-numeric: tabular-nums;
 }
 
 .status-tag {

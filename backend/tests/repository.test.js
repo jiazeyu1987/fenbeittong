@@ -69,6 +69,30 @@ test('ERP push marks prepared record with simulated ERP identifiers', () => {
   assert.equal(pushed.erpFid, 'MOCK-KINGDEE-FID');
 });
 
+test('duplicate ERP push for the same source is blocked', () => {
+  resetRepository();
+  const template = buildMockTemplate();
+  const preview = buildVoucherPreview({
+    fixedJson: template.mockFixedJson,
+    voucherDate: template.mockVoucherDate,
+    year: template.mockYear,
+    period: template.mockPeriod,
+    config: template
+  });
+  savePreparedRecord(preview);
+  markPushedToErp('MOCK-REIMB-001', {
+    erpFid: 'MOCK-KINGDEE-FID',
+    erpNumber: 'MOCK-KINGDEE-NUMBER',
+    documentStatus: 'Z'
+  });
+
+  assert.throws(() => markPushedToErp('MOCK-REIMB-001', {
+    erpFid: 'MOCK-KINGDEE-FID-2',
+    erpNumber: 'MOCK-KINGDEE-NUMBER-2',
+    documentStatus: 'Z'
+  }), /already pushed to ERP/);
+});
+
 test('local repository persists dashboard state and operation logs', () => {
   resetRepository();
   const template = buildMockTemplate();

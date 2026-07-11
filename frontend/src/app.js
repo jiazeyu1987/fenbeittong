@@ -32,6 +32,8 @@ const state = {
   currentStatus: null,
   syncedDocuments: [],
   lastPreview: null,
+  previewSignature: '',
+  previewInvalidReason: '',
   preparedSourceIds: new Set(),
   pushedSourceIds: new Set()
 };
@@ -50,6 +52,7 @@ const saveRiskNotice = document.querySelector('#saveRiskNotice');
 const actionBlockReason = document.querySelector('#actionBlockReason');
 const voucherValidationList = document.querySelector('#voucherValidationList');
 const teacherAcceptanceList = document.querySelector('#teacherAcceptanceList');
+const previewHashSummary = document.querySelector('#previewHashSummary');
 
 controls.loadTemplate.addEventListener('click', run(loadTemplate));
 controls.saveConfig.addEventListener('click', run(saveConfig));
@@ -64,11 +67,15 @@ controls.listRecords.addEventListener('click', run(refreshRecords));
 controls.primaryAction.addEventListener('click', run(runPrimaryAction));
 sourceQueueBody.addEventListener('click', run(selectQueuedDocument));
 sourceIdInput.addEventListener('input', () => {
-  state.lastPreview = null;
-  renderSaveConfirmation(null);
-  renderVoucherValidation(null);
+  invalidatePreview('预览已失效：来源单据已变化，请重新预览凭证。');
   renderActionState();
 });
+for (const field of Object.values(fields)) {
+  field.addEventListener('input', () => {
+    invalidatePreview('预览已失效：凭证关键字段已变化，请重新预览凭证。');
+    renderActionState();
+  });
+}
 
 run(async () => {
   await api.health();
@@ -98,9 +105,7 @@ async function saveConfig() {
 async function syncFenbeitong() {
   const result = await api.syncFenbeitong();
   selectFirstRecord(result.records);
-  state.lastPreview = null;
-  renderSaveConfirmation(null);
-  renderVoucherValidation(null);
+  invalidatePreview('预览已失效：同步结果已变化，请重新预览凭证。');
   show(result, `同步完成，新增或更新 ${result.records.length} 张来源单据。`);
   await refreshAll();
 }
@@ -108,24 +113,28 @@ async function syncFenbeitong() {
 async function runSchedulerOnce() {
   const result = await api.runSchedulerOnce();
   selectFirstRecord(result.sync.records);
-  state.lastPreview = null;
-  renderSaveConfirmation(null);
-  renderVoucherValidation(null);
+  invalidatePreview('预览已失效：同步结果已变化，请重新预览凭证。');
   show(result, `定时任务已手动运行，本次同步 ${result.sync.records.length} 张来源单据。`);
   await refreshAll();
 }
 
 async function preview() {
-  const result = await api.preview(buildVoucherRequest());
+  const request = buildVoucherRequest();
+  const signature = requestSignature(request);
+  const result = await api.preview(request);
   state.lastPreview = result;
+  state.previewSignature = signature;
+  state.previewInvalidReason = '';
   renderVoucherPreview(result);
   renderSaveConfirmation(result);
   renderVoucherValidation(result);
+  renderPreviewHashSummary(result);
   show(result, buildPreviewSummary(result));
   await refreshAll();
 }
 
 async function prepare() {
+  ensurePreviewFresh();
   const record = await api.prepare(buildVoucherRequest());
   sourceIdInput.value = record.sourceId;
   state.preparedSourceIds.add(record.sourceId);
@@ -134,6 +143,7 @@ async function prepare() {
 }
 
 async function pushErp() {
+  ensurePreviewFresh();
   const sourceId = requiredSourceId();
   const record = await api.pushErp({
     sourceId,
@@ -228,9 +238,7 @@ async function selectQueuedDocument(event) {
   }
   sourceIdInput.value = sourceId;
   fields.mockFixedJson.value = record.fixedJson || fields.mockFixedJson.value;
-  state.lastPreview = null;
-  renderSaveConfirmation(null);
-  renderVoucherValidation(null);
+  invalidatePreview('预览已失效：已切换来源单据，请重新预览凭证。');
   renderSourceQueue(state.syncedDocuments);
   renderActionState();
   show(record, `已选择来源单据 ${sourceId}，下一步请预览凭证。`);
@@ -283,9 +291,10 @@ function renderActionState() {
   const hasSource = Boolean(sourceId || fields.mockFixedJson.value.trim());
   const prepared = sourceId ? state.preparedSourceIds.has(sourceId) : false;
   const pushed = sourceId ? state.pushedSourceIds.has(sourceId) : false;
+  const previewFresh = isPreviewFresh();
   controls.preview.disabled = !hasSource;
-  controls.prepare.disabled = !state.lastPreview?.balanced;
-  controls.pushErp.disabled = !state.lastPreview?.balanced || !sourceId || pushed;
+  controls.prepare.disabled = !state.lastPreview?.balanced || !previewFresh;
+  controls.pushErp.disabled = !state.lastPreview?.balanced || !previewFresh || !sourceId || pushed;
   const reason = getActionBlockReason({ sourceId, prepared, pushed });
 
   let action = 'save-config';
@@ -298,15 +307,15 @@ function renderActionState() {
     action = 'preview';
     label = '先选择待处理单据';
     disabled = true;
-  } else if (state.configSaved && !state.lastPreview?.balanced) {
+  } else if (state.configSaved && (!state.lastPreview?.balanced || !previewFresh)) {
     action = 'preview';
-    label = '预览凭证';
+    label = state.previewInvalidReason ? '重新预览凭证' : '预览凭证';
   } else if (state.configSaved && !prepared) {
     action = 'prepare';
     label = '生成待保存凭证';
   } else if (state.configSaved && !pushed) {
     action = 'push';
-    label = state.currentStatus?.mode.kingdee === 'real' ? '保存凭证到金蝶测试账套' : '模拟保存到 ERP';
+    label = state.currentStatus?.mode.kingdee === 'real' ? '保存金蝶测试账套草稿' : 'Mock 保存 ERP 草稿';
   } else if (pushed) {
     action = 'done';
     label = '已保存，等待财务人工审核';
@@ -328,6 +337,9 @@ function getActionBlockReason({ sourceId, prepared, pushed }) {
   if (!sourceId) {
     return '未满足原因：请先在待处理单据队列中选择一张单据。';
   }
+  if (state.previewInvalidReason) {
+    return state.previewInvalidReason;
+  }
   if (!state.lastPreview?.balanced) {
     return '未满足原因：请先预览凭证，并确认借贷平衡、税额和科目映射。';
   }
@@ -337,7 +349,7 @@ function getActionBlockReason({ sourceId, prepared, pushed }) {
   if (!pushed) {
     return state.currentStatus?.mode.kingdee === 'real'
       ? '当前可保存到金蝶测试账套；只保存暂存凭证，不提交、不审核、不过账。'
-      : '当前可模拟保存到 ERP；这不会写入真实金蝶。';
+      : '当前可执行 Mock 保存 ERP 草稿；这不会写入真实金蝶。';
   }
   return '该单据已保存，下一步由财务在金蝶中人工审核。';
 }
@@ -371,7 +383,7 @@ function renderConfigValidation() {
 
 function renderSourceQueue(records) {
   if (records.length === 0) {
-    sourceQueueBody.innerHTML = '<tr><td colspan="8">暂无待处理单据，请先同步分贝通数据。</td></tr>';
+    sourceQueueBody.innerHTML = '<tr><td colspan="9">暂无待处理单据，请先同步分贝通数据。</td></tr>';
     return;
   }
   const selected = sourceIdInput.value.trim();
@@ -379,7 +391,7 @@ function renderSourceQueue(records) {
     const summary = buildSourceSummary(record);
     return `
     <tr class="${record.sourceId === selected ? 'selected' : ''}">
-      <td><button class="secondary row-action" data-source-id="${escapeHtml(record.sourceId)}">${record.sourceId === selected ? '已选择' : '选择'}</button></td>
+      <td><button class="secondary row-action" data-source-id="${escapeHtml(record.sourceId)}">${record.sourceId === selected ? '当前单据' : '选择'}</button></td>
       <td><span class="status-tag">${escapeHtml(queueStatus(record))}</span></td>
       <td>${escapeHtml(record.sourceCode || '')}</td>
       <td>${escapeHtml(summary.requester)}</td>
@@ -427,6 +439,21 @@ function renderVoucherValidation(preview) {
   voucherValidationList.innerHTML = checks.map(([label, ok, detail]) =>
     `<li class="${ok ? 'ok' : 'pending'}">${escapeHtml(label)}：${ok ? '通过' : '待验证'}，${escapeHtml(detail)}</li>`
   ).join('');
+}
+
+function renderPreviewHashSummary(preview) {
+  if (!previewHashSummary) {
+    return;
+  }
+  if (state.previewInvalidReason) {
+    previewHashSummary.textContent = state.previewInvalidReason;
+    return;
+  }
+  if (!preview) {
+    previewHashSummary.textContent = '尚未生成凭证预览。';
+    return;
+  }
+  previewHashSummary.textContent = `当前预览内容哈希：${preview.contentHash}；关键字段变化后必须重新预览。`;
 }
 
 function renderSaveConfirmation(preview) {
@@ -488,6 +515,40 @@ function applyTemplate(template) {
   fields.categoryAccountNumbers.value = JSON.stringify(template.categoryAccountNumbers, null, 2);
   fields.creditDetailNumbers.value = JSON.stringify(template.creditDetailNumbers, null, 2);
   fields.mockFixedJson.value = template.mockFixedJson;
+}
+
+function invalidatePreview(reason) {
+  if (!state.lastPreview) {
+    renderPreviewHashSummary(null);
+    return;
+  }
+  state.lastPreview = null;
+  state.previewSignature = '';
+  state.previewInvalidReason = reason;
+  renderSaveConfirmation(null);
+  renderVoucherValidation(null);
+  renderPreviewHashSummary(null);
+}
+
+function ensurePreviewFresh() {
+  if (!state.lastPreview || !isPreviewFresh()) {
+    throw new Error('预览已失效，请重新预览凭证。');
+  }
+}
+
+function isPreviewFresh() {
+  if (!state.lastPreview || !state.previewSignature) {
+    return false;
+  }
+  try {
+    return requestSignature(buildVoucherRequest()) === state.previewSignature;
+  } catch {
+    return false;
+  }
+}
+
+function requestSignature(request) {
+  return JSON.stringify(request);
 }
 
 function buildSourceSummary(record) {
