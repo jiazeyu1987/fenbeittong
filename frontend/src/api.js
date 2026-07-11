@@ -30,6 +30,7 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({})
   }),
+  listSyncedDocuments: () => request('/api/fenbeitong-voucher/synced-documents'),
   preview: (data) => request('/api/fenbeitong-voucher/preview', {
     method: 'POST',
     body: JSON.stringify(data)

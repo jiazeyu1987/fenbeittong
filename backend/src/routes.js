@@ -8,6 +8,7 @@ import {
   getConfig,
   listOperationLogs,
   listProcessRecords,
+  listSyncedDocuments,
   saveConfig
 } from './repository.js';
 
@@ -52,6 +53,9 @@ export async function handleApi(request, response) {
     }
     if (request.method === 'POST' && url.pathname === '/api/fenbeitong-voucher/sync') {
       return sendJson(response, 200, { success: true, data: await syncFenbeitongDocuments() });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/fenbeitong-voucher/synced-documents') {
+      return sendJson(response, 200, { success: true, data: listSyncedDocuments() });
     }
     if (request.method === 'POST' && url.pathname === '/api/fenbeitong-voucher/preview') {
       return sendJson(response, 200, { success: true, data: previewVoucher(await readJson(request)) });

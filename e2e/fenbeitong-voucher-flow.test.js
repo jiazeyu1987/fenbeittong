@@ -53,6 +53,12 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
     assert.equal(syncBody.data.records[0].processStage, 'SYNCED');
     assert.equal(syncBody.data.records[0].mockReplacement, true);
 
+    const syncedDocumentsResponse = await fetch(`${baseUrl}/api/fenbeitong-voucher/synced-documents`);
+    const syncedDocumentsBody = await syncedDocumentsResponse.json();
+    assert.equal(syncedDocumentsBody.data[0].sourceId, 'MOCK-REIMB-001');
+    assert.equal(syncedDocumentsBody.data[0].batchId, syncBody.data.batch.batchId);
+    assert.equal(syncedDocumentsBody.data[0].mockReplacement, true);
+
     const schedulerRunBody = await postJson(`${baseUrl}/api/scheduler/run-once`, {});
     assert.equal(schedulerRunBody.data.sync.batch.status, 'SUCCESS');
     assert.equal(schedulerRunBody.data.sync.records[0].processStage, 'SYNCED');

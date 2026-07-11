@@ -8,6 +8,8 @@ test('frontend page exposes expected workflow controls', () => {
     'environmentWarning',
     'businessSteps',
     'nextActionText',
+    'primaryActionButton',
+    'syncBatchSummary',
     'loadTemplateButton',
     'saveConfigButton',
     'syncButton',
@@ -19,6 +21,11 @@ test('frontend page exposes expected workflow controls', () => {
     'schedulerDetail',
     'selfCheckList',
     'mockReplacement',
+    'sourceQueueBody',
+    'configValidationList',
+    'saveConfirmPanel',
+    'saveConfirmSummary',
+    'saveRiskNotice',
     'voucherPreviewBody',
     'previewDebitTotal',
     'previewCreditTotal',
@@ -38,6 +45,10 @@ test('frontend source is productized rather than a raw debug console', () => {
   assert.match(html, /<details id="technicalDetails"/);
   assert.match(app, /renderVoucherPreview/);
   assert.match(app, /renderSelfCheck/);
+  assert.match(app, /renderSourceQueue/);
+  assert.match(app, /renderConfigValidation/);
+  assert.match(app, /renderSaveConfirmation/);
+  assert.match(app, /showError/);
   assert.match(app, /draftOnlyWarning/);
 });
 
@@ -55,6 +66,7 @@ test('frontend api exposes formal product workflow endpoints', () => {
   assert.match(api, /scheduler\/status/);
   assert.match(api, /scheduler\/run-once/);
   assert.match(api, /fenbeitong-voucher\/sync/);
+  assert.match(api, /fenbeitong-voucher\/synced-documents/);
   assert.match(api, /fenbeitong-voucher\/push-erp/);
   assert.match(api, /operations\/logs/);
 });

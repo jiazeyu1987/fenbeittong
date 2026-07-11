@@ -165,6 +165,40 @@ h2 {
   font-weight: 700;
 }
 
+.batch-summary,
+.confirm-panel {
+  margin-top: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  padding: 12px;
+  line-height: 1.5;
+}
+
+.primary-action {
+  width: 100%;
+  margin-top: 12px;
+  border-color: #0f766e;
+  background: #0f766e;
+  font-weight: 700;
+}
+
+.confirm-panel {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #7c2d12;
+}
+
+.confirm-panel h3,
+.confirm-panel p {
+  margin: 0 0 8px;
+}
+
+.risk-text {
+  font-weight: 700;
+}
+
 .section-title {
   display: flex;
   justify-content: space-between;
@@ -269,6 +303,21 @@ button:hover {
   background: #115e59;
 }
 
+button:disabled,
+button:disabled:hover {
+  cursor: not-allowed;
+  border-color: #d0d5dd;
+  background: #eaecf0;
+  color: #98a2b3;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid #99f6e4;
+  outline-offset: 2px;
+}
+
 button.secondary {
   border-color: #cbd5e1;
   background: #fff;
@@ -347,6 +396,10 @@ th {
 
 .check-list .pending {
   color: #854d0e;
+}
+
+.row-action {
+  padding: 6px 10px;
 }
 
 .log-list {
