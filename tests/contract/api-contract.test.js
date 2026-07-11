@@ -5,6 +5,7 @@ import { buildVoucherPreview } from '../../backend/src/voucher-mapper.js';
 import { getSystemStatus } from '../../backend/src/services/system-status.js';
 import { resetRepository } from '../../backend/src/repository.js';
 import { validateFenbeitongConfig } from '../../backend/src/config.js';
+import { pullFenbeitongReimbursements } from '../../backend/src/adapters/fenbeitong-client.js';
 import { getSchedulerStatus, runSchedulerOnce, stopSchedulerForTest } from '../../backend/src/services/scheduler.js';
 
 test('mock template contains required fields and no real token', () => {
@@ -82,6 +83,23 @@ test('scheduler is explicit and can run one sync with mock replacement', async (
   assert.equal(result.sync.batch.mockReplacement, true);
   assert.equal(result.sync.records[0].processStage, 'SYNCED');
   assert.equal(getSchedulerStatus().runCount, 1);
+});
+
+test('mock Fenbeitong pull returns finance-sized sortable reimbursement ledger', async () => {
+  const result = await pullFenbeitongReimbursements();
+  assert.equal(result.mode, 'mock');
+  assert.equal(result.mockReplacement, true);
+  assert.equal(result.documents.length, 100);
+
+  const sourceIds = result.documents.map((document) => document.data.reimb_id);
+  const sourceCodes = result.documents.map((document) => document.data.reimb_code);
+  const amounts = result.documents.map((document) => Number(document.data.total_amount));
+  const times = result.documents.map((document) => document.data.create_time);
+
+  assert.equal(new Set(sourceIds).size, 100);
+  assert.equal(new Set(sourceCodes).size, 100);
+  assert.ok(new Set(amounts).size > 20);
+  assert.ok(new Set(times).size > 20);
 });
 
 test('real Fenbeitong mode fails fast when required config is missing', () => {

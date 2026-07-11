@@ -53,12 +53,14 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
     const syncBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/sync`, {});
     assert.equal(syncBody.data.batch.status, 'SUCCESS');
     assert.equal(syncBody.data.batch.mockReplacement, true);
+    assert.equal(syncBody.data.records.length, 100);
     assert.equal(syncBody.data.records[0].processStage, 'SYNCED');
     assert.equal(syncBody.data.records[0].mockReplacement, true);
+    const sourceId = syncBody.data.records[0].sourceId;
 
     const syncedDocumentsResponse = await fetch(`${baseUrl}/api/fenbeitong-voucher/synced-documents`);
     const syncedDocumentsBody = await syncedDocumentsResponse.json();
-    assert.equal(syncedDocumentsBody.data[0].sourceId, 'MOCK-REIMB-001');
+    assert.equal(syncedDocumentsBody.data.length, 100);
     assert.equal(syncedDocumentsBody.data[0].batchId, syncBody.data.batch.batchId);
     assert.equal(syncedDocumentsBody.data[0].mockReplacement, true);
 
@@ -67,7 +69,7 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
     assert.equal(schedulerRunBody.data.sync.records[0].processStage, 'SYNCED');
 
     const pushBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/push-erp`, {
-      sourceId: syncBody.data.records[0].sourceId,
+      sourceId,
       voucherDate: template.mockVoucherDate,
       year: template.mockYear,
       period: template.mockPeriod,
@@ -78,7 +80,7 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
     assert.equal(pushBody.data.erpMockReplacement, true);
 
     const duplicatePushBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/push-erp`, {
-      sourceId: syncBody.data.records[0].sourceId,
+      sourceId,
       voucherDate: template.mockVoucherDate,
       year: template.mockYear,
       period: template.mockPeriod,
@@ -87,9 +89,9 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
     assert.equal(duplicatePushBody.success, false);
     assert.match(duplicatePushBody.error.message, /already pushed to ERP/);
 
-    const queryResponse = await fetch(`${baseUrl}/api/fenbeitong-voucher/process/MOCK-REIMB-001`);
+    const queryResponse = await fetch(`${baseUrl}/api/fenbeitong-voucher/process/${sourceId}`);
     const queryBody = await queryResponse.json();
-    assert.equal(queryBody.data.sourceId, 'MOCK-REIMB-001');
+    assert.equal(queryBody.data.sourceId, sourceId);
 
     const recordsResponse = await fetch(`${baseUrl}/api/fenbeitong-voucher/process`);
     const recordsBody = await recordsResponse.json();

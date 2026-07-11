@@ -143,6 +143,31 @@ body {
   font-weight: 700;
 }
 
+.sort-header {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+}
+
+.sort-header:hover {
+  background: transparent;
+  color: #008f86;
+}
+
+.row-checkbox,
+#selectAllRowsCheckbox {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #009688;
+}
+
 .ledger-table tr:nth-child(even) td {
   background: #fbfbfc;
 }

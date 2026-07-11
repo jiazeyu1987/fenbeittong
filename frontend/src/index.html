@@ -50,15 +50,15 @@
         <table class="ledger-table">
           <thead>
             <tr>
-              <th>操作</th>
+              <th><input id="selectAllRowsCheckbox" type="checkbox" aria-label="全选当前筛选单据" /></th>
               <th>单据状态</th>
-              <th>来源单号</th>
+              <th><button class="sort-header" data-sort-field="sourceCode" type="button">来源单号</button></th>
               <th>报销人</th>
               <th>部门</th>
               <th>费用类型</th>
-              <th class="amount">金额</th>
+              <th class="amount"><button class="sort-header" data-sort-field="amount" type="button">金额</button></th>
               <th>接口来源</th>
-              <th>更新时间</th>
+              <th><button class="sort-header" data-sort-field="time" type="button">更新时间</button></th>
             </tr>
           </thead>
           <tbody id="sourceQueueBody">

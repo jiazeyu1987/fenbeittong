@@ -9,6 +9,7 @@ test('frontend page exposes expected workflow controls', () => {
     'ledgerToolbar',
     'sourceSearchInput',
     'queryLedgerButton',
+    'selectAllRowsCheckbox',
     'syncFenbeitongButton',
     'generateVoucherButton',
     'saveErpButton',
@@ -74,6 +75,9 @@ test('frontend is centered on a finance source document list', () => {
   assert.doesNotMatch(html, /class="metric-grid"/);
   assert.match(app, /renderFinanceReview/);
   assert.match(app, /financeReviewSummary/);
+  assert.match(app, /selectedSourceIds/);
+  assert.match(app, /sortLedgerRecords/);
+  assert.match(app, /toggleQueuedDocument/);
 });
 
 test('frontend uses fullscreen ledger table layout', () => {
@@ -89,6 +93,10 @@ test('frontend uses fullscreen ledger table layout', () => {
   assert.match(html, /&#x5BFC;&#x51FA;/);
   assert.match(html, /&#x663E;&#x793A;&#x5B57;&#x6BB5;/);
   assert.match(html, /Total/);
+  assert.match(html, /data-sort-field="sourceCode"/);
+  assert.match(html, /data-sort-field="amount"/);
+  assert.match(html, /data-sort-field="time"/);
+  assert.match(html, /id="selectAllRowsCheckbox"/);
   assert.doesNotMatch(html, /class="metric-grid"/);
   assert.doesNotMatch(html, /&#x7B2C;&#x4E09;&#x65B9;&#x5BFC;&#x5165;/);
   assert.match(css, /\.ledger-toolbar \.primary-action\s*{[^}]*width:\s*auto;/s);

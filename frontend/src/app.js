@@ -39,6 +39,9 @@ const state = {
   configSaved: false,
   currentStatus: null,
   syncedDocuments: [],
+  selectedSourceIds: new Set(),
+  sortField: 'time',
+  sortDirection: 'desc',
   lastPreview: null,
   previewSignature: '',
   previewInvalidReason: '',
@@ -56,6 +59,8 @@ const recordsTable = document.querySelector('#recordsTable');
 const logsList = document.querySelector('#logsList');
 const voucherPreviewBody = document.querySelector('#voucherPreviewBody');
 const sourceQueueBody = document.querySelector('#sourceQueueBody');
+const selectAllRowsCheckbox = document.querySelector('#selectAllRowsCheckbox');
+const financeQueuePanel = document.querySelector('#financeQueuePanel');
 const saveConfirmPanel = document.querySelector('#saveConfirmPanel');
 const saveConfirmSummary = document.querySelector('#saveConfirmSummary');
 const saveRiskNotice = document.querySelector('#saveRiskNotice');
@@ -67,7 +72,7 @@ const financeReviewSummary = document.querySelector('#financeReviewSummary');
 controls.loadTemplate.addEventListener('click', run(loadTemplate));
 controls.syncFenbeitong.addEventListener('click', run(syncFenbeitong));
 controls.generateVoucher.addEventListener('click', run(generateVoucherFromLedger));
-controls.saveErp.addEventListener('click', run(pushErp));
+controls.saveErp.addEventListener('click', run(pushSelectedToErp));
 controls.viewVoucher.addEventListener('click', run(queryProcess));
 controls.queryLedger.addEventListener('click', () => renderSourceQueue(state.syncedDocuments));
 controls.resetLedger.addEventListener('click', () => {
@@ -86,7 +91,15 @@ controls.query.addEventListener('click', run(queryProcess));
 controls.refresh.addEventListener('click', run(refreshAll));
 controls.listRecords.addEventListener('click', run(refreshRecords));
 controls.primaryAction.addEventListener('click', run(runPrimaryAction));
-sourceQueueBody.addEventListener('click', run(selectQueuedDocument));
+sourceQueueBody.addEventListener('change', run(toggleQueuedDocument));
+selectAllRowsCheckbox.addEventListener('change', () => toggleAllVisibleDocuments(selectAllRowsCheckbox.checked));
+financeQueuePanel.addEventListener('click', (event) => {
+  const sortButton = event.target.closest('button[data-sort-field]');
+  if (!sortButton) {
+    return;
+  }
+  setLedgerSort(sortButton.dataset.sortField);
+});
 sourceSearchInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     renderSourceQueue(state.syncedDocuments);
@@ -169,8 +182,49 @@ async function prepare() {
 }
 
 async function generateVoucherFromLedger() {
-  await preview();
-  await prepare();
+  const records = selectedLedgerRecords();
+  if (records.length === 0) {
+    await preview();
+    await prepare();
+    return;
+  }
+  const prepared = [];
+  for (const record of records) {
+    setActiveSourceRecord(record, false);
+    const request = buildVoucherRequestForRecord(record);
+    const previewResult = await api.preview(request);
+    const preparedRecord = await api.prepare(request);
+    state.lastPreview = previewResult;
+    state.previewSignature = requestSignature(request);
+    state.previewInvalidReason = '';
+    state.preparedSourceIds.add(preparedRecord.sourceId);
+    prepared.push(preparedRecord);
+  }
+  show({ count: prepared.length, records: prepared }, `已生成 ${prepared.length} 张待保存凭证。`);
+  await refreshAll();
+}
+
+async function pushSelectedToErp() {
+  const records = selectedLedgerRecords();
+  if (records.length === 0) {
+    await pushErp();
+    return;
+  }
+  const pushed = [];
+  for (const record of records) {
+    setActiveSourceRecord(record, false);
+    const saved = await api.pushErp({
+      sourceId: record.sourceId,
+      voucherDate: fields.mockVoucherDate.value,
+      year: Number(fields.mockYear.value),
+      period: Number(fields.mockPeriod.value),
+      config: readConfig()
+    });
+    state.pushedSourceIds.add(saved.sourceId);
+    pushed.push(saved);
+  }
+  show({ count: pushed.length, records: pushed }, `已保存 ${pushed.length} 张ERP草稿凭证，等待财务人工审核。`);
+  await refreshAll();
 }
 
 async function pushErp() {
@@ -257,22 +311,75 @@ async function runPrimaryAction() {
   }
 }
 
-async function selectQueuedDocument(event) {
-  const button = event.target.closest('button[data-source-id]');
-  if (!button) {
+async function toggleQueuedDocument(event) {
+  const checkbox = event.target.closest('input[data-source-id]');
+  if (!checkbox) {
     return;
   }
-  const sourceId = button.dataset.sourceId;
+  const sourceId = checkbox.dataset.sourceId;
   const record = state.syncedDocuments.find((item) => item.sourceId === sourceId);
   if (!record) {
     throw new Error(`待处理单据不存在：${sourceId}`);
   }
-  sourceIdInput.value = sourceId;
-  fields.mockFixedJson.value = record.fixedJson || fields.mockFixedJson.value;
-  invalidatePreview('预览已失效：已切换来源单据，请重新预览凭证。');
+  if (checkbox.checked) {
+    state.selectedSourceIds.add(sourceId);
+    setActiveSourceRecord(record, true);
+  } else {
+    state.selectedSourceIds.delete(sourceId);
+    const nextRecord = state.syncedDocuments.find((item) => state.selectedSourceIds.has(item.sourceId));
+    if (nextRecord) {
+      setActiveSourceRecord(nextRecord, true);
+    } else {
+      sourceIdInput.value = '';
+      invalidatePreview('预览已失效：已取消选择来源单据，请重新选择后预览凭证。');
+    }
+  }
   renderSourceQueue(state.syncedDocuments);
   renderActionState();
-  show(record, `已选择来源单据 ${sourceId}，下一步请预览凭证。`);
+  show({ selectedCount: state.selectedSourceIds.size, lastSelected: record }, `已选择 ${state.selectedSourceIds.size} 张来源单据。`);
+}
+
+function toggleAllVisibleDocuments(checked) {
+  const visibleRecords = sortLedgerRecords(filterLedgerRecords(state.syncedDocuments));
+  for (const record of visibleRecords) {
+    if (checked) {
+      state.selectedSourceIds.add(record.sourceId);
+    } else {
+      state.selectedSourceIds.delete(record.sourceId);
+    }
+  }
+  const firstSelected = state.syncedDocuments.find((record) => state.selectedSourceIds.has(record.sourceId));
+  if (firstSelected) {
+    setActiveSourceRecord(firstSelected, true);
+  } else {
+    sourceIdInput.value = '';
+    invalidatePreview('预览已失效：已取消选择来源单据，请重新选择后预览凭证。');
+  }
+  renderSourceQueue(state.syncedDocuments);
+  renderActionState();
+}
+
+function selectedLedgerRecords() {
+  return [...state.selectedSourceIds]
+    .map((sourceId) => state.syncedDocuments.find((record) => record.sourceId === sourceId))
+    .filter(Boolean);
+}
+
+function setActiveSourceRecord(record, invalidate) {
+  sourceIdInput.value = record.sourceId;
+  fields.mockFixedJson.value = record.fixedJson || fields.mockFixedJson.value;
+  if (invalidate) {
+    invalidatePreview('预览已失效：已切换来源单据，请重新预览凭证。');
+  }
+}
+
+function renderSelectAllState(visibleRecords) {
+  if (!selectAllRowsCheckbox) {
+    return;
+  }
+  const selectedCount = visibleRecords.filter((record) => state.selectedSourceIds.has(record.sourceId)).length;
+  selectAllRowsCheckbox.checked = visibleRecords.length > 0 && selectedCount === visibleRecords.length;
+  selectAllRowsCheckbox.indeterminate = selectedCount > 0 && selectedCount < visibleRecords.length;
 }
 
 function renderStatus(status) {
@@ -321,13 +428,14 @@ function renderNextAction(status) {
 
 function renderActionState() {
   const sourceId = sourceIdInput.value.trim();
-  const hasSource = Boolean(sourceId || fields.mockFixedJson.value.trim());
+  const hasSelection = state.selectedSourceIds.size > 0;
+  const hasSource = Boolean(hasSelection || sourceId || fields.mockFixedJson.value.trim());
   const prepared = sourceId ? state.preparedSourceIds.has(sourceId) : false;
   const pushed = sourceId ? state.pushedSourceIds.has(sourceId) : false;
   const previewFresh = isPreviewFresh();
   controls.generateVoucher.disabled = !hasSource;
   controls.saveErp.disabled = !state.lastPreview?.balanced || !previewFresh || !sourceId || pushed;
-  controls.viewVoucher.disabled = !sourceId;
+  controls.viewVoucher.disabled = !sourceId && !hasSelection;
   controls.preview.disabled = !hasSource;
   controls.prepare.disabled = !state.lastPreview?.balanced || !previewFresh;
   controls.pushErp.disabled = !state.lastPreview?.balanced || !previewFresh || !sourceId || pushed;
@@ -405,21 +513,22 @@ function renderConfigValidation() {
 }
 
 function renderSourceQueue(records) {
-  const visibleRecords = filterLedgerRecords(records);
+  const visibleRecords = sortLedgerRecords(filterLedgerRecords(records));
   if (paginationSummary) {
     paginationSummary.textContent = `Total ${visibleRecords.length}`;
   }
+  renderSelectAllState(visibleRecords);
   if (visibleRecords.length === 0) {
     sourceQueueBody.innerHTML = '<tr><td colspan="9">暂无待处理单据，请先同步分贝通数据。</td></tr>';
     renderFinanceReview(state.lastPreview);
     return;
   }
-  const selected = sourceIdInput.value.trim();
   sourceQueueBody.innerHTML = visibleRecords.map((record) => {
     const summary = buildSourceSummary(record);
+    const selected = state.selectedSourceIds.has(record.sourceId);
     return `
-    <tr class="${record.sourceId === selected ? 'selected' : ''}">
-      <td><button class="secondary row-action" data-source-id="${escapeHtml(record.sourceId)}">${record.sourceId === selected ? '当前单据' : '选择'}</button></td>
+    <tr class="${selected ? 'selected' : ''}">
+      <td><input class="row-checkbox" type="checkbox" data-source-id="${escapeHtml(record.sourceId)}" aria-label="选择 ${escapeHtml(displaySourceCode(record))}" ${selected ? 'checked' : ''} /></td>
       <td><span class="status-tag">${escapeHtml(queueStatus(record))}</span></td>
       <td>${escapeHtml(displaySourceCode(record))}</td>
       <td>${escapeHtml(displayRequester(record, summary.requester))}</td>
@@ -427,7 +536,7 @@ function renderSourceQueue(records) {
       <td>${escapeHtml(displayExpenseCategories(record, summary.expenseCategories))}</td>
       <td class="amount">${formatMoney(summary.totalAmount)}</td>
       <td>${escapeHtml(record.mockReplacement ? '接口未启用' : '正式接口')}</td>
-      <td>${escapeHtml(record.updateTime || '')}</td>
+      <td>${escapeHtml(summary.createTime || record.updateTime || '')}</td>
     </tr>
   `;
   }).join('');
@@ -453,12 +562,48 @@ function filterLedgerRecords(records) {
   });
 }
 
+function sortLedgerRecords(records) {
+  return [...records].sort((left, right) => {
+    const leftValue = ledgerSortValue(left, state.sortField);
+    const rightValue = ledgerSortValue(right, state.sortField);
+    const direction = state.sortDirection === 'asc' ? 1 : -1;
+    if (leftValue > rightValue) {
+      return direction;
+    }
+    if (leftValue < rightValue) {
+      return -direction;
+    }
+    return String(displaySourceCode(left)).localeCompare(String(displaySourceCode(right)), 'zh-CN');
+  });
+}
+
+function ledgerSortValue(record, field) {
+  const summary = buildSourceSummary(record);
+  if (field === 'amount') {
+    return Number(summary.totalAmount || 0);
+  }
+  if (field === 'sourceCode') {
+    return String(displaySourceCode(record) || '');
+  }
+  return Date.parse(summary.createTime || record.updateTime || '') || 0;
+}
+
+function setLedgerSort(field) {
+  if (state.sortField === field) {
+    state.sortDirection = state.sortDirection === 'asc' ? 'desc' : 'asc';
+  } else {
+    state.sortField = field;
+    state.sortDirection = field === 'time' ? 'desc' : 'asc';
+  }
+  renderSourceQueue(state.syncedDocuments);
+}
+
 function visibleLedgerColumns() {
   return ['操作', '单据状态', '来源单号', '报销人', '部门', '费用类型', '金额', '接口来源', '更新时间'];
 }
 
 function exportLedgerCsv() {
-  const rows = filterLedgerRecords(state.syncedDocuments);
+  const rows = sortLedgerRecords(filterLedgerRecords(state.syncedDocuments));
   const header = visibleLedgerColumns().slice(1);
   const csvRows = [
     header,
@@ -472,7 +617,7 @@ function exportLedgerCsv() {
         displayExpenseCategories(record, summary.expenseCategories),
         formatMoney(summary.totalAmount),
         record.mockReplacement ? '接口未启用' : '正式接口',
-        record.updateTime || ''
+        summary.createTime || record.updateTime || ''
       ];
     })
   ];
@@ -634,23 +779,14 @@ function interfaceReason(reason, replacementEnabled) {
 }
 
 function displaySourceCode(record) {
-  if (!record?.mockReplacement) {
-    return record?.sourceCode || record?.sourceId || '-';
-  }
-  return '示例报销单-001';
+  return record?.sourceCode || record?.sourceId || '-';
 }
 
 function displayRequester(record, requester) {
-  if (!record?.mockReplacement) {
-    return requester || '-';
-  }
-  return '示例员工';
+  return requester || '-';
 }
 
 function displayExpenseCategories(record, categories) {
-  if (!record?.mockReplacement) {
-    return categories || '-';
-  }
   return String(categories || '-')
     .replaceAll('Travel', '差旅费')
     .replaceAll('Office', '办公费')
@@ -729,7 +865,8 @@ function buildSourceSummary(record) {
       requester: data.user?.name || data.user?.code || '-',
       department: data.user?.department_name || data.user?.department_code || '-',
       expenseCategories: expenses.map((expense) => expense.cost_category?.name || expense.cost_category?.code || '未分类').join(' / ') || '-',
-      totalAmount: Number(data.total_amount || 0)
+      totalAmount: Number(data.total_amount || 0),
+      createTime: data.create_time || data.reimb_time || ''
     };
   } catch {
     return {
@@ -789,6 +926,17 @@ function buildVoucherRequest() {
   };
 }
 
+function buildVoucherRequestForRecord(record) {
+  return {
+    fixedJson: record.fixedJson || undefined,
+    sourceId: record.sourceId,
+    voucherDate: fields.mockVoucherDate.value,
+    year: Number(fields.mockYear.value),
+    period: Number(fields.mockPeriod.value),
+    config: readConfig()
+  };
+}
+
 function parseJson(text, label) {
   try {
     const value = JSON.parse(text || '{}');
@@ -821,7 +969,8 @@ function isJsonObject(text) {
 function selectFirstRecord(records) {
   const firstRecord = records[0];
   if (firstRecord) {
-    sourceIdInput.value = firstRecord.sourceId;
+    state.selectedSourceIds = new Set([firstRecord.sourceId]);
+    setActiveSourceRecord(firstRecord, false);
   }
 }
 
