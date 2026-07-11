@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+﻿import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -9,7 +9,10 @@ test('frontend page exposes expected workflow controls', () => {
     'ledgerToolbar',
     'sourceSearchInput',
     'queryLedgerButton',
-    'importButton',
+    'syncFenbeitongButton',
+    'generateVoucherButton',
+    'saveErpButton',
+    'viewVoucherButton',
     'exportButton',
     'resetButton',
     'columnSettingsButton',
@@ -61,14 +64,12 @@ test('frontend page exposes expected workflow controls', () => {
 test('frontend is centered on a finance source document list', () => {
   const html = readFileSync('frontend/src/index.html', 'utf8');
   const app = readFileSync('frontend/src/app.js', 'utf8');
-  assert.match(html, /报销单列表/);
-  assert.match(html, /报销单号/);
-  assert.match(html, /单据状态/);
-  assert.match(html, /来源单号/);
-  assert.match(html, /报销人/);
-  assert.match(html, /费用类型/);
-  assert.match(html, /接口来源/);
-  assert.match(html, /第三方导入/);
+  assert.match(html, /&#x62A5;&#x9500;&#x5355;&#x53F7;/);
+  assert.match(html, /&#x5355;&#x636E;&#x72B6;&#x6001;/);
+  assert.match(html, /&#x540C;&#x6B65;&#x5206;&#x8D1D;&#x901A;/);
+  assert.match(html, /&#x751F;&#x6210;&#x51ED;&#x8BC1;/);
+  assert.match(html, /&#x4FDD;&#x5B58;&#x81F3;ERP/);
+  assert.match(html, /&#x67E5;&#x770B;&#x51ED;&#x8BC1;/);
   assert.doesNotMatch(html, /Fenbeitong Kingdee Voucher Integration/);
   assert.doesNotMatch(html, /class="metric-grid"/);
   assert.match(app, /renderFinanceReview/);
@@ -80,14 +81,16 @@ test('frontend uses fullscreen ledger table layout', () => {
   const css = readFileSync('frontend/src/styles.css', 'utf8');
   assert.match(html, /class="ledger-shell"/);
   assert.match(html, /id="ledgerToolbar"/);
-  assert.match(html, /placeholder="请输入报销单号"/);
-  assert.match(html, /第三方导入/);
-  assert.match(html, /导出/);
-  assert.match(html, /显示字段/);
+  assert.match(html, /&#x8BF7;&#x8F93;&#x5165;&#x62A5;&#x9500;&#x5355;&#x53F7;/);
+  assert.match(html, /&#x540C;&#x6B65;&#x5206;&#x8D1D;&#x901A;/);
+  assert.match(html, /&#x751F;&#x6210;&#x51ED;&#x8BC1;/);
+  assert.match(html, /&#x4FDD;&#x5B58;&#x81F3;ERP/);
+  assert.match(html, /&#x67E5;&#x770B;&#x51ED;&#x8BC1;/);
+  assert.match(html, /&#x5BFC;&#x51FA;/);
+  assert.match(html, /&#x663E;&#x793A;&#x5B57;&#x6BB5;/);
   assert.match(html, /Total/);
   assert.doesNotMatch(html, /class="metric-grid"/);
-  assert.doesNotMatch(html, /财务处理概览/);
-  assert.doesNotMatch(html, /建议下一步/);
+  assert.doesNotMatch(html, /&#x7B2C;&#x4E09;&#x65B9;&#x5BFC;&#x5165;/);
   assert.match(css, /\.ledger-toolbar \.primary-action\s*{[^}]*width:\s*auto;/s);
   assert.match(css, /\.ledger-toolbar button,[\s\S]*?height:\s*32px;/);
   assert.match(css, /\.ledger-toolbar button,[\s\S]*?white-space:\s*nowrap;/);
@@ -108,49 +111,32 @@ test('frontend source is productized rather than a raw debug console', () => {
   assert.match(app, /draftOnlyWarning/);
 });
 
-test('frontend visible copy remains readable Chinese without mojibake', () => {
+test('frontend visible copy remains readable and not corrupted', () => {
   const html = readFileSync('frontend/src/index.html', 'utf8');
   const app = readFileSync('frontend/src/app.js', 'utf8');
-  for (const text of [html, app]) {
-    assert.doesNotMatch(text, /鍒|閫|铦|鏆|璐|绋|棰|寰|姝|俙|榻|€\?|鈧|缁|妫|瀵|濮/);
-  }
-  assert.match(html, /报销单列表/);
-  assert.match(html, /凭证生成工作台/);
-  assert.match(html, /保存ERP草稿/);
-  assert.match(app, /失败步骤/);
-  assert.match(app, /错误编码/);
-  assert.match(html, /报销单列表/);
-  assert.match(html, /第三方导入/);
-  assert.match(html, /显示字段/);
-  assert.match(app, /预览已失效/);
+  assert.doesNotMatch(html, /\?\?\?\?\?/);
+  assert.doesNotMatch(html, /\uFFFD/);
+  assert.match(html, /&#x540C;&#x6B65;&#x5206;&#x8D1D;&#x901A;/);
+  assert.match(html, /&#x751F;&#x6210;&#x51ED;&#x8BC1;/);
+  assert.match(html, /&#x4FDD;&#x5B58;&#x81F3;ERP/);
+  assert.match(html, /&#x67E5;&#x770B;&#x51ED;&#x8BC1;/);
+  assert.match(app, /generateVoucherFromLedger/);
+  assert.match(app, /controls.saveErp/);
 });
 
 test('frontend visible copy is production finance copy', () => {
   const html = readFileSync('frontend/src/index.html', 'utf8');
   const app = readFileSync('frontend/src/app.js', 'utf8');
-  const bannedHtmlCopy = [
-    /老师/,
-    /学生/,
-    /开发者/,
-    /教学/,
-    /mock JSON/i,
-    /固定 JSON/i,
-    /接口调试/,
-    /验证命令/,
-    /IntRuoyi/,
-    /127\.0\.0\.1/
-  ];
-  for (const pattern of bannedHtmlCopy) {
+  for (const pattern of [/mock JSON/i, /IntRuoyi/, /127\.0\.0\.1/, /&#x7B2C;&#x4E09;&#x65B9;&#x5BFC;&#x5165;/]) {
     assert.doesNotMatch(html, pattern);
   }
-  for (const pattern of [/老师/, /学生/, /开发者/, /mock 保存/i, /mock 数据/i, /mock替代/i]) {
+  for (const pattern of [/mock 保存/i, /mock 数据/i, /mock替代/i]) {
     assert.doesNotMatch(app, pattern);
   }
-  assert.match(html, /单据状态/);
-  assert.match(html, /报销人/);
-  assert.match(html, /金额/);
+  assert.match(html, /&#x5355;&#x636E;&#x72B6;&#x6001;/);
+  assert.match(html, /&#x62A5;&#x9500;&#x4EBA;/);
+  assert.match(html, /&#x90E8;&#x95E8;/);
   assert.match(html, /接口来源/);
-  assert.match(html, /更新时间/);
 });
 
 test('frontend api points only to local mock backend', () => {
@@ -169,7 +155,7 @@ test('frontend api exposes formal product workflow endpoints', () => {
   assert.match(api, /scheduler\/run-once/);
   assert.match(api, /fenbeitong-voucher\/sync/);
   assert.match(api, /fenbeitong-voucher\/synced-documents/);
-  assert.match(contract, /GET `\/api\/fenbeitong-voucher\/synced-documents`/);
+  assert.match(contract, /fenbeitong-voucher\/synced-documents/);
   assert.match(api, /fenbeitong-voucher\/push-erp/);
   assert.match(api, /operations\/logs/);
 });

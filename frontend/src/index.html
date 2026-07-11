@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
@@ -16,27 +16,30 @@
         <span id="statusBadge" class="badge">未连接</span>
       </section>
 
-      <section id="ledgerToolbar" class="ledger-toolbar" aria-label="报销单查询工具栏">
-        <select aria-label="查询字段">
-          <option>报销单号</option>
-          <option>报销人</option>
-          <option>部门</option>
-          <option>单据状态</option>
+      <section id="ledgerToolbar" class="ledger-toolbar" aria-label="&#x62A5;&#x9500;&#x5355;&#x67E5;&#x8BE2;&#x5DE5;&#x5177;&#x680F;">
+        <select aria-label="&#x67E5;&#x8BE2;&#x5B57;&#x6BB5;">
+          <option>&#x62A5;&#x9500;&#x5355;&#x53F7;</option>
+          <option>&#x62A5;&#x9500;&#x4EBA;</option>
+          <option>&#x90E8;&#x95E8;</option>
+          <option>&#x5355;&#x636E;&#x72B6;&#x6001;</option>
         </select>
-        <select aria-label="匹配方式">
-          <option>包含</option>
-          <option>等于</option>
-          <option>不等于</option>
+        <select aria-label="&#x5339;&#x914D;&#x65B9;&#x5F0F;">
+          <option>&#x5305;&#x542B;</option>
+          <option>&#x7B49;&#x4E8E;</option>
+          <option>&#x4E0D;&#x7B49;&#x4E8E;</option>
         </select>
-        <input id="sourceSearchInput" placeholder="请输入报销单号" />
-        <button id="queryLedgerButton" class="primary-action compact-action">查询</button>
+        <input id="sourceSearchInput" placeholder="&#x8BF7;&#x8F93;&#x5165;&#x62A5;&#x9500;&#x5355;&#x53F7;" />
+        <button id="queryLedgerButton" class="primary-action compact-action">&#x67E5;&#x8BE2;</button>
 
         <div class="toolbar-spacer"></div>
 
-        <button id="importButton" class="outline-action">第三方导入</button>
-        <button id="exportButton" class="success-action">导出</button>
-        <button id="resetButton" class="secondary">重置</button>
-        <button id="columnSettingsButton" class="secondary">显示字段</button>
+        <button id="syncFenbeitongButton" class="outline-action">&#x540C;&#x6B65;&#x5206;&#x8D1D;&#x901A;</button>
+        <button id="generateVoucherButton" class="outline-action">&#x751F;&#x6210;&#x51ED;&#x8BC1;</button>
+        <button id="saveErpButton" class="outline-action">&#x4FDD;&#x5B58;&#x81F3;ERP</button>
+        <button id="viewVoucherButton" class="outline-action">&#x67E5;&#x770B;&#x51ED;&#x8BC1;</button>
+        <button id="exportButton" class="success-action">&#x5BFC;&#x51FA;</button>
+        <button id="resetButton" class="secondary">&#x91CD;&#x7F6E;</button>
+        <button id="columnSettingsButton" class="secondary">&#x663E;&#x793A;&#x5B57;&#x6BB5;</button>
       </section>
 
       <section id="environmentWarning" class="ledger-warning">
@@ -59,7 +62,7 @@
             </tr>
           </thead>
           <tbody id="sourceQueueBody">
-            <tr><td colspan="9">暂无待处理单据，请先执行第三方导入。</td></tr>
+            <tr><td colspan="9">&#x6682;&#x65E0;&#x5F85;&#x5904;&#x7406;&#x5355;&#x636E;&#xFF0C;&#x8BF7;&#x5148;&#x6267;&#x884C;&#x540C;&#x6B65;&#x5206;&#x8D1D;&#x901A;&#x3002;</td></tr>
           </tbody>
         </table>
       </section>
@@ -150,3 +153,4 @@
     <script type="module" src="/app.js"></script>
   </body>
 </html>
+

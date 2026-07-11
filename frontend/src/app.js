@@ -15,7 +15,10 @@ const fields = {
 
 const controls = {
   primaryAction: document.querySelector('#primaryActionButton'),
-  import: document.querySelector('#importButton'),
+  syncFenbeitong: document.querySelector('#syncFenbeitongButton'),
+  generateVoucher: document.querySelector('#generateVoucherButton'),
+  saveErp: document.querySelector('#saveErpButton'),
+  viewVoucher: document.querySelector('#viewVoucherButton'),
   exportLedger: document.querySelector('#exportButton'),
   queryLedger: document.querySelector('#queryLedgerButton'),
   resetLedger: document.querySelector('#resetButton'),
@@ -62,7 +65,10 @@ const previewHashSummary = document.querySelector('#previewHashSummary');
 const financeReviewSummary = document.querySelector('#financeReviewSummary');
 
 controls.loadTemplate.addEventListener('click', run(loadTemplate));
-controls.import.addEventListener('click', run(syncFenbeitong));
+controls.syncFenbeitong.addEventListener('click', run(syncFenbeitong));
+controls.generateVoucher.addEventListener('click', run(generateVoucherFromLedger));
+controls.saveErp.addEventListener('click', run(pushErp));
+controls.viewVoucher.addEventListener('click', run(queryProcess));
 controls.queryLedger.addEventListener('click', () => renderSourceQueue(state.syncedDocuments));
 controls.resetLedger.addEventListener('click', () => {
   sourceSearchInput.value = '';
@@ -160,6 +166,11 @@ async function prepare() {
   state.preparedSourceIds.add(record.sourceId);
   show(record, '已生成待保存凭证。本地记录已保留幂等键和内容哈希。');
   await refreshAll();
+}
+
+async function generateVoucherFromLedger() {
+  await preview();
+  await prepare();
 }
 
 async function pushErp() {
@@ -314,6 +325,9 @@ function renderActionState() {
   const prepared = sourceId ? state.preparedSourceIds.has(sourceId) : false;
   const pushed = sourceId ? state.pushedSourceIds.has(sourceId) : false;
   const previewFresh = isPreviewFresh();
+  controls.generateVoucher.disabled = !hasSource;
+  controls.saveErp.disabled = !state.lastPreview?.balanced || !previewFresh || !sourceId || pushed;
+  controls.viewVoucher.disabled = !sourceId;
   controls.preview.disabled = !hasSource;
   controls.prepare.disabled = !state.lastPreview?.balanced || !previewFresh;
   controls.pushErp.disabled = !state.lastPreview?.balanced || !previewFresh || !sourceId || pushed;
