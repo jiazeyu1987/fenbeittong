@@ -1,0 +1,42 @@
+{
+  "trace_id": "trace-mock-reimbursement-001",
+  "code": "0",
+  "msg": "success",
+  "request_id": "request-mock-reimbursement-001",
+  "data": {
+    "type": 26,
+    "reimb_id": "MOCK-REIMB-001",
+    "reimb_code": "MOCK-BX-001",
+    "reimb_third_id": "MOCK-THIRD-001",
+    "user": {
+      "id": "USER-001",
+      "name": "Mock User",
+      "code": "PL0189",
+      "department_code": "BM000330"
+    },
+    "currency_code": "CNY",
+    "total_amount": "228.00",
+    "payment_amount": "228.00",
+    "expense_number": 2,
+    "apply_reason": "Mock reimbursement for voucher prepare",
+    "create_time": "2026-07-11 10:30:00",
+    "expenses": [
+      {
+        "id": "EXP-001",
+        "cost_category": { "code": "TRAVEL", "name": "Travel" },
+        "total_amount": "108.00",
+        "reason": "Mock travel expense",
+        "invoices": [
+          { "id": "INV-001", "total_amount": "108.00", "tax_amount": "6.11", "deductible_tax_amount": "6.11" }
+        ]
+      },
+      {
+        "id": "EXP-002",
+        "cost_category": { "code": "OFFICE", "name": "Office" },
+        "total_amount": "120.00",
+        "reason": "Mock office expense",
+        "invoices": []
+      }
+    ]
+  }
+}

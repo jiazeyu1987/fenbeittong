@@ -1,0 +1,11 @@
+{
+  "code": "0",
+  "msg": "success",
+  "data": {
+    "reimb_code": "MOCK-BX-MISSING",
+    "currency_code": "CNY",
+    "total_amount": "100.00",
+    "payment_amount": "100.00",
+    "expenses": []
+  }
+}

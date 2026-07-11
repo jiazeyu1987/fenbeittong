@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>分贝通凭证协作开发包</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="toolbar">
+        <div>
+          <h1>分贝通凭证</h1>
+          <p>固定 JSON 模拟、凭证预览、本地准备记录。不会调用真实金蝶。</p>
+        </div>
+        <span id="statusBadge" class="badge">未连接</span>
+      </section>
+
+      <section class="panel">
+        <h2>映射配置</h2>
+        <div class="grid">
+          <label>账簿编码<input id="accountBookNumber" /></label>
+          <label>凭证字编码<input id="voucherGroupNumber" /></label>
+          <label>模板 FID<input id="templateErpFid" /></label>
+          <label>凭证日期<input id="mockVoucherDate" type="date" /></label>
+          <label>年度<input id="mockYear" type="number" /></label>
+          <label>期间<input id="mockPeriod" type="number" /></label>
+        </div>
+        <div class="grid textareas">
+          <label>币种映射<textarea id="currencyNumbers"></textarea></label>
+          <label>费用科目映射<textarea id="categoryAccountNumbers"></textarea></label>
+          <label>贷方维度<textarea id="creditDetailNumbers"></textarea></label>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>模拟数据</h2>
+        <label>固定 JSON<textarea id="mockFixedJson" class="json-input"></textarea></label>
+        <div class="actions">
+          <button id="loadTemplateButton">填入模拟模板</button>
+          <button id="saveConfigButton">保存配置</button>
+          <button id="previewButton">预览模拟凭证</button>
+          <button id="prepareButton">生成本地准备记录</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>处理记录</h2>
+        <div class="inline">
+          <input id="sourceIdInput" placeholder="来源 ID，例如 MOCK-REIMB-001" />
+          <button id="queryButton">查询处理记录</button>
+        </div>
+      </section>
+
+      <section class="panel result-panel">
+        <h2>结果</h2>
+        <pre id="resultOutput">{}</pre>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

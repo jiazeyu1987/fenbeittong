@@ -1,0 +1,21 @@
+{
+  "code": "0",
+  "msg": "success",
+  "data": {
+    "reimb_id": "MOCK-REIMB-BAD",
+    "reimb_code": "MOCK-BX-BAD",
+    "user": { "code": "PL0189", "department_code": "BM000330" },
+    "currency_code": "CNY",
+    "total_amount": "229.00",
+    "payment_amount": "228.00",
+    "expense_number": 1,
+    "expenses": [
+      {
+        "id": "EXP-BAD",
+        "cost_category": { "code": "TRAVEL", "name": "Travel" },
+        "total_amount": "108.00",
+        "invoices": []
+      }
+    ]
+  }
+}
