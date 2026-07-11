@@ -54,17 +54,26 @@ export function parseFenbeitongDetail(fixedJson) {
     throw new Error('data.expenses must not be empty');
   }
 
-  document.expenses = document.expenses.map((expense, index) => ({
-    id: requireText(expense.id || `EXP-${index + 1}`, `data.expenses[${index}].id`),
-    categoryCode: requireText(expense.cost_category?.code, `data.expenses[${index}].cost_category.code`),
-    categoryName: expense.cost_category?.name || expense.cost_category?.code,
-    amount: money(expense.total_amount, `data.expenses[${index}].total_amount`),
-    reason: expense.reason || document.reason,
-    deductibleTaxAmount: (expense.invoices || []).reduce(
-      (sum, invoice) => sum + money(invoice.deductible_tax_amount || 0, 'invoice.deductible_tax_amount'),
-      0
-    )
-  }));
+  document.expenses = document.expenses.map((expense, index) => {
+    const invoices = Array.isArray(expense.invoices) ? expense.invoices.map((invoice, invoiceIndex) => ({
+      id: invoice.id || `INV-${index + 1}-${invoiceIndex + 1}`,
+      totalAmount: money(invoice.total_amount || 0, 'invoice.total_amount'),
+      taxAmount: money(invoice.tax_amount || 0, 'invoice.tax_amount'),
+      deductibleTaxAmount: money(invoice.deductible_tax_amount || 0, 'invoice.deductible_tax_amount')
+    })) : [];
+    return {
+      id: requireText(expense.id || `EXP-${index + 1}`, `data.expenses[${index}].id`),
+      categoryCode: requireText(expense.cost_category?.code, `data.expenses[${index}].cost_category.code`),
+      categoryName: expense.cost_category?.name || expense.cost_category?.code,
+      amount: money(expense.total_amount, `data.expenses[${index}].total_amount`),
+      reason: expense.reason || document.reason,
+      invoices,
+      invoiceCount: invoices.length,
+      invoiceTotalAmount: round(invoices.reduce((sum, invoice) => sum + invoice.totalAmount, 0)),
+      taxAmount: round(invoices.reduce((sum, invoice) => sum + invoice.taxAmount, 0)),
+      deductibleTaxAmount: round(invoices.reduce((sum, invoice) => sum + invoice.deductibleTaxAmount, 0))
+    };
+  });
 
   const expenseTotal = round(document.expenses.reduce((sum, expense) => sum + expense.amount, 0));
   if (expenseTotal !== document.totalAmount) {
@@ -94,6 +103,7 @@ export function buildVoucherPreview(input) {
   }
 
   const lines = [];
+  const lineMetas = [];
   let deductibleTaxTotal = 0;
   for (const expense of document.expenses) {
     const accountNumber = config.categoryAccountNumbers?.[expense.categoryCode];
@@ -111,26 +121,58 @@ export function buildVoucherPreview(input) {
       credit: 0,
       detail: buildDetail(config, document)
     }));
+    lineMetas.push({
+      lineType: 'EXPENSE',
+      sourceExpenseId: expense.id,
+      sourceCategoryCode: expense.categoryCode,
+      sourceCategoryName: expense.categoryName,
+      sourceReason: expense.reason,
+      sourceAmount: expense.amount,
+      sourceTaxAmount: tax,
+      mappingRule: `category ${expense.categoryCode} -> account ${accountNumber}`
+    });
     if (tax > 0) {
+      const taxAccountNumber = requireText(config.taxAccountNumber, 'taxAccountNumber');
       lines.push(voucherLine({
         explanation: `${document.reimbursementCode}/deductible tax`,
-        accountNumber: requireText(config.taxAccountNumber, 'taxAccountNumber'),
+        accountNumber: taxAccountNumber,
         currencyNumber,
         debit: tax,
         credit: 0,
         detail: buildDetail(config, document)
       }));
+      lineMetas.push({
+        lineType: 'TAX',
+        sourceExpenseId: expense.id,
+        sourceCategoryCode: expense.categoryCode,
+        sourceCategoryName: expense.categoryName,
+        sourceReason: expense.reason,
+        sourceAmount: expense.amount,
+        sourceTaxAmount: tax,
+        mappingRule: `deductible tax -> account ${taxAccountNumber}`
+      });
     }
   }
 
+  const creditAccountNumber = requireText(config.creditAccountNumber, 'creditAccountNumber');
   lines.push(voucherLine({
     explanation: `${document.reimbursementCode}/payment`,
-    accountNumber: requireText(config.creditAccountNumber, 'creditAccountNumber'),
+    accountNumber: creditAccountNumber,
     currencyNumber,
     debit: 0,
     credit: document.paymentAmount,
     detail: config.creditDetailNumbers || {}
   }));
+  lineMetas.push({
+    lineType: 'PAYMENT',
+    sourceExpenseId: 'PAYMENT',
+    sourceCategoryCode: 'PAYMENT',
+    sourceCategoryName: 'Payment',
+    sourceReason: document.reason,
+    sourceAmount: document.paymentAmount,
+    sourceTaxAmount: 0,
+    mappingRule: `payment -> account ${creditAccountNumber}`
+  });
 
   const debitTotal = round(lines.reduce((sum, line) => sum + line.FDEBIT, 0));
   const creditTotal = round(lines.reduce((sum, line) => sum + line.FCREDIT, 0));
@@ -159,14 +201,47 @@ export function buildVoucherPreview(input) {
   };
 
   const contentHash = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
-  const voucherLines = lines.map((line) => ({
+  const voucherLines = lines.map((line, index) => ({
     explanation: line.FEXPLANATION,
     accountNumber: line.FACCOUNTID.FNumber,
     accountName: resolveAccountName(config, line.FACCOUNTID.FNumber),
     detailText: formatDetail(line.FDetailID),
     debit: line.FDEBIT,
-    credit: line.FCREDIT
+    credit: line.FCREDIT,
+    ...lineMetas[index]
   }));
+  const invoiceCount = document.expenses.reduce((sum, expense) => sum + expense.invoiceCount, 0);
+  const invoiceTaxAmount = round(document.expenses.reduce((sum, expense) => sum + expense.taxAmount, 0));
+  const sourceSummary = {
+    sourceId: document.reimbursementId,
+    sourceCode: document.reimbursementCode,
+    requester: document.userName,
+    requesterCode: document.userCode,
+    department: document.departmentName,
+    departmentCode: document.departmentCode,
+    reason: document.reason,
+    currencyCode: document.currencyCode,
+    totalAmount: document.totalAmount,
+    paymentAmount: document.paymentAmount,
+    expenseCount: document.expenses.length,
+    invoiceCount,
+    expenseCategories: document.expenses.map((expense) => ({
+      expenseId: expense.id,
+      categoryCode: expense.categoryCode,
+      categoryName: expense.categoryName,
+      amount: expense.amount,
+      taxAmount: expense.taxAmount,
+      deductibleTaxAmount: expense.deductibleTaxAmount
+    }))
+  };
+  const taxSummary = {
+    grossAmount: document.totalAmount,
+    netExpenseAmount: round(document.totalAmount - deductibleTaxTotal),
+    invoiceTaxAmount,
+    deductibleTaxAmount: deductibleTaxTotal,
+    invoiceCount,
+    taxAccountNumber: config.taxAccountNumber || ''
+  };
   return {
     sourceId: document.reimbursementId,
     sourceCode: document.reimbursementCode,
@@ -178,6 +253,8 @@ export function buildVoucherPreview(input) {
     totalAmount: document.totalAmount,
     deductibleTaxAmount: deductibleTaxTotal,
     balanced,
+    sourceSummary,
+    taxSummary,
     voucherLines,
     financialSummary: {
       sourceCode: document.reimbursementCode,

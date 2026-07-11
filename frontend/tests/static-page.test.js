@@ -9,6 +9,7 @@ test('frontend page exposes expected workflow controls', () => {
     'businessSteps',
     'nextActionText',
     'primaryActionButton',
+    'actionBlockReason',
     'syncBatchSummary',
     'loadTemplateButton',
     'saveConfigButton',
@@ -26,6 +27,9 @@ test('frontend page exposes expected workflow controls', () => {
     'saveConfirmPanel',
     'saveConfirmSummary',
     'saveRiskNotice',
+    'voucherValidationList',
+    'teacherAcceptanceList',
+    'developerValidationPanel',
     'voucherPreviewBody',
     'previewDebitTotal',
     'previewCreditTotal',
@@ -47,9 +51,24 @@ test('frontend source is productized rather than a raw debug console', () => {
   assert.match(app, /renderSelfCheck/);
   assert.match(app, /renderSourceQueue/);
   assert.match(app, /renderConfigValidation/);
+  assert.match(app, /renderVoucherValidation/);
+  assert.match(app, /renderTeacherAcceptance/);
+  assert.match(app, /buildSourceSummary/);
+  assert.match(app, /actionBlockReason/);
   assert.match(app, /renderSaveConfirmation/);
   assert.match(app, /showError/);
   assert.match(app, /draftOnlyWarning/);
+});
+
+test('frontend visible copy remains readable Chinese without mojibake', () => {
+  const html = readFileSync('frontend/src/index.html', 'utf8');
+  const app = readFileSync('frontend/src/app.js', 'utf8');
+  for (const text of [html, app]) {
+    assert.doesNotMatch(text, /鍒|閫|铦|鏆|璐|绋|棰|寰|姝|俙|榻|€\?/);
+  }
+  assert.match(html, /待处理单据队列/);
+  assert.match(html, /老师验收清单/);
+  assert.match(app, /失败步骤/);
 });
 
 test('frontend api points only to local mock backend', () => {

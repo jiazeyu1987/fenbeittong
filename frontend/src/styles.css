@@ -184,6 +184,12 @@ h2 {
   font-weight: 700;
 }
 
+.block-reason {
+  margin-top: 8px;
+  color: #854d0e;
+  font-size: 14px;
+}
+
 .confirm-panel {
   border-color: #fed7aa;
   background: #fff7ed;
@@ -352,6 +358,21 @@ td {
 th {
   background: #f8fafc;
   color: #475467;
+}
+
+td.amount,
+th.amount {
+  text-align: right;
+}
+
+.status-tag {
+  display: inline-block;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .result-panel pre {

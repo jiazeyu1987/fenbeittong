@@ -30,6 +30,11 @@ test('preview response keeps stable contract fields', () => {
   }
   assert.ok(Array.isArray(preview.voucherLines));
   assert.ok(preview.voucherLines.length > 0);
+  assert.ok(Array.isArray(preview.sourceSummary.expenseCategories));
+  assert.equal(preview.sourceSummary.requester, 'Mock User');
+  assert.equal(preview.taxSummary.deductibleTaxAmount, 6.11);
+  assert.equal(preview.voucherLines[0].sourceExpenseId, 'EXP-001');
+  assert.match(preview.voucherLines[0].mappingRule, /category TRAVEL/);
   assert.equal(preview.financialSummary.documentStatusName, 'Saved draft only; not submitted, audited, or posted');
   assert.equal(preview.financialSummary.lineCount, preview.voucherLines.length);
 });

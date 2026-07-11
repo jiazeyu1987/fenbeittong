@@ -47,6 +47,9 @@ const sourceQueueBody = document.querySelector('#sourceQueueBody');
 const saveConfirmPanel = document.querySelector('#saveConfirmPanel');
 const saveConfirmSummary = document.querySelector('#saveConfirmSummary');
 const saveRiskNotice = document.querySelector('#saveRiskNotice');
+const actionBlockReason = document.querySelector('#actionBlockReason');
+const voucherValidationList = document.querySelector('#voucherValidationList');
+const teacherAcceptanceList = document.querySelector('#teacherAcceptanceList');
 
 controls.loadTemplate.addEventListener('click', run(loadTemplate));
 controls.saveConfig.addEventListener('click', run(saveConfig));
@@ -63,6 +66,7 @@ sourceQueueBody.addEventListener('click', run(selectQueuedDocument));
 sourceIdInput.addEventListener('input', () => {
   state.lastPreview = null;
   renderSaveConfirmation(null);
+  renderVoucherValidation(null);
   renderActionState();
 });
 
@@ -96,6 +100,7 @@ async function syncFenbeitong() {
   selectFirstRecord(result.records);
   state.lastPreview = null;
   renderSaveConfirmation(null);
+  renderVoucherValidation(null);
   show(result, `同步完成，新增或更新 ${result.records.length} 张来源单据。`);
   await refreshAll();
 }
@@ -105,6 +110,7 @@ async function runSchedulerOnce() {
   selectFirstRecord(result.sync.records);
   state.lastPreview = null;
   renderSaveConfirmation(null);
+  renderVoucherValidation(null);
   show(result, `定时任务已手动运行，本次同步 ${result.sync.records.length} 张来源单据。`);
   await refreshAll();
 }
@@ -114,6 +120,7 @@ async function preview() {
   state.lastPreview = result;
   renderVoucherPreview(result);
   renderSaveConfirmation(result);
+  renderVoucherValidation(result);
   show(result, buildPreviewSummary(result));
   await refreshAll();
 }
@@ -155,6 +162,7 @@ async function refreshAll() {
   renderSourceQueue(documents);
   await refreshRecords();
   await refreshLogs();
+  renderTeacherAcceptance(status);
   renderActionState();
 }
 
@@ -222,6 +230,7 @@ async function selectQueuedDocument(event) {
   fields.mockFixedJson.value = record.fixedJson || fields.mockFixedJson.value;
   state.lastPreview = null;
   renderSaveConfirmation(null);
+  renderVoucherValidation(null);
   renderSourceQueue(state.syncedDocuments);
   renderActionState();
   show(record, `已选择来源单据 ${sourceId}，下一步请预览凭证。`);
@@ -245,6 +254,7 @@ function renderStatus(status) {
   renderNextAction(status);
   renderSelfCheck(status);
   renderConfigValidation();
+  renderTeacherAcceptance(status);
 }
 
 function renderNextAction(status) {
@@ -276,6 +286,7 @@ function renderActionState() {
   controls.preview.disabled = !hasSource;
   controls.prepare.disabled = !state.lastPreview?.balanced;
   controls.pushErp.disabled = !state.lastPreview?.balanced || !sourceId || pushed;
+  const reason = getActionBlockReason({ sourceId, prepared, pushed });
 
   let action = 'save-config';
   let label = '保存配置';
@@ -304,6 +315,31 @@ function renderActionState() {
   controls.primaryAction.dataset.action = action;
   controls.primaryAction.textContent = label;
   controls.primaryAction.disabled = disabled;
+  actionBlockReason.textContent = reason;
+}
+
+function getActionBlockReason({ sourceId, prepared, pushed }) {
+  if (!state.configSaved) {
+    return '未满足原因：请先保存配置，确保账簿、凭证字、科目和核算维度可用。';
+  }
+  if (state.syncedDocuments.length === 0) {
+    return '未满足原因：还没有同步到分贝通单据，请先执行同步。';
+  }
+  if (!sourceId) {
+    return '未满足原因：请先在待处理单据队列中选择一张单据。';
+  }
+  if (!state.lastPreview?.balanced) {
+    return '未满足原因：请先预览凭证，并确认借贷平衡、税额和科目映射。';
+  }
+  if (!prepared) {
+    return '当前可生成待保存凭证；系统将保留幂等键和内容哈希，避免重复入账。';
+  }
+  if (!pushed) {
+    return state.currentStatus?.mode.kingdee === 'real'
+      ? '当前可保存到金蝶测试账套；只保存暂存凭证，不提交、不审核、不过账。'
+      : '当前可模拟保存到 ERP；这不会写入真实金蝶。';
+  }
+  return '该单据已保存，下一步由财务在金蝶中人工审核。';
 }
 
 function renderSelfCheck(status) {
@@ -335,21 +371,26 @@ function renderConfigValidation() {
 
 function renderSourceQueue(records) {
   if (records.length === 0) {
-    sourceQueueBody.innerHTML = '<tr><td colspan="7">暂无待处理单据，请先同步分贝通数据。</td></tr>';
+    sourceQueueBody.innerHTML = '<tr><td colspan="8">暂无待处理单据，请先同步分贝通数据。</td></tr>';
     return;
   }
   const selected = sourceIdInput.value.trim();
-  sourceQueueBody.innerHTML = records.map((record) => `
+  sourceQueueBody.innerHTML = records.map((record) => {
+    const summary = buildSourceSummary(record);
+    return `
     <tr class="${record.sourceId === selected ? 'selected' : ''}">
       <td><button class="secondary row-action" data-source-id="${escapeHtml(record.sourceId)}">${record.sourceId === selected ? '已选择' : '选择'}</button></td>
-      <td>${escapeHtml(record.sourceId)}</td>
+      <td><span class="status-tag">${escapeHtml(queueStatus(record))}</span></td>
       <td>${escapeHtml(record.sourceCode || '')}</td>
-      <td>${escapeHtml(record.batchId || '-')}</td>
-      <td>${escapeHtml(stageName(record.processStage))}</td>
+      <td>${escapeHtml(summary.requester)}</td>
+      <td>${escapeHtml(summary.department)}</td>
+      <td>${escapeHtml(summary.expenseCategories)}</td>
+      <td class="amount">${formatMoney(summary.totalAmount)}</td>
       <td>${escapeHtml(record.mockReplacement ? `${record.sourceMode} / mock替代` : record.sourceMode)}</td>
       <td>${escapeHtml(record.updateTime || '')}</td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function renderVoucherPreview(preview) {
@@ -361,13 +402,31 @@ function renderVoucherPreview(preview) {
   voucherPreviewBody.innerHTML = preview.voucherLines.map((line) => `
     <tr>
       <td>${escapeHtml(line.explanation)}</td>
+      <td>${escapeHtml(line.sourceExpenseId || '-')}</td>
       <td>${escapeHtml(line.accountNumber)}</td>
       <td>${escapeHtml(line.accountName || '-')}</td>
       <td>${escapeHtml(line.detailText || '-')}</td>
-      <td>${formatMoney(line.debit)}</td>
-      <td>${formatMoney(line.credit)}</td>
+      <td>${escapeHtml(line.mappingRule || '-')}</td>
+      <td class="amount">${formatMoney(line.debit)}</td>
+      <td class="amount">${formatMoney(line.credit)}</td>
     </tr>
   `).join('');
+}
+
+function renderVoucherValidation(preview) {
+  const checks = preview ? [
+    ['账簿编码', Boolean(preview.financialSummary.accountBookNumber), `将写入 ${preview.financialSummary.accountBookNumber}`],
+    ['凭证字编码', Boolean(preview.financialSummary.voucherGroupNumber), `将写入 ${preview.financialSummary.voucherGroupNumber}`],
+    ['会计期间', Boolean(preview.financialSummary.year && preview.financialSummary.period), `${preview.financialSummary.year} 年 ${preview.financialSummary.period} 期`],
+    ['借贷平衡', preview.balanced, `借方 ${formatMoney(preview.debitTotal)} / 贷方 ${formatMoney(preview.creditTotal)}`],
+    ['税额拆分', Number(preview.taxSummary?.deductibleTaxAmount || 0) >= 0, `可抵扣税额 ${formatMoney(preview.taxSummary?.deductibleTaxAmount || 0)}`],
+    ['科目映射', preview.voucherLines.every((line) => Boolean(line.accountNumber)), '每条分录都有科目编码']
+  ] : [
+    ['凭证预览', false, '请先选择单据并点击预览凭证']
+  ];
+  voucherValidationList.innerHTML = checks.map(([label, ok, detail]) =>
+    `<li class="${ok ? 'ok' : 'pending'}">${escapeHtml(label)}：${ok ? '通过' : '待验证'}，${escapeHtml(detail)}</li>`
+  ).join('');
 }
 
 function renderSaveConfirmation(preview) {
@@ -379,11 +438,14 @@ function renderSaveConfirmation(preview) {
   saveConfirmPanel.hidden = false;
   saveConfirmSummary.textContent = [
     `来源单据 ${preview.sourceCode}`,
+    `报销人 ${preview.sourceSummary?.requester || '-'}`,
+    `部门 ${preview.sourceSummary?.department || '-'}`,
     `账簿 ${fields.accountBookNumber.value}`,
     `凭证字 ${fields.voucherGroupNumber.value}`,
     `${fields.mockYear.value} 年 ${fields.mockPeriod.value} 期`,
     `借方 ${formatMoney(preview.debitTotal)}`,
     `贷方 ${formatMoney(preview.creditTotal)}`,
+    `可抵扣税额 ${formatMoney(preview.taxSummary?.deductibleTaxAmount || 0)}`,
     `${preview.financialSummary.lineCount} 条分录`
   ].join('；');
   saveRiskNotice.textContent = state.currentStatus?.mode.kingdee === 'real'
@@ -426,6 +488,57 @@ function applyTemplate(template) {
   fields.categoryAccountNumbers.value = JSON.stringify(template.categoryAccountNumbers, null, 2);
   fields.creditDetailNumbers.value = JSON.stringify(template.creditDetailNumbers, null, 2);
   fields.mockFixedJson.value = template.mockFixedJson;
+}
+
+function buildSourceSummary(record) {
+  try {
+    const parsed = JSON.parse(record.fixedJson || '{}');
+    const data = parsed.data || {};
+    const expenses = Array.isArray(data.expenses) ? data.expenses : [];
+    return {
+      requester: data.user?.name || data.user?.code || '-',
+      department: data.user?.department_name || data.user?.department_code || '-',
+      expenseCategories: expenses.map((expense) => expense.cost_category?.name || expense.cost_category?.code || '未分类').join(' / ') || '-',
+      totalAmount: Number(data.total_amount || 0)
+    };
+  } catch {
+    return {
+      requester: '-',
+      department: '-',
+      expenseCategories: 'JSON 解析失败',
+      totalAmount: 0
+    };
+  }
+}
+
+function queueStatus(record) {
+  const sourceId = record.sourceId;
+  if (state.pushedSourceIds.has(sourceId)) {
+    return '已保存ERP';
+  }
+  if (state.preparedSourceIds.has(sourceId)) {
+    return '已生成';
+  }
+  if (state.lastPreview?.sourceId === sourceId) {
+    return '已预览';
+  }
+  return stageName(record.processStage);
+}
+
+function renderTeacherAcceptance(status) {
+  if (!teacherAcceptanceList) {
+    return;
+  }
+  const checks = [
+    ['配置已保存', state.configSaved, '老师可看到配置完整性检查结果'],
+    ['mock 同步成功', status.summary.counts.syncedDocuments > 0, '队列中可选择待处理单据'],
+    ['凭证借贷平衡', Boolean(state.lastPreview?.balanced), '预览区显示借方、贷方、税额和分录数'],
+    ['暂存保存成功', status.summary.counts.pushedVouchers > 0, '只保存凭证，不提交、不审核、不过账'],
+    ['日志可追溯', true, '操作日志保留批次、mock 标识和处理记录']
+  ];
+  teacherAcceptanceList.innerHTML = checks.map(([label, ok, detail]) =>
+    `<li class="${ok ? 'ok' : 'pending'}">${escapeHtml(label)}：${ok ? '通过' : '待验证'}，${escapeHtml(detail)}</li>`
+  ).join('');
 }
 
 function readConfig() {
