@@ -8,37 +8,43 @@
   </head>
   <body>
     <main class="app-shell">
-      <section class="hero">
+      <section id="financeWorkbenchHeader" class="workbench-header">
         <div>
-          <p class="eyebrow">Fenbeitong Kingdee Voucher Integration</p>
-          <h1>分贝通金蝶凭证集成工作台</h1>
-          <p class="subtitle">按正式流程验证：同步分贝通、预览凭证、生成待保存凭证、保存为金蝶暂存凭证。当前只保存草稿，不审核、不过账。</p>
+          <h1>报销单列表</h1>
+          <p class="subtitle">财务按来源单据逐张复核费用、税额、科目、辅助核算和借贷平衡；系统只保存金蝶暂存凭证，由财务人工审核。</p>
         </div>
         <span id="statusBadge" class="badge">未连接</span>
       </section>
 
-      <section id="environmentWarning" class="notice warning">
-        当前为可替换 mock 模式。分贝通 token 与金蝶真实保存示例到位后，可切换 real 模式联调；mock 保存不代表真实 ERP 已写入。
-      </section>
-
-      <section class="metric-grid" aria-label="系统状态">
+      <section class="metric-grid" aria-label="财务处理概览">
         <article class="metric">
-          <span>待处理单据</span>
+          <span>待复核单据</span>
           <strong id="syncedCount">0</strong>
-          <small>来自分贝通报销单</small>
+          <small>已同步的分贝通报销单</small>
         </article>
         <article class="metric">
-          <span>ERP 保存结果</span>
-          <strong id="pushedCount">0</strong>
-          <small>区分 mock 模拟和真实保存</small>
+          <span>异常单据</span>
+          <strong id="exceptionCount">0</strong>
+          <small>同步或校验失败需处理</small>
         </article>
         <article class="metric">
-          <span>数据源模式</span>
+          <span>已保存草稿</span>
+          <strong id="draftCount">0</strong>
+          <small>金蝶暂存凭证，不审核不过账</small>
+          <span id="pushedCount" hidden>0</span>
+        </article>
+        <article class="metric">
+          <span>重复风险</span>
+          <strong id="riskCount">0</strong>
+          <small>已保存单据再次推送会被拦截</small>
+        </article>
+        <article class="metric">
+          <span>数据来源</span>
           <strong id="fenbeitongMode">-</strong>
           <small id="fenbeitongReady">-</small>
         </article>
         <article class="metric">
-          <span>金蝶模式</span>
+          <span>金蝶状态</span>
           <strong id="kingdeeMode">-</strong>
           <small id="kingdeeReady">-</small>
         </article>
@@ -54,90 +60,102 @@
         </article>
       </section>
 
-      <section class="panel">
-        <div class="section-title">
-          <div>
-            <h2>业务流程</h2>
-            <p>建议按步骤操作，先用 mock 数据验证完整闭环，真实接口到位后再切换配置。</p>
-          </div>
-          <button id="refreshButton" class="secondary">刷新状态</button>
-        </div>
-        <ol id="businessSteps" class="steps">
-          <li data-step="config"><strong>1 配置检查</strong><span>载入并保存账簿、凭证字、科目和核算维度映射。</span></li>
-          <li data-step="sync"><strong>2 同步分贝通</strong><span>立即同步或测试一次定时任务，生成来源单据。</span></li>
-          <li data-step="preview"><strong>3 预览凭证</strong><span>确认借贷平衡、期间、税额和分录数量。</span></li>
-          <li data-step="prepare"><strong>4 生成待保存凭证</strong><span>生成本地待保存记录，保留幂等键和内容哈希。</span></li>
-          <li data-step="push"><strong>5 保存到金蝶</strong><span>Mock 保存 ERP 草稿或保存金蝶测试账套草稿，后续由财务人工审核。</span></li>
-        </ol>
-        <div class="next-action">
-          <span>建议下一步</span>
-          <strong id="nextActionText">当前未同步分贝通数据，建议先点击立即同步分贝通数据。</strong>
-        </div>
-        <div id="syncBatchSummary" class="batch-summary">尚未产生同步批次。</div>
-        <div id="previewHashSummary" class="hash-summary">尚未生成凭证预览。</div>
-        <button id="primaryActionButton" class="primary-action">立即同步分贝通数据</button>
-        <p id="actionBlockReason" class="block-reason">请先保存配置并同步分贝通数据。</p>
-        <div class="actions">
-          <button id="loadTemplateButton" class="secondary">载入标准配置</button>
-          <button id="saveConfigButton" class="secondary">保存配置</button>
-          <button id="syncButton">立即同步分贝通数据</button>
-          <button id="runSchedulerButton" class="secondary">测试一次定时任务</button>
-          <button id="previewButton" class="secondary">预览凭证</button>
-          <button id="prepareButton" class="secondary">生成待保存凭证</button>
-          <button id="pushErpButton">Mock 保存 ERP 草稿</button>
-        </div>
+      <section id="environmentWarning" class="notice warning">
+        当前为可替换 mock 模式。分贝通 token 与金蝶真实保存示例到位后，可切换 real 模式联调；mock 保存不代表真实 ERP 已写入。
       </section>
 
-      <section class="panel">
-        <div class="section-title">
-          <div>
-            <h2>待处理单据队列</h2>
-            <p>同步分贝通后先在这里选择单据，再预览并生成金蝶凭证。当前 mock 单据会明确标记，不伪装成真实来源。</p>
+      <section class="finance-grid">
+        <section id="financeQueuePanel" class="panel finance-queue-panel">
+          <div class="section-title">
+            <div>
+              <h2>报销单列表</h2>
+              <p>先从列表选中单据，再查看右侧财务复核结果。mock 单据会明确标记，不伪装成真实来源。</p>
+            </div>
+            <button id="refreshButton" class="secondary">刷新状态</button>
           </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>操作</th>
-                <th>状态</th>
-                <th>来源单号</th>
-                <th>报销人</th>
-                <th>部门</th>
-                <th>费用类型</th>
-                <th>金额</th>
-                <th>Mock 标识</th>
-                <th>更新时间</th>
-              </tr>
-            </thead>
-            <tbody id="sourceQueueBody">
-              <tr><td colspan="9">暂无待处理单据，请先同步分贝通数据。</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
 
-      <section class="layout">
-        <section class="panel">
-          <h2>财务凭证预览</h2>
-          <p class="hint">保存前请确认借贷平衡、账簿、凭证字、期间、分录数量和当前环境。</p>
+          <div id="sourceQueueFilters" class="filter-bar" aria-label="列表筛选">
+            <button type="button" class="filter-chip active">全部</button>
+            <button type="button" class="filter-chip">待复核</button>
+            <button type="button" class="filter-chip">异常单据</button>
+            <button type="button" class="filter-chip">已保存草稿</button>
+            <button type="button" class="filter-chip">重复风险</button>
+          </div>
+
+          <div class="finance-command-bar">
+            <div class="next-action">
+              <span>建议下一步</span>
+              <strong id="nextActionText">当前未同步分贝通数据，建议先点击立即同步分贝通数据。</strong>
+            </div>
+            <div id="syncBatchSummary" class="batch-summary">尚未产生同步批次。</div>
+            <div id="previewHashSummary" class="hash-summary">尚未生成凭证预览。</div>
+            <button id="primaryActionButton" class="primary-action">立即同步分贝通数据</button>
+            <p id="actionBlockReason" class="block-reason">请先保存配置并同步分贝通数据。</p>
+            <div class="actions">
+              <button id="loadTemplateButton" class="secondary">载入标准配置</button>
+              <button id="saveConfigButton" class="secondary">保存配置</button>
+              <button id="syncButton">同步分贝通</button>
+              <button id="runSchedulerButton" class="secondary">测试定时任务</button>
+              <button id="previewButton" class="secondary">预览凭证</button>
+              <button id="prepareButton" class="secondary">生成待保存凭证</button>
+              <button id="pushErpButton">Mock 保存 ERP 草稿</button>
+            </div>
+          </div>
+
+          <div class="table-wrap list-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>操作</th>
+                  <th>状态</th>
+                  <th>来源单号</th>
+                  <th>报销人</th>
+                  <th>部门</th>
+                  <th>费用类型</th>
+                  <th class="amount">金额</th>
+                  <th>Mock 标识</th>
+                  <th>更新时间</th>
+                </tr>
+              </thead>
+              <tbody id="sourceQueueBody">
+                <tr><td colspan="9">暂无待处理单据，请先同步分贝通数据。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="financeReviewPanel" class="panel finance-review-panel">
+          <div class="section-title">
+            <div>
+              <h2>财务复核</h2>
+              <p>重点看来源、金额、税额、期间、科目、辅助核算和借贷平衡。</p>
+            </div>
+          </div>
+
+          <div id="financeReviewSummary" class="review-summary">
+            请先从报销单列表选择一张单据。
+          </div>
+
           <div class="summary-grid">
             <div><span>借贷平衡</span><strong id="previewBalanced">-</strong></div>
             <div><span>借方金额</span><strong id="previewDebitTotal">0.00</strong></div>
             <div><span>贷方金额</span><strong id="previewCreditTotal">0.00</strong></div>
             <div><span>分录数</span><strong id="previewLineCount">0</strong></div>
             <div><span>税额</span><strong id="previewTaxTotal">0.00</strong></div>
-            <div><span>状态</span><strong id="draftOnlyWarning">未审核 / 未过账 / 需人工审核</strong></div>
+            <div><span>凭证状态</span><strong id="draftOnlyWarning">未审核 / 未过账 / 需人工审核</strong></div>
           </div>
+
           <div id="saveConfirmPanel" class="confirm-panel" hidden>
             <h3>保存前确认</h3>
             <p id="saveConfirmSummary">请先预览凭证。</p>
             <p id="saveRiskNotice" class="risk-text">凭证只保存为金蝶暂存，不提交、不审核、不过账。</p>
           </div>
+
           <h3>生成前财务校验</h3>
           <ul id="voucherValidationList" class="check-list">
             <li>请先预览凭证，系统会校验账簿、凭证字、期间、借贷平衡、税额和科目映射。</li>
           </ul>
+
           <div class="table-wrap">
             <table>
               <thead>
@@ -148,8 +166,8 @@
                   <th>科目名称</th>
                   <th>核算维度</th>
                   <th>映射规则</th>
-                  <th>借方金额</th>
-                  <th>贷方金额</th>
+                  <th class="amount">借方金额</th>
+                  <th class="amount">贷方金额</th>
                 </tr>
               </thead>
               <tbody id="voucherPreviewBody">
@@ -158,105 +176,112 @@
             </table>
           </div>
         </section>
-
-        <section class="panel">
-          <h2>系统自检</h2>
-          <p class="hint">学生和老师可以用这里确认 mock 流程是否已经具备独立验证条件。</p>
-          <ul id="selfCheckList" class="check-list">
-            <li>配置可用：待检查</li>
-            <li>mock 数据可同步：待检查</li>
-            <li>凭证可预览：待检查</li>
-            <li>ERP mock 保存可验证：待检查</li>
-            <li>真实模式缺失配置会失败提示：待检查</li>
-          </ul>
-          <h3>配置完整性</h3>
-          <ul id="configValidationList" class="check-list">
-            <li>账簿、凭证字、期间、科目和核算维度：待检查</li>
-          </ul>
-          <h3>老师验收清单</h3>
-          <ul id="teacherAcceptanceList" class="check-list">
-            <li>打开页面后按主按钮完成 mock 闭环：待验证</li>
-            <li>凭证只保存，不审核、不过账：待验证</li>
-            <li>mock 与真实接口边界清晰：待验证</li>
-          </ul>
-        </section>
       </section>
 
-      <section class="panel">
-        <details>
-          <summary>配置管理</summary>
-          <div class="grid">
-            <label>账簿编码<input id="accountBookNumber" /></label>
-            <label>凭证字编码<input id="voucherGroupNumber" /></label>
-            <label>模板 FID<input id="templateErpFid" /></label>
-            <label>凭证日期<input id="mockVoucherDate" type="date" /></label>
-            <label>年度<input id="mockYear" type="number" /></label>
-            <label>期间<input id="mockPeriod" type="number" /></label>
-          </div>
-          <div class="grid textareas">
-            <label>币别映射<textarea id="currencyNumbers"></textarea></label>
-            <label>费用科目映射<textarea id="categoryAccountNumbers"></textarea></label>
-            <label>贷方核算维度<textarea id="creditDetailNumbers"></textarea></label>
-          </div>
-        </details>
-      </section>
+      <section class="panel technical-panel">
+        <details id="technicalDetails" class="technical-details">
+          <summary>验证与联调信息</summary>
 
-      <section class="layout">
-        <section class="panel">
-          <h2>分贝通 mock 数据</h2>
-          <p class="hint">这些字段来自分贝通报销单。真实 token 到位后，mock 适配器可替换为真实分贝通接口。</p>
-          <label>固定 JSON mock 数据<textarea id="mockFixedJson" class="json-input"></textarea></label>
-        </section>
+          <div class="technical-grid">
+            <section class="technical-section">
+              <h2>系统自检</h2>
+              <p class="hint">学生和老师可以用这里确认 mock 流程是否已经具备独立验证条件。</p>
+              <ul id="selfCheckList" class="check-list">
+                <li>配置可用：待检查</li>
+                <li>mock 数据可同步：待检查</li>
+                <li>凭证可预览：待检查</li>
+                <li>ERP mock 保存可验证：待检查</li>
+                <li>真实模式缺失配置会失败提示：待检查</li>
+              </ul>
+            </section>
 
-        <section class="panel">
-          <h2>处理结果摘要</h2>
-          <div id="resultSummary" class="result-summary">暂无结果，请先执行同步或预览。</div>
-          <details id="technicalDetails" class="technical-details">
-            <summary>接口调试信息</summary>
+            <section class="technical-section">
+              <h2>配置完整性</h2>
+              <ul id="configValidationList" class="check-list">
+                <li>账簿、凭证字、期间、科目和核算维度：待检查</li>
+              </ul>
+            </section>
+
+            <section class="technical-section">
+              <h2>老师验收清单</h2>
+              <ul id="teacherAcceptanceList" class="check-list">
+                <li>打开页面后按主按钮完成 mock 闭环：待验证</li>
+                <li>凭证只保存，不审核、不过账：待验证</li>
+                <li>mock 与真实接口边界清晰：待验证</li>
+              </ul>
+            </section>
+          </div>
+
+          <section class="technical-section">
+            <h2>配置管理</h2>
+            <div class="grid">
+              <label>账簿编码<input id="accountBookNumber" /></label>
+              <label>凭证字编码<input id="voucherGroupNumber" /></label>
+              <label>模板 FID<input id="templateErpFid" /></label>
+              <label>凭证日期<input id="mockVoucherDate" type="date" /></label>
+              <label>年度<input id="mockYear" type="number" /></label>
+              <label>期间<input id="mockPeriod" type="number" /></label>
+            </div>
+            <div class="grid textareas">
+              <label>币别映射<textarea id="currencyNumbers"></textarea></label>
+              <label>费用科目映射<textarea id="categoryAccountNumbers"></textarea></label>
+              <label>贷方核算维度<textarea id="creditDetailNumbers"></textarea></label>
+            </div>
+          </section>
+
+          <section class="technical-section">
+            <h2>分贝通 mock 数据</h2>
+            <p class="hint">这些字段来自分贝通报销单。真实 token 到位后，mock 适配器可替换为真实分贝通接口。</p>
+            <label>固定 JSON mock 数据<textarea id="mockFixedJson" class="json-input"></textarea></label>
+          </section>
+
+          <section class="technical-section">
+            <h2>处理结果摘要</h2>
+            <div id="resultSummary" class="result-summary">暂无结果，请先执行同步或预览。</div>
             <pre id="resultOutput">{}</pre>
-          </details>
-        </section>
-      </section>
+          </section>
 
-      <section id="developerValidationPanel" class="panel">
-        <h2>开发者验证区</h2>
-        <p class="hint">学生可用这里确认本项目不依赖 IntRuoyi：运行 <code>npm run verify</code>，再按页面主按钮完成 mock 闭环。</p>
-        <div class="summary-grid">
-          <div><span>前端地址</span><strong>http://127.0.0.1:5173</strong></div>
-          <div><span>后端健康检查</span><strong>http://127.0.0.1:3001/api/health</strong></div>
-          <div><span>验证命令</span><strong>npm run verify</strong></div>
-        </div>
-      </section>
+          <section id="developerValidationPanel" class="technical-section">
+            <h2>开发者验证区</h2>
+            <p class="hint">学生可用这里确认本项目不依赖 IntRuoyi：运行 <code>npm run verify</code>，再按页面主按钮完成 mock 闭环。</p>
+            <div class="summary-grid">
+              <div><span>前端地址</span><strong>http://127.0.0.1:5173</strong></div>
+              <div><span>后端健康检查</span><strong>http://127.0.0.1:3001/api/health</strong></div>
+              <div><span>验证命令</span><strong>npm run verify</strong></div>
+            </div>
+          </section>
 
-      <section class="panel">
-        <h2>处理记录</h2>
-        <p class="hint">本地处理字段用于追踪来源 ID、幂等键、处理阶段、ERP 返回编号，不属于凭证业务字段。</p>
-        <div class="inline">
-          <input id="sourceIdInput" placeholder="来源 ID，例如 MOCK-REIMB-001" />
-          <button id="queryButton" class="secondary">查询单条记录</button>
-          <button id="listRecordsButton" class="secondary">刷新记录列表</button>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>来源 ID</th>
-                <th>来源单号</th>
-                <th>处理阶段</th>
-                <th>ERP FID</th>
-                <th>更新时间</th>
-              </tr>
-            </thead>
-            <tbody id="recordsTable">
-              <tr><td colspan="5">暂无记录，请先同步分贝通数据。</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+          <section class="technical-section">
+            <h2>处理记录</h2>
+            <p class="hint">本地处理字段用于追踪来源 ID、幂等键、处理阶段、ERP 返回编号，不属于凭证业务字段。</p>
+            <div class="inline">
+              <input id="sourceIdInput" placeholder="来源 ID，例如 MOCK-REIMB-001" />
+              <button id="queryButton" class="secondary">查询单条记录</button>
+              <button id="listRecordsButton" class="secondary">刷新记录列表</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>来源 ID</th>
+                    <th>来源单号</th>
+                    <th>处理阶段</th>
+                    <th>ERP FID</th>
+                    <th>更新时间</th>
+                  </tr>
+                </thead>
+                <tbody id="recordsTable">
+                  <tr><td colspan="5">暂无记录，请先同步分贝通数据。</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
 
-      <section class="panel">
-        <h2>操作日志</h2>
-        <div id="logsList" class="log-list">暂无日志</div>
+          <section class="technical-section">
+            <h2>操作日志</h2>
+            <div id="logsList" class="log-list">暂无日志</div>
+          </section>
+        </details>
       </section>
     </main>
     <script type="module" src="/app.js"></script>

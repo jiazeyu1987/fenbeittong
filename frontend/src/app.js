@@ -53,6 +53,7 @@ const actionBlockReason = document.querySelector('#actionBlockReason');
 const voucherValidationList = document.querySelector('#voucherValidationList');
 const teacherAcceptanceList = document.querySelector('#teacherAcceptanceList');
 const previewHashSummary = document.querySelector('#previewHashSummary');
+const financeReviewSummary = document.querySelector('#financeReviewSummary');
 
 controls.loadTemplate.addEventListener('click', run(loadTemplate));
 controls.saveConfig.addEventListener('click', run(saveConfig));
@@ -180,6 +181,7 @@ async function refreshRecords() {
   const records = await api.listProcessRecords();
   state.preparedSourceIds = new Set(records.filter((record) => record.processStage === 'PREPARED').map((record) => record.sourceId));
   state.pushedSourceIds = new Set(records.filter((record) => record.processStage === 'ERP_PUSHED').map((record) => record.sourceId));
+  renderSourceQueue(state.syncedDocuments);
   if (records.length === 0) {
     recordsTable.innerHTML = '<tr><td colspan="5">暂无记录，请先同步分贝通数据。</td></tr>';
     return;
@@ -251,6 +253,9 @@ function renderStatus(status) {
   document.querySelector('#kingdeeReady').textContent = status.readiness.kingdee.message;
   document.querySelector('#syncedCount').textContent = status.summary.counts.syncedDocuments;
   document.querySelector('#pushedCount').textContent = status.summary.counts.pushedVouchers;
+  document.querySelector('#draftCount').textContent = status.summary.counts.pushedVouchers;
+  document.querySelector('#exceptionCount').textContent = status.summary.latestBatch?.failCount || 0;
+  document.querySelector('#riskCount').textContent = status.summary.counts.pushedVouchers;
   const batch = status.summary.latestBatch;
   const mockReplacement = Boolean(batch?.mockReplacement || status.mode.kingdee === 'mock' || status.mode.fenbeitong === 'mock');
   document.querySelector('#mockReplacement').textContent = mockReplacement ? '开启' : '关闭';
@@ -263,6 +268,7 @@ function renderStatus(status) {
   renderSelfCheck(status);
   renderConfigValidation();
   renderTeacherAcceptance(status);
+  renderFinanceReview(state.lastPreview);
 }
 
 function renderNextAction(status) {
@@ -388,6 +394,7 @@ function renderConfigValidation() {
 function renderSourceQueue(records) {
   if (records.length === 0) {
     sourceQueueBody.innerHTML = '<tr><td colspan="9">暂无待处理单据，请先同步分贝通数据。</td></tr>';
+    renderFinanceReview(state.lastPreview);
     return;
   }
   const selected = sourceIdInput.value.trim();
@@ -407,9 +414,11 @@ function renderSourceQueue(records) {
     </tr>
   `;
   }).join('');
+  renderFinanceReview(state.lastPreview);
 }
 
 function renderVoucherPreview(preview) {
+  renderFinanceReview(preview);
   document.querySelector('#previewBalanced').textContent = preview.balanced ? '是' : '否';
   document.querySelector('#previewDebitTotal').textContent = formatMoney(preview.debitTotal);
   document.querySelector('#previewCreditTotal').textContent = formatMoney(preview.creditTotal);
@@ -427,6 +436,47 @@ function renderVoucherPreview(preview) {
       <td class="amount">${formatMoney(line.credit)}</td>
     </tr>
   `).join('');
+}
+
+function renderFinanceReview(preview) {
+  if (!financeReviewSummary) {
+    return;
+  }
+  const selectedSourceId = sourceIdInput.value.trim();
+  const selectedRecord = state.syncedDocuments.find((record) => record.sourceId === selectedSourceId);
+
+  if (preview) {
+    const summary = preview.sourceSummary || {};
+    financeReviewSummary.innerHTML = `
+      <dl>
+        <div><dt>来源单号</dt><dd>${escapeHtml(preview.sourceCode || selectedRecord?.sourceCode || '-')}</dd></div>
+        <div><dt>报销人</dt><dd>${escapeHtml(summary.requester || '-')}</dd></div>
+        <div><dt>部门</dt><dd>${escapeHtml(summary.department || '-')}</dd></div>
+        <div><dt>期间</dt><dd>${escapeHtml(`${preview.financialSummary.year} 年 ${preview.financialSummary.period} 期`)}</dd></div>
+        <div><dt>借贷平衡</dt><dd>${preview.balanced ? '是' : '否'}，借方 ${formatMoney(preview.debitTotal)} / 贷方 ${formatMoney(preview.creditTotal)}</dd></div>
+        <div><dt>税额</dt><dd>可抵扣税额 ${formatMoney(preview.taxSummary?.deductibleTaxAmount || 0)}</dd></div>
+        <div><dt>草稿规则</dt><dd>只保存金蝶暂存凭证，不提交、不审核、不过账。</dd></div>
+      </dl>
+    `;
+    return;
+  }
+
+  if (selectedRecord) {
+    const summary = buildSourceSummary(selectedRecord);
+    financeReviewSummary.innerHTML = `
+      <dl>
+        <div><dt>来源单号</dt><dd>${escapeHtml(selectedRecord.sourceCode || selectedRecord.sourceId)}</dd></div>
+        <div><dt>报销人</dt><dd>${escapeHtml(summary.requester)}</dd></div>
+        <div><dt>部门</dt><dd>${escapeHtml(summary.department)}</dd></div>
+        <div><dt>费用类型</dt><dd>${escapeHtml(summary.expenseCategories)}</dd></div>
+        <div><dt>报销金额</dt><dd>${formatMoney(summary.totalAmount)}</dd></div>
+        <div><dt>下一步</dt><dd>点击预览凭证，确认科目、辅助核算、税额和借贷平衡。</dd></div>
+      </dl>
+    `;
+    return;
+  }
+
+  financeReviewSummary.textContent = '请先从报销单列表选择一张单据。';
 }
 
 function renderVoucherValidation(preview) {
@@ -524,6 +574,7 @@ function applyTemplate(template) {
 function invalidatePreview(reason) {
   if (!state.lastPreview) {
     renderPreviewHashSummary(null);
+    renderFinanceReview(null);
     return;
   }
   state.lastPreview = null;
@@ -532,6 +583,7 @@ function invalidatePreview(reason) {
   renderSaveConfirmation(null);
   renderVoucherValidation(null);
   renderPreviewHashSummary(null);
+  renderFinanceReview(null);
 }
 
 function ensurePreviewFresh() {

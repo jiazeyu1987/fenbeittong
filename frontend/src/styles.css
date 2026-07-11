@@ -15,14 +15,14 @@ body {
   padding: 28px;
 }
 
-.hero,
+.workbench-header,
 .panel,
 .metric {
   border: 1px solid #d9e1ea;
   background: #fff;
 }
 
-.hero {
+.workbench-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -95,7 +95,7 @@ h2 {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -115,6 +115,15 @@ h2 {
   display: block;
   margin: 8px 0 4px;
   font-size: 24px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .panel {
@@ -219,6 +228,95 @@ h2 {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 14px;
+}
+
+.finance-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(380px, .75fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.finance-queue-panel,
+.finance-review-panel {
+  min-width: 0;
+}
+
+.finance-command-bar {
+  margin-bottom: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+button.filter-chip {
+  border-color: #d0d5dd;
+  background: #fff;
+  color: #344054;
+  padding: 7px 12px;
+}
+
+button.filter-chip.active {
+  border-color: #0f766e;
+  background: #ecfdf3;
+  color: #047857;
+  font-weight: 700;
+}
+
+.list-table {
+  margin-top: 0;
+}
+
+.review-summary {
+  border: 1px solid #d1fae5;
+  border-radius: 8px;
+  background: #ecfdf3;
+  color: #064e3b;
+  padding: 12px;
+  line-height: 1.5;
+}
+
+.review-summary dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  margin: 0;
+}
+
+.review-summary div {
+  min-width: 0;
+}
+
+.review-summary dt {
+  color: #047857;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.review-summary dd {
+  margin: 2px 0 0;
+}
+
+.technical-panel {
+  margin-top: 16px;
+}
+
+.technical-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.technical-section {
+  margin-top: 16px;
 }
 
 .layout {
@@ -460,6 +558,8 @@ th.amount {
 
 @media (max-width: 960px) {
   .metric-grid,
+  .finance-grid,
+  .technical-grid,
   .layout,
   .grid,
   .steps,
@@ -467,7 +567,7 @@ th.amount {
     grid-template-columns: 1fr;
   }
 
-  .hero,
+  .workbench-header,
   .section-title,
   .actions,
   .inline {

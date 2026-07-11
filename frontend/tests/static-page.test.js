@@ -5,8 +5,15 @@ import assert from 'node:assert/strict';
 test('frontend page exposes expected workflow controls', () => {
   const html = readFileSync('frontend/src/index.html', 'utf8');
   for (const id of [
+    'financeWorkbenchHeader',
+    'financeQueuePanel',
+    'financeReviewPanel',
+    'exceptionCount',
+    'draftCount',
+    'riskCount',
+    'financeReviewSummary',
+    'sourceQueueFilters',
     'environmentWarning',
-    'businessSteps',
     'nextActionText',
     'primaryActionButton',
     'actionBlockReason',
@@ -43,6 +50,21 @@ test('frontend page exposes expected workflow controls', () => {
   }
 });
 
+test('frontend is centered on a finance source document list', () => {
+  const html = readFileSync('frontend/src/index.html', 'utf8');
+  const app = readFileSync('frontend/src/app.js', 'utf8');
+  assert.match(html, /报销单列表/);
+  assert.match(html, /财务复核/);
+  assert.match(html, /异常单据/);
+  assert.match(html, /已保存草稿/);
+  assert.match(html, /重复风险/);
+  assert.match(html, /来源单号/);
+  assert.match(html, /借贷平衡/);
+  assert.doesNotMatch(html, /Fenbeitong Kingdee Voucher Integration/);
+  assert.match(app, /renderFinanceReview/);
+  assert.match(app, /financeReviewSummary/);
+});
+
 test('frontend source is productized rather than a raw debug console', () => {
   const html = readFileSync('frontend/src/index.html', 'utf8');
   const app = readFileSync('frontend/src/app.js', 'utf8');
@@ -66,7 +88,7 @@ test('frontend visible copy remains readable Chinese without mojibake', () => {
   for (const text of [html, app]) {
     assert.doesNotMatch(text, /鍒|閫|铦|鏆|璐|绋|棰|寰|姝|俙|榻|€\?|鈧|缁|妫|瀵|濮/);
   }
-  assert.match(html, /待处理单据队列/);
+  assert.match(html, /报销单列表/);
   assert.match(html, /老师验收清单/);
   assert.match(html, /Mock 保存 ERP 草稿/);
   assert.match(app, /失败步骤/);
