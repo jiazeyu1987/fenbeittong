@@ -8,6 +8,7 @@ This is a standalone teaching and collaboration project for developing the Fenbe
 - Keeps mock behavior isolated behind Fenbeitong and Kingdee adapters.
 - Persists local state to `runtime-data/state.json`.
 - Shows dependency readiness, dashboard counts, process records, and operation logs.
+- Exposes an explicit scheduler for timed Fenbeitong sync plus a manual "run once" path.
 - Provides backend, frontend, contract tests, and E2E smoke tests.
 - Uses only mock data by default. Real interfaces can be enabled later through `.env` without changing the workflow code.
 
@@ -40,6 +41,16 @@ Copy `.env.example` to `.env` when local configuration is needed.
 - `FENBEITONG_MODE=real`: requires `FENBEITONG_BASE_URL`, `FENBEITONG_ACCESS_TOKEN`, and `FENBEITONG_PULL_PATH`.
 - `KINGDEE_MODE=mock`: simulates ERP save response.
 - `KINGDEE_MODE=real`: requires `KINGDEE_SAVE_URL` and optional auth header values.
+
+## Scheduler
+
+The scheduler is off by default and must be enabled explicitly.
+
+- `SCHEDULER_ENABLED=false`: no background timer starts.
+- `SCHEDULER_INTERVAL_SECONDS=3600`: interval used when the scheduler is enabled.
+- `SCHEDULER_AUTO_PUSH_ERP=false`: default behavior only syncs Fenbeitong data. Set to `true` only after voucher mapping config is saved and ERP save behavior is verified.
+
+Manual scheduler testing is available through the frontend button "运行一次定时同步" and `POST /api/scheduler/run-once`.
 
 ## Safety Boundaries
 

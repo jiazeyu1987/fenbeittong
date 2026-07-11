@@ -28,6 +28,11 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
     const readyBody = await readyResponse.json();
     assert.equal(readyBody.data.ready, true);
 
+    const schedulerStatusResponse = await fetch(`${baseUrl}/api/scheduler/status`);
+    const schedulerStatusBody = await schedulerStatusResponse.json();
+    assert.equal(schedulerStatusBody.data.enabled, false);
+    assert.equal(schedulerStatusBody.data.autoPushErp, false);
+
     const template = templateBody.data;
     const request = {
       fixedJson: template.mockFixedJson,
@@ -45,6 +50,10 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
     assert.equal(syncBody.data.batch.mockReplacement, true);
     assert.equal(syncBody.data.records[0].processStage, 'SYNCED');
     assert.equal(syncBody.data.records[0].mockReplacement, true);
+
+    const schedulerRunBody = await postJson(`${baseUrl}/api/scheduler/run-once`, {});
+    assert.equal(schedulerRunBody.data.sync.batch.status, 'SUCCESS');
+    assert.equal(schedulerRunBody.data.sync.records[0].processStage, 'SYNCED');
 
     const pushBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/push-erp`, {
       sourceId: syncBody.data.records[0].sourceId,

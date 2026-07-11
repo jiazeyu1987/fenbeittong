@@ -1,5 +1,6 @@
 import { getAppConfig, getSanitizedConfigSummary } from '../config.js';
 import { getDashboardSummary } from '../repository.js';
+import { getSchedulerStatus } from './scheduler.js';
 
 export function getSystemStatus() {
   const config = getAppConfig();
@@ -20,7 +21,8 @@ export function getSystemStatus() {
       ])
     },
     summary: getDashboardSummary(),
-    config: getSanitizedConfigSummary()
+    config: getSanitizedConfigSummary(),
+    scheduler: getSchedulerStatus()
   };
 }
 

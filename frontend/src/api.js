@@ -16,6 +16,11 @@ export const api = {
   health: () => request('/api/health'),
   ready: () => request('/api/ready'),
   systemStatus: () => request('/api/system/status'),
+  schedulerStatus: () => request('/api/scheduler/status'),
+  runSchedulerOnce: () => request('/api/scheduler/run-once', {
+    method: 'POST',
+    body: JSON.stringify({})
+  }),
   getMockTemplate: () => request('/api/fenbeitong-voucher/config/mock-template'),
   saveConfig: (data) => request('/api/fenbeitong-voucher/config', {
     method: 'PUT',

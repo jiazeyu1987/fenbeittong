@@ -5,6 +5,7 @@ import { buildVoucherPreview } from '../../backend/src/voucher-mapper.js';
 import { getSystemStatus } from '../../backend/src/services/system-status.js';
 import { resetRepository } from '../../backend/src/repository.js';
 import { validateFenbeitongConfig } from '../../backend/src/config.js';
+import { getSchedulerStatus, runSchedulerOnce, stopSchedulerForTest } from '../../backend/src/services/scheduler.js';
 
 test('mock template contains required fields and no real token', () => {
   const template = buildMockTemplate();
@@ -53,8 +54,24 @@ test('system status exposes mode and readiness for formal workflow', () => {
   assert.equal(status.mode.kingdee, 'mock');
   assert.equal(status.readiness.fenbeitong.ready, true);
   assert.equal(status.readiness.kingdee.ready, true);
+  assert.equal(status.scheduler.enabled, false);
+  assert.equal(status.scheduler.autoPushErp, false);
   assert.ok(Object.hasOwn(status.summary.counts, 'syncedDocuments'));
   assert.equal(status.config.fenbeitong.accessTokenConfigured, false);
+});
+
+test('scheduler is explicit and can run one sync with mock replacement', async () => {
+  resetRepository();
+  stopSchedulerForTest();
+  const initialStatus = getSchedulerStatus();
+  assert.equal(initialStatus.enabled, false);
+  assert.equal(initialStatus.running, false);
+
+  const result = await runSchedulerOnce('contract-test');
+  assert.equal(result.sync.batch.status, 'SUCCESS');
+  assert.equal(result.sync.batch.mockReplacement, true);
+  assert.equal(result.sync.records[0].processStage, 'SYNCED');
+  assert.equal(getSchedulerStatus().runCount, 1);
 });
 
 test('real Fenbeitong mode fails fast when required config is missing', () => {

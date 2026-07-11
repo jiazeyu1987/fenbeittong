@@ -22,6 +22,7 @@ const logsList = document.querySelector('#logsList');
 document.querySelector('#loadTemplateButton').addEventListener('click', run(loadTemplate));
 document.querySelector('#saveConfigButton').addEventListener('click', run(saveConfig));
 document.querySelector('#syncButton').addEventListener('click', run(syncFenbeitong));
+document.querySelector('#runSchedulerButton').addEventListener('click', run(runSchedulerOnce));
 document.querySelector('#previewButton').addEventListener('click', run(preview));
 document.querySelector('#prepareButton').addEventListener('click', run(prepare));
 document.querySelector('#pushErpButton').addEventListener('click', run(pushErp));
@@ -51,6 +52,16 @@ async function saveConfig() {
 async function syncFenbeitong() {
   const result = await api.syncFenbeitong();
   const firstRecord = result.records[0];
+  if (firstRecord) {
+    sourceIdInput.value = firstRecord.sourceId;
+  }
+  show(result);
+  await refreshAll();
+}
+
+async function runSchedulerOnce() {
+  const result = await api.runSchedulerOnce();
+  const firstRecord = result.sync.records[0];
   if (firstRecord) {
     sourceIdInput.value = firstRecord.sourceId;
   }
@@ -135,6 +146,15 @@ function renderStatus(status) {
   const mockReplacement = Boolean(batch?.mockReplacement || status.mode.kingdee === 'mock' || status.mode.fenbeitong === 'mock');
   document.querySelector('#mockReplacement').textContent = mockReplacement ? '启用' : '关闭';
   document.querySelector('#mockReason').textContent = batch?.mockReason || (mockReplacement ? '外部依赖未全部就绪' : '真实接口模式');
+  document.querySelector('#schedulerEnabled').textContent = status.scheduler.enabled ? '启用' : '关闭';
+  document.querySelector('#schedulerDetail').textContent = schedulerSummary(status.scheduler);
+}
+
+function schedulerSummary(scheduler) {
+  const interval = `${scheduler.intervalSeconds}s`;
+  const pushMode = scheduler.autoPushErp ? '自动推送 ERP' : '仅同步';
+  const lastRun = scheduler.lastRunAt ? `最近 ${scheduler.lastRunAt}` : '尚未运行';
+  return `${interval} · ${pushMode} · ${lastRun}`;
 }
 
 function applyTemplate(template) {

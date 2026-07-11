@@ -1,5 +1,6 @@
 import { buildMockTemplate } from './mock-template.js';
 import { readJson, sendError, sendJson } from './http-utils.js';
+import { getSchedulerStatus, runSchedulerOnce } from './services/scheduler.js';
 import { getReadinessStatus, getSystemStatus } from './services/system-status.js';
 import { prepareVoucher, previewVoucher, pushVoucherToErp, syncFenbeitongDocuments } from './services/voucher-workflow.js';
 import {
@@ -29,6 +30,12 @@ export async function handleApi(request, response) {
     }
     if (request.method === 'GET' && url.pathname === '/api/system/config-summary') {
       return sendJson(response, 200, { success: true, data: getSystemStatus().config });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/scheduler/status') {
+      return sendJson(response, 200, { success: true, data: getSchedulerStatus() });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/scheduler/run-once') {
+      return sendJson(response, 200, { success: true, data: await runSchedulerOnce('manual') });
     }
     if (request.method === 'GET' && url.pathname === '/api/fenbeitong-voucher/config/mock-template') {
       return sendJson(response, 200, { success: true, data: buildMockTemplate() });

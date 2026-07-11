@@ -12,11 +12,34 @@ Returns dependency readiness. Mock mode is ready only because it is explicitly c
 
 ## GET `/api/system/status`
 
-Returns product mode, dependency readiness, local state path, latest sync batch, and dashboard counts.
+Returns product mode, dependency readiness, local state path, latest sync batch, dashboard counts, and scheduler state.
 
 ## GET `/api/system/config-summary`
 
 Returns sanitized configuration booleans only. It never returns tokens, passwords, or authorization header values.
+
+## GET `/api/scheduler/status`
+
+Returns scheduler status:
+
+```json
+{
+  "enabled": false,
+  "intervalSeconds": 3600,
+  "autoPushErp": false,
+  "running": false,
+  "lastRunAt": "",
+  "lastSuccessAt": "",
+  "lastErrorAt": "",
+  "lastError": "",
+  "lastBatchId": "",
+  "runCount": 0
+}
+```
+
+## POST `/api/scheduler/run-once`
+
+Runs one scheduler cycle immediately. This uses the configured Fenbeitong adapter. When `SCHEDULER_AUTO_PUSH_ERP=false`, it only syncs source documents. When `SCHEDULER_AUTO_PUSH_ERP=true`, it also pushes synced records to Kingdee and fails fast if voucher mapping config is missing.
 
 ## GET `/api/fenbeitong-voucher/config/mock-template`
 
@@ -64,4 +87,4 @@ Returns a local process record.
 
 ## GET `/api/operations/logs`
 
-Returns local operation logs for sync, prepare, push, and config actions.
+Returns local operation logs for sync, prepare, push, scheduler, and config actions.

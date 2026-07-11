@@ -49,6 +49,11 @@ export function getAppConfig() {
       saveUrl: process.env.KINGDEE_SAVE_URL || '',
       authHeaderName: process.env.KINGDEE_AUTH_HEADER_NAME || '',
       authHeaderValue: process.env.KINGDEE_AUTH_HEADER_VALUE || ''
+    },
+    scheduler: {
+      enabled: readBoolean('SCHEDULER_ENABLED', false),
+      intervalSeconds: readPositiveInteger('SCHEDULER_INTERVAL_SECONDS', 3600),
+      autoPushErp: readBoolean('SCHEDULER_AUTO_PUSH_ERP', false)
     }
   };
 }
@@ -93,6 +98,11 @@ export function getSanitizedConfigSummary() {
       mode: config.kingdee.mode,
       saveUrlConfigured: Boolean(config.kingdee.saveUrl),
       authHeaderConfigured: Boolean(config.kingdee.authHeaderName && config.kingdee.authHeaderValue)
+    },
+    scheduler: {
+      enabled: config.scheduler.enabled,
+      intervalSeconds: config.scheduler.intervalSeconds,
+      autoPushErp: config.scheduler.autoPushErp
     }
   };
 }
@@ -107,4 +117,27 @@ function readMode(name) {
     throw new Error(`${name} must be mock or real`);
   }
   return mode;
+}
+
+function readBoolean(name, defaultValue) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') {
+    return defaultValue;
+  }
+  const value = raw.trim().toLowerCase();
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new Error(`${name} must be true or false`);
+}
+
+function readPositiveInteger(name, defaultValue) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') {
+    return defaultValue;
+  }
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return value;
 }
