@@ -70,6 +70,8 @@ test('frontend visible copy remains readable Chinese without mojibake', () => {
   assert.match(html, /老师验收清单/);
   assert.match(html, /Mock 保存 ERP 草稿/);
   assert.match(app, /失败步骤/);
+  assert.match(app, /错误编码/);
+  assert.match(app, /operationLogs/);
   assert.match(app, /预览已失效/);
 });
 

@@ -355,12 +355,16 @@ function getActionBlockReason({ sourceId, prepared, pushed }) {
 }
 
 function renderSelfCheck(status) {
+  const realMissing = [
+    ...status.readiness.fenbeitong.missing,
+    ...status.readiness.kingdee.missing
+  ];
   const checks = [
     ['配置可用', state.configSaved],
     ['mock 数据可同步', status.summary.counts.syncedDocuments > 0],
     ['凭证可预览', Boolean(state.lastPreview?.balanced)],
     ['ERP mock 保存可验证', status.summary.counts.pushedVouchers > 0],
-    ['真实模式缺失配置会失败提示', status.config.fenbeitong.accessTokenConfigured === false]
+    ['真实模式阻塞项已明确', status.mode.fenbeitong === 'mock' && status.mode.kingdee === 'mock' ? false : realMissing.length > 0]
   ];
   document.querySelector('#selfCheckList').innerHTML = checks.map(([label, ok]) =>
     `<li class="${ok ? 'ok' : 'pending'}">${escapeHtml(label)}：${ok ? '通过' : '待验证'}</li>`
@@ -595,7 +599,7 @@ function renderTeacherAcceptance(status) {
     ['mock 同步成功', status.summary.counts.syncedDocuments > 0, '队列中可选择待处理单据'],
     ['凭证借贷平衡', Boolean(state.lastPreview?.balanced), '预览区显示借方、贷方、税额和分录数'],
     ['暂存保存成功', status.summary.counts.pushedVouchers > 0, '只保存凭证，不提交、不审核、不过账'],
-    ['日志可追溯', true, '操作日志保留批次、mock 标识和处理记录']
+    ['日志可追溯', Number(status.summary.counts.operationLogs || 0) > 0, '操作日志保留批次、mock 标识和处理记录']
   ];
   teacherAcceptanceList.innerHTML = checks.map(([label, ok, detail]) =>
     `<li class="${ok ? 'ok' : 'pending'}">${escapeHtml(label)}：${ok ? '通过' : '待验证'}，${escapeHtml(detail)}</li>`
@@ -713,7 +717,12 @@ function show(value, summary = '') {
 }
 
 function showError(step, error) {
-  show({ error: error.message, step }, `失败步骤：${step}；原因：${error.message}；下一步：按提示补齐配置或重新选择单据后再试。`);
+  show({
+    error: error.message,
+    code: error.code || 'FRONTEND_ERROR',
+    detail: error.detail || {},
+    step
+  }, `失败步骤：${step}；错误编码：${error.code || 'FRONTEND_ERROR'}；原因：${error.message}；下一步：老师看摘要，学生查看接口调试信息中的 detail。`);
 }
 
 function summarizeValue(value) {

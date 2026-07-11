@@ -7,7 +7,10 @@ async function request(path, options = {}) {
   });
   const body = await response.json();
   if (!response.ok || body.success === false) {
-    throw new Error(body.error?.message || `request failed: ${response.status}`);
+    const error = new Error(body.error?.message || `request failed: ${response.status}`);
+    error.code = body.error?.code || `HTTP_${response.status}`;
+    error.detail = body.error?.detail || {};
+    throw error;
   }
   return body.data;
 }

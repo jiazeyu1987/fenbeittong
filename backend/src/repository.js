@@ -222,7 +222,8 @@ export function getDashboardSummary() {
       syncedDocuments: synced.length,
       preparedVouchers: vouchers.filter((item) => item.processStage === 'PREPARED').length,
       pushedVouchers: vouchers.filter((item) => item.processStage === 'ERP_PUSHED').length,
-      failedBatches: batches.filter((item) => item.status === 'FAILED').length
+      failedBatches: batches.filter((item) => item.status === 'FAILED').length,
+      operationLogs: state.operationLogs.length
     },
     latestBatch: batches[0] || null,
     stateFile: getStateFile()

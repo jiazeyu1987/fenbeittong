@@ -66,6 +66,7 @@ test('system status exposes mode and readiness for formal workflow', () => {
   assert.equal(status.scheduler.enabled, false);
   assert.equal(status.scheduler.autoPushErp, false);
   assert.ok(Object.hasOwn(status.summary.counts, 'syncedDocuments'));
+  assert.ok(Object.hasOwn(status.summary.counts, 'operationLogs'));
   assert.equal(status.config.fenbeitong.accessTokenConfigured, false);
 });
 
