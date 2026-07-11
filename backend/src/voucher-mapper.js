@@ -38,7 +38,9 @@ export function parseFenbeitongDetail(fixedJson) {
     paymentAmount: money(data.payment_amount, 'data.payment_amount'),
     reason: data.apply_reason || data.reimb_code,
     userCode: data.user?.code || '',
+    userName: data.user?.name || data.user?.code || '',
     departmentCode: data.user?.department_code || '',
+    departmentName: data.user?.department_name || data.user?.department_code || '',
     expenses: Array.isArray(data.expenses) ? data.expenses : []
   };
 
@@ -157,6 +159,14 @@ export function buildVoucherPreview(input) {
   };
 
   const contentHash = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  const voucherLines = lines.map((line) => ({
+    explanation: line.FEXPLANATION,
+    accountNumber: line.FACCOUNTID.FNumber,
+    accountName: resolveAccountName(config, line.FACCOUNTID.FNumber),
+    detailText: formatDetail(line.FDetailID),
+    debit: line.FDEBIT,
+    credit: line.FCREDIT
+  }));
   return {
     sourceId: document.reimbursementId,
     sourceCode: document.reimbursementCode,
@@ -168,6 +178,23 @@ export function buildVoucherPreview(input) {
     totalAmount: document.totalAmount,
     deductibleTaxAmount: deductibleTaxTotal,
     balanced,
+    voucherLines,
+    financialSummary: {
+      sourceCode: document.reimbursementCode,
+      requester: document.userName,
+      department: document.departmentName,
+      accountBookNumber: config.accountBookNumber,
+      voucherGroupNumber: config.voucherGroupNumber,
+      voucherDate,
+      year,
+      period,
+      debitTotal,
+      creditTotal,
+      lineCount: voucherLines.length,
+      deductibleTaxAmount: deductibleTaxTotal,
+      documentStatus: 'Z',
+      documentStatusName: 'Saved draft only; not submitted, audited, or posted'
+    },
     payload
   };
 }
@@ -197,4 +224,20 @@ function buildDetail(config, document) {
 
 function round(value) {
   return Math.round(Number(value) * 100) / 100;
+}
+
+function resolveAccountName(config, accountNumber) {
+  const accountNames = config.accountNames || {
+    '6601.09': 'Travel expense',
+    '6601.15': 'Office expense',
+    '1002.01': 'Bank deposit',
+    '2221.01.01.05': 'Input VAT'
+  };
+  return accountNames[accountNumber] || '';
+}
+
+function formatDetail(detail) {
+  return Object.entries(detail || {})
+    .map(([key, value]) => `${key}:${value?.FNumber || value}`)
+    .join('; ');
 }

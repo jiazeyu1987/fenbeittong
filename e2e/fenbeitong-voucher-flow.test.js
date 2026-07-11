@@ -44,6 +44,8 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
 
     const previewBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/preview`, request);
     assert.equal(previewBody.data.balanced, true);
+    assert.ok(previewBody.data.voucherLines.length >= 2);
+    assert.equal(previewBody.data.financialSummary.documentStatusName, 'Saved draft only; not submitted, audited, or posted');
 
     const syncBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/sync`, {});
     assert.equal(syncBody.data.batch.status, 'SUCCESS');

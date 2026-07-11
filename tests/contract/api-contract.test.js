@@ -28,6 +28,10 @@ test('preview response keeps stable contract fields', () => {
   for (const field of ['sourceId', 'sourceCode', 'idempotencyKey', 'contentHash', 'debitTotal', 'creditTotal', 'balanced', 'payload']) {
     assert.ok(Object.hasOwn(preview, field), `${field} should exist`);
   }
+  assert.ok(Array.isArray(preview.voucherLines));
+  assert.ok(preview.voucherLines.length > 0);
+  assert.equal(preview.financialSummary.documentStatusName, 'Saved draft only; not submitted, audited, or posted');
+  assert.equal(preview.financialSummary.lineCount, preview.voucherLines.length);
 });
 
 test('voucher payload writes only Kingdee GL_VOUCHER fields', () => {

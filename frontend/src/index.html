@@ -12,14 +12,28 @@
         <div>
           <p class="eyebrow">Fenbeitong Kingdee Voucher Integration</p>
           <h1>分贝通金蝶凭证集成工作台</h1>
-          <p class="subtitle">当前只有外部接口可处于 mock 模式；同步、转换、推送、状态、日志和本地持久化均按正式产品流程运行。</p>
+          <p class="subtitle">按正式流程验证：同步分贝通、预览凭证、生成待保存凭证、保存为金蝶暂存凭证。当前只保存草稿，不审核、不过账。</p>
         </div>
         <span id="statusBadge" class="badge">未连接</span>
       </section>
 
+      <section id="environmentWarning" class="notice warning">
+        当前为可替换 mock 模式。分贝通 token 与金蝶真实保存示例到位后，可切换 real 模式联调；mock 保存不代表真实 ERP 已写入。
+      </section>
+
       <section class="metric-grid" aria-label="系统状态">
         <article class="metric">
-          <span>分贝通模式</span>
+          <span>待处理单据</span>
+          <strong id="syncedCount">0</strong>
+          <small>来自分贝通报销单</small>
+        </article>
+        <article class="metric">
+          <span>ERP 暂存成功</span>
+          <strong id="pushedCount">0</strong>
+          <small>只保存，不审核不过账</small>
+        </article>
+        <article class="metric">
+          <span>数据源模式</span>
           <strong id="fenbeitongMode">-</strong>
           <small id="fenbeitongReady">-</small>
         </article>
@@ -29,22 +43,12 @@
           <small id="kingdeeReady">-</small>
         </article>
         <article class="metric">
-          <span>已同步来源单据</span>
-          <strong id="syncedCount">0</strong>
-          <small>来自分贝通报销单</small>
-        </article>
-        <article class="metric">
-          <span>已推送 ERP</span>
-          <strong id="pushedCount">0</strong>
-          <small>当前 mock 仅模拟保存</small>
-        </article>
-        <article class="metric">
           <span>Mock 替代</span>
           <strong id="mockReplacement">-</strong>
           <small id="mockReason">-</small>
         </article>
         <article class="metric">
-          <span>定时同步</span>
+          <span>定时任务</span>
           <strong id="schedulerEnabled">-</strong>
           <small id="schedulerDetail">-</small>
         </article>
@@ -53,26 +57,80 @@
       <section class="panel">
         <div class="section-title">
           <div>
-            <h2>业务操作</h2>
-            <p>正式流程为：同步分贝通、生成凭证预览、准备本地记录、推送 ERP。</p>
+            <h2>业务流程</h2>
+            <p>建议按步骤操作，先用 mock 数据验证完整闭环，真实接口到位后再切换配置。</p>
           </div>
           <button id="refreshButton" class="secondary">刷新状态</button>
         </div>
+        <ol id="businessSteps" class="steps">
+          <li data-step="config"><strong>1 配置检查</strong><span>载入并保存账簿、凭证字、科目和核算维度映射。</span></li>
+          <li data-step="sync"><strong>2 同步分贝通</strong><span>立即同步或测试一次定时任务，生成来源单据。</span></li>
+          <li data-step="preview"><strong>3 预览凭证</strong><span>确认借贷平衡、期间、税额和分录数量。</span></li>
+          <li data-step="prepare"><strong>4 生成待保存凭证</strong><span>生成本地待保存记录，保留幂等键和内容哈希。</span></li>
+          <li data-step="push"><strong>5 保存到金蝶</strong><span>保存为 ERP 暂存凭证，后续由财务人工审核。</span></li>
+        </ol>
+        <div class="next-action">
+          <span>建议下一步</span>
+          <strong id="nextActionText">当前未同步分贝通数据，建议先点击立即同步分贝通数据。</strong>
+        </div>
         <div class="actions">
-          <button id="loadTemplateButton">载入标准配置</button>
-          <button id="saveConfigButton">保存映射配置</button>
-          <button id="syncButton">同步分贝通</button>
-          <button id="runSchedulerButton">运行一次定时同步</button>
-          <button id="previewButton">预览金蝶凭证</button>
-          <button id="prepareButton">生成本地准备记录</button>
-          <button id="pushErpButton">推送到 ERP</button>
+          <button id="loadTemplateButton" class="secondary">载入标准配置</button>
+          <button id="saveConfigButton" class="secondary">保存配置</button>
+          <button id="syncButton">立即同步分贝通数据</button>
+          <button id="runSchedulerButton" class="secondary">测试一次定时任务</button>
+          <button id="previewButton" class="secondary">预览凭证</button>
+          <button id="prepareButton" class="secondary">生成待保存凭证</button>
+          <button id="pushErpButton">模拟保存到 ERP</button>
         </div>
       </section>
 
       <section class="layout">
         <section class="panel">
-          <h2>金蝶凭证写入字段</h2>
-          <p class="hint">这些字段会进入 GL_VOUCHER 请求：账簿、凭证字、日期、年度、期间、科目、币别、核算维度、借贷金额。</p>
+          <h2>财务凭证预览</h2>
+          <p class="hint">保存前请确认借贷平衡、账簿、凭证字、期间、分录数量和当前环境。</p>
+          <div class="summary-grid">
+            <div><span>借贷平衡</span><strong id="previewBalanced">-</strong></div>
+            <div><span>借方金额</span><strong id="previewDebitTotal">0.00</strong></div>
+            <div><span>贷方金额</span><strong id="previewCreditTotal">0.00</strong></div>
+            <div><span>分录数</span><strong id="previewLineCount">0</strong></div>
+            <div><span>税额</span><strong id="previewTaxTotal">0.00</strong></div>
+            <div><span>状态</span><strong id="draftOnlyWarning">未审核 / 未过账 / 需人工审核</strong></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>摘要</th>
+                  <th>科目编码</th>
+                  <th>科目名称</th>
+                  <th>核算维度</th>
+                  <th>借方金额</th>
+                  <th>贷方金额</th>
+                </tr>
+              </thead>
+              <tbody id="voucherPreviewBody">
+                <tr><td colspan="6">暂无凭证预览，请先点击预览凭证。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>系统自检</h2>
+          <p class="hint">学生和老师可以用这里确认 mock 流程是否已经具备独立验证条件。</p>
+          <ul id="selfCheckList" class="check-list">
+            <li>配置可用：待检查</li>
+            <li>mock 数据可同步：待检查</li>
+            <li>凭证可预览：待检查</li>
+            <li>ERP mock 保存可验证：待检查</li>
+            <li>真实模式缺失配置会失败提示：待检查</li>
+          </ul>
+        </section>
+      </section>
+
+      <section class="panel">
+        <details>
+          <summary>配置管理</summary>
           <div class="grid">
             <label>账簿编码<input id="accountBookNumber" /></label>
             <label>凭证字编码<input id="voucherGroupNumber" /></label>
@@ -86,12 +144,23 @@
             <label>费用科目映射<textarea id="categoryAccountNumbers"></textarea></label>
             <label>贷方核算维度<textarea id="creditDetailNumbers"></textarea></label>
           </div>
+        </details>
+      </section>
+
+      <section class="layout">
+        <section class="panel">
+          <h2>分贝通 mock 数据</h2>
+          <p class="hint">这些字段来自分贝通报销单。真实 token 到位后，mock 适配器可替换为真实分贝通接口。</p>
+          <label>固定 JSON mock 数据<textarea id="mockFixedJson" class="json-input"></textarea></label>
         </section>
 
         <section class="panel">
-          <h2>分贝通来源字段</h2>
-          <p class="hint">这些字段来自分贝通报销单。真实 token 到位后，mock 适配器可替换为真实分贝通接口。</p>
-          <label>固定 JSON mock 数据<textarea id="mockFixedJson" class="json-input"></textarea></label>
+          <h2>处理结果摘要</h2>
+          <div id="resultSummary" class="result-summary">暂无结果，请先执行同步或预览。</div>
+          <details id="technicalDetails" class="technical-details">
+            <summary>技术详情</summary>
+            <pre id="resultOutput">{}</pre>
+          </details>
         </section>
       </section>
 
@@ -115,21 +184,15 @@
               </tr>
             </thead>
             <tbody id="recordsTable">
-              <tr><td colspan="5">暂无记录</td></tr>
+              <tr><td colspan="5">暂无记录，请先同步分贝通数据。</td></tr>
             </tbody>
           </table>
         </div>
       </section>
 
-      <section class="layout">
-        <section class="panel result-panel">
-          <h2>结果</h2>
-          <pre id="resultOutput">{}</pre>
-        </section>
-        <section class="panel">
-          <h2>操作日志</h2>
-          <div id="logsList" class="log-list">暂无日志</div>
-        </section>
+      <section class="panel">
+        <h2>操作日志</h2>
+        <div id="logsList" class="log-list">暂无日志</div>
       </section>
     </main>
     <script type="module" src="/app.js"></script>

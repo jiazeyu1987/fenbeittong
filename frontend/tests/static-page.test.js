@@ -5,6 +5,9 @@ import assert from 'node:assert/strict';
 test('frontend page exposes expected workflow controls', () => {
   const html = readFileSync('frontend/src/index.html', 'utf8');
   for (const id of [
+    'environmentWarning',
+    'businessSteps',
+    'nextActionText',
     'loadTemplateButton',
     'saveConfigButton',
     'syncButton',
@@ -14,12 +17,28 @@ test('frontend page exposes expected workflow controls', () => {
     'pushErpButton',
     'schedulerEnabled',
     'schedulerDetail',
+    'selfCheckList',
     'mockReplacement',
+    'voucherPreviewBody',
+    'previewDebitTotal',
+    'previewCreditTotal',
+    'previewLineCount',
+    'resultSummary',
+    'technicalDetails',
     'recordsTable',
     'logsList'
   ]) {
     assert.match(html, new RegExp(`id="${id}"`), `${id} should exist`);
   }
+});
+
+test('frontend source is productized rather than a raw debug console', () => {
+  const html = readFileSync('frontend/src/index.html', 'utf8');
+  const app = readFileSync('frontend/src/app.js', 'utf8');
+  assert.match(html, /<details id="technicalDetails"/);
+  assert.match(app, /renderVoucherPreview/);
+  assert.match(app, /renderSelfCheck/);
+  assert.match(app, /draftOnlyWarning/);
 });
 
 test('frontend api points only to local mock backend', () => {
