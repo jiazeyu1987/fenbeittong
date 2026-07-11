@@ -27,7 +27,6 @@ test('frontend page exposes expected workflow controls', () => {
     'pushErpButton',
     'schedulerEnabled',
     'schedulerDetail',
-    'selfCheckList',
     'mockReplacement',
     'sourceQueueBody',
     'configValidationList',
@@ -35,8 +34,6 @@ test('frontend page exposes expected workflow controls', () => {
     'saveConfirmSummary',
     'saveRiskNotice',
     'voucherValidationList',
-    'teacherAcceptanceList',
-    'developerValidationPanel',
     'voucherPreviewBody',
     'previewDebitTotal',
     'previewCreditTotal',
@@ -70,11 +67,9 @@ test('frontend source is productized rather than a raw debug console', () => {
   const app = readFileSync('frontend/src/app.js', 'utf8');
   assert.match(html, /<details id="technicalDetails"/);
   assert.match(app, /renderVoucherPreview/);
-  assert.match(app, /renderSelfCheck/);
   assert.match(app, /renderSourceQueue/);
   assert.match(app, /renderConfigValidation/);
   assert.match(app, /renderVoucherValidation/);
-  assert.match(app, /renderTeacherAcceptance/);
   assert.match(app, /buildSourceSummary/);
   assert.match(app, /actionBlockReason/);
   assert.match(app, /renderSaveConfirmation/);
@@ -89,12 +84,41 @@ test('frontend visible copy remains readable Chinese without mojibake', () => {
     assert.doesNotMatch(text, /鍒|閫|铦|鏆|璐|绋|棰|寰|姝|俙|榻|€\?|鈧|缁|妫|瀵|濮/);
   }
   assert.match(html, /报销单列表/);
-  assert.match(html, /老师验收清单/);
-  assert.match(html, /Mock 保存 ERP 草稿/);
+  assert.match(html, /凭证生成工作台/);
+  assert.match(html, /保存ERP草稿/);
   assert.match(app, /失败步骤/);
   assert.match(app, /错误编码/);
-  assert.match(app, /operationLogs/);
+  assert.match(html, /操作日志/);
+  assert.match(html, /处理记录/);
   assert.match(app, /预览已失效/);
+});
+
+test('frontend visible copy is production finance copy', () => {
+  const html = readFileSync('frontend/src/index.html', 'utf8');
+  const app = readFileSync('frontend/src/app.js', 'utf8');
+  const bannedHtmlCopy = [
+    /老师/,
+    /学生/,
+    /开发者/,
+    /教学/,
+    /mock JSON/i,
+    /固定 JSON/i,
+    /接口调试/,
+    /验证命令/,
+    /IntRuoyi/,
+    /127\.0\.0\.1/
+  ];
+  for (const pattern of bannedHtmlCopy) {
+    assert.doesNotMatch(html, pattern);
+  }
+  for (const pattern of [/老师/, /学生/, /开发者/, /mock 保存/i, /mock 数据/i, /mock替代/i]) {
+    assert.doesNotMatch(app, pattern);
+  }
+  assert.match(html, /单据状态/);
+  assert.match(html, /凭证状态/);
+  assert.match(html, /接口状态/);
+  assert.match(html, /系统设置/);
+  assert.match(html, /处理记录/);
 });
 
 test('frontend api points only to local mock backend', () => {

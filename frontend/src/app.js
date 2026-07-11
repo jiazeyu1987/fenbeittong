@@ -51,7 +51,6 @@ const saveConfirmSummary = document.querySelector('#saveConfirmSummary');
 const saveRiskNotice = document.querySelector('#saveRiskNotice');
 const actionBlockReason = document.querySelector('#actionBlockReason');
 const voucherValidationList = document.querySelector('#voucherValidationList');
-const teacherAcceptanceList = document.querySelector('#teacherAcceptanceList');
 const previewHashSummary = document.querySelector('#previewHashSummary');
 const financeReviewSummary = document.querySelector('#financeReviewSummary');
 
@@ -92,7 +91,7 @@ async function loadTemplate() {
   state.configSaved = false;
   renderConfigValidation();
   renderActionState();
-  show(template, '已载入标准配置，请保存配置后开始同步。');
+  show(template, '已载入默认凭证参数，请保存配置后开始同步。');
 }
 
 async function saveConfig() {
@@ -173,7 +172,6 @@ async function refreshAll() {
   renderSourceQueue(documents);
   await refreshRecords();
   await refreshLogs();
-  renderTeacherAcceptance(status);
   renderActionState();
 }
 
@@ -247,10 +245,10 @@ async function selectQueuedDocument(event) {
 }
 
 function renderStatus(status) {
-  document.querySelector('#fenbeitongMode').textContent = status.mode.fenbeitong.toUpperCase();
-  document.querySelector('#kingdeeMode').textContent = status.mode.kingdee.toUpperCase();
-  document.querySelector('#fenbeitongReady').textContent = status.readiness.fenbeitong.message;
-  document.querySelector('#kingdeeReady').textContent = status.readiness.kingdee.message;
+  document.querySelector('#fenbeitongMode').textContent = status.mode.fenbeitong === 'real' ? '已启用' : '待启用';
+  document.querySelector('#kingdeeMode').textContent = status.mode.kingdee === 'real' ? '已启用' : '待启用';
+  document.querySelector('#fenbeitongReady').textContent = readinessText(status.readiness.fenbeitong);
+  document.querySelector('#kingdeeReady').textContent = readinessText(status.readiness.kingdee);
   document.querySelector('#syncedCount').textContent = status.summary.counts.syncedDocuments;
   document.querySelector('#pushedCount').textContent = status.summary.counts.pushedVouchers;
   document.querySelector('#draftCount').textContent = status.summary.counts.pushedVouchers;
@@ -258,16 +256,14 @@ function renderStatus(status) {
   document.querySelector('#riskCount').textContent = status.summary.counts.pushedVouchers;
   const batch = status.summary.latestBatch;
   const mockReplacement = Boolean(batch?.mockReplacement || status.mode.kingdee === 'mock' || status.mode.fenbeitong === 'mock');
-  document.querySelector('#mockReplacement').textContent = mockReplacement ? '开启' : '关闭';
-  document.querySelector('#mockReason').textContent = batch?.mockReason || (mockReplacement ? '外部依赖未全部就绪' : '真实接口模式');
+  document.querySelector('#mockReplacement').textContent = mockReplacement ? '未启用' : '已启用';
+  document.querySelector('#mockReason').textContent = interfaceReason(batch?.mockReason, mockReplacement);
   document.querySelector('#schedulerEnabled').textContent = status.scheduler.enabled ? '开启' : '关闭';
   document.querySelector('#schedulerDetail').textContent = schedulerSummary(status.scheduler);
   document.querySelector('#environmentWarning').textContent = environmentWarning(status);
   document.querySelector('#syncBatchSummary').textContent = syncBatchSummary(batch);
   renderNextAction(status);
-  renderSelfCheck(status);
   renderConfigValidation();
-  renderTeacherAcceptance(status);
   renderFinanceReview(state.lastPreview);
 }
 
@@ -321,7 +317,7 @@ function renderActionState() {
     label = '生成待保存凭证';
   } else if (state.configSaved && !pushed) {
     action = 'push';
-    label = state.currentStatus?.mode.kingdee === 'real' ? '保存金蝶测试账套草稿' : 'Mock 保存 ERP 草稿';
+    label = '保存ERP草稿';
   } else if (pushed) {
     action = 'done';
     label = '已保存，等待财务人工审核';
@@ -355,26 +351,9 @@ function getActionBlockReason({ sourceId, prepared, pushed }) {
   if (!pushed) {
     return state.currentStatus?.mode.kingdee === 'real'
       ? '当前可保存到金蝶测试账套；只保存暂存凭证，不提交、不审核、不过账。'
-      : '当前可执行 Mock 保存 ERP 草稿；这不会写入真实金蝶。';
+      : '当前外部ERP接口未启用，系统仅保存本地处理结果，不写入正式ERP。';
   }
   return '该单据已保存，下一步由财务在金蝶中人工审核。';
-}
-
-function renderSelfCheck(status) {
-  const realMissing = [
-    ...status.readiness.fenbeitong.missing,
-    ...status.readiness.kingdee.missing
-  ];
-  const checks = [
-    ['配置可用', state.configSaved],
-    ['mock 数据可同步', status.summary.counts.syncedDocuments > 0],
-    ['凭证可预览', Boolean(state.lastPreview?.balanced)],
-    ['ERP mock 保存可验证', status.summary.counts.pushedVouchers > 0],
-    ['真实模式阻塞项已明确', status.mode.fenbeitong === 'mock' && status.mode.kingdee === 'mock' ? false : realMissing.length > 0]
-  ];
-  document.querySelector('#selfCheckList').innerHTML = checks.map(([label, ok]) =>
-    `<li class="${ok ? 'ok' : 'pending'}">${escapeHtml(label)}：${ok ? '通过' : '待验证'}</li>`
-  ).join('');
 }
 
 function renderConfigValidation() {
@@ -404,12 +383,12 @@ function renderSourceQueue(records) {
     <tr class="${record.sourceId === selected ? 'selected' : ''}">
       <td><button class="secondary row-action" data-source-id="${escapeHtml(record.sourceId)}">${record.sourceId === selected ? '当前单据' : '选择'}</button></td>
       <td><span class="status-tag">${escapeHtml(queueStatus(record))}</span></td>
-      <td>${escapeHtml(record.sourceCode || '')}</td>
-      <td>${escapeHtml(summary.requester)}</td>
+      <td>${escapeHtml(displaySourceCode(record))}</td>
+      <td>${escapeHtml(displayRequester(record, summary.requester))}</td>
       <td>${escapeHtml(summary.department)}</td>
-      <td>${escapeHtml(summary.expenseCategories)}</td>
+      <td>${escapeHtml(displayExpenseCategories(record, summary.expenseCategories))}</td>
       <td class="amount">${formatMoney(summary.totalAmount)}</td>
-      <td>${escapeHtml(record.mockReplacement ? `${record.sourceMode} / mock替代` : record.sourceMode)}</td>
+      <td>${escapeHtml(record.mockReplacement ? '接口未启用' : '正式接口')}</td>
       <td>${escapeHtml(record.updateTime || '')}</td>
     </tr>
   `;
@@ -449,8 +428,8 @@ function renderFinanceReview(preview) {
     const summary = preview.sourceSummary || {};
     financeReviewSummary.innerHTML = `
       <dl>
-        <div><dt>来源单号</dt><dd>${escapeHtml(preview.sourceCode || selectedRecord?.sourceCode || '-')}</dd></div>
-        <div><dt>报销人</dt><dd>${escapeHtml(summary.requester || '-')}</dd></div>
+        <div><dt>来源单号</dt><dd>${escapeHtml(selectedRecord ? displaySourceCode(selectedRecord) : preview.sourceCode || '-')}</dd></div>
+        <div><dt>报销人</dt><dd>${escapeHtml(selectedRecord ? displayRequester(selectedRecord, summary.requester) : summary.requester || '-')}</dd></div>
         <div><dt>部门</dt><dd>${escapeHtml(summary.department || '-')}</dd></div>
         <div><dt>期间</dt><dd>${escapeHtml(`${preview.financialSummary.year} 年 ${preview.financialSummary.period} 期`)}</dd></div>
         <div><dt>借贷平衡</dt><dd>${preview.balanced ? '是' : '否'}，借方 ${formatMoney(preview.debitTotal)} / 贷方 ${formatMoney(preview.creditTotal)}</dd></div>
@@ -465,10 +444,10 @@ function renderFinanceReview(preview) {
     const summary = buildSourceSummary(selectedRecord);
     financeReviewSummary.innerHTML = `
       <dl>
-        <div><dt>来源单号</dt><dd>${escapeHtml(selectedRecord.sourceCode || selectedRecord.sourceId)}</dd></div>
-        <div><dt>报销人</dt><dd>${escapeHtml(summary.requester)}</dd></div>
+        <div><dt>来源单号</dt><dd>${escapeHtml(displaySourceCode(selectedRecord))}</dd></div>
+        <div><dt>报销人</dt><dd>${escapeHtml(displayRequester(selectedRecord, summary.requester))}</dd></div>
         <div><dt>部门</dt><dd>${escapeHtml(summary.department)}</dd></div>
-        <div><dt>费用类型</dt><dd>${escapeHtml(summary.expenseCategories)}</dd></div>
+        <div><dt>费用类型</dt><dd>${escapeHtml(displayExpenseCategories(selectedRecord, summary.expenseCategories))}</dd></div>
         <div><dt>报销金额</dt><dd>${formatMoney(summary.totalAmount)}</dd></div>
         <div><dt>下一步</dt><dd>点击预览凭证，确认科目、辅助核算、税额和借贷平衡。</dd></div>
       </dl>
@@ -531,7 +510,7 @@ function renderSaveConfirmation(preview) {
   ].join('；');
   saveRiskNotice.textContent = state.currentStatus?.mode.kingdee === 'real'
     ? '将写入金蝶测试账套并只保存为暂存凭证，不提交、不审核、不过账。'
-    : '当前为 ERP mock 保存，只验证请求结构和处理闭环，不会写入真实金蝶。';
+    : '当前外部ERP接口未启用，系统仅保存本地处理结果，不写入正式ERP。';
 }
 
 function schedulerSummary(scheduler) {
@@ -545,17 +524,60 @@ function syncBatchSummary(batch) {
   if (!batch) {
     return '尚未产生同步批次。';
   }
-  const mockText = batch.mockReplacement ? `mock 替代：${batch.mockReason || '外部依赖未就绪'}` : '真实来源';
-  return `最近批次 ${batch.batchId}：${batch.status}，成功 ${batch.successCount}/${batch.totalCount}，失败 ${batch.failCount}，${mockText}。重复单据按来源 ID 和内容哈希幂等更新。`;
+  const interfaceText = batch.mockReplacement ? `接口状态：${interfaceReason(batch.mockReason, true)}` : '真实接口';
+  return `最近批次 ${batch.batchId}：${batch.status}，成功 ${batch.successCount}/${batch.totalCount}，失败 ${batch.failCount}，${interfaceText}。重复单据按来源 ID 和内容哈希幂等更新。`;
+}
+
+function interfaceReason(reason, replacementEnabled) {
+  if (!replacementEnabled) {
+    return '真实接口已启用';
+  }
+  const normalized = String(reason || '').toLowerCase();
+  if (normalized.includes('fenbeitong') || normalized.includes('access token')) {
+    return '分贝通授权未配置';
+  }
+  if (normalized.includes('kingdee') || normalized.includes('erp')) {
+    return 'ERP接口未启用';
+  }
+  return reason ? String(reason) : '外部接口未全部启用';
+}
+
+function displaySourceCode(record) {
+  if (!record?.mockReplacement) {
+    return record?.sourceCode || record?.sourceId || '-';
+  }
+  return '示例报销单-001';
+}
+
+function displayRequester(record, requester) {
+  if (!record?.mockReplacement) {
+    return requester || '-';
+  }
+  return '示例员工';
+}
+
+function displayExpenseCategories(record, categories) {
+  if (!record?.mockReplacement) {
+    return categories || '-';
+  }
+  return String(categories || '-')
+    .replaceAll('Travel', '差旅费')
+    .replaceAll('Office', '办公费')
+    .replaceAll(' / ', ' / ');
 }
 
 function environmentWarning(status) {
-  const fenbeitong = status.mode.fenbeitong.toUpperCase();
-  const kingdee = status.mode.kingdee.toUpperCase();
   if (status.mode.kingdee === 'mock') {
-    return `当前分贝通 ${fenbeitong}，金蝶 ${kingdee}。点击保存到 ERP 只会模拟保存，不会写入真实金蝶。`;
+    return '当前外部ERP接口未启用，保存动作仅记录处理结果，不写入正式ERP。';
   }
-  return `当前分贝通 ${fenbeitong}，金蝶 ${kingdee}。保存动作会写入配置的测试账套，请先确认凭证预览。`;
+  return '当前外部接口已启用，保存动作会写入配置的ERP账套，请先确认凭证预览。';
+}
+
+function readinessText(readiness) {
+  if (readiness.ready) {
+    return '连接参数完整';
+  }
+  return readiness.missing.length > 0 ? `缺少 ${readiness.missing.length} 项配置` : '待确认';
 }
 
 function applyTemplate(template) {
@@ -642,22 +664,6 @@ function queueStatus(record) {
   return stageName(record.processStage);
 }
 
-function renderTeacherAcceptance(status) {
-  if (!teacherAcceptanceList) {
-    return;
-  }
-  const checks = [
-    ['配置已保存', state.configSaved, '老师可看到配置完整性检查结果'],
-    ['mock 同步成功', status.summary.counts.syncedDocuments > 0, '队列中可选择待处理单据'],
-    ['凭证借贷平衡', Boolean(state.lastPreview?.balanced), '预览区显示借方、贷方、税额和分录数'],
-    ['暂存保存成功', status.summary.counts.pushedVouchers > 0, '只保存凭证，不提交、不审核、不过账'],
-    ['日志可追溯', Number(status.summary.counts.operationLogs || 0) > 0, '操作日志保留批次、mock 标识和处理记录']
-  ];
-  teacherAcceptanceList.innerHTML = checks.map(([label, ok, detail]) =>
-    `<li class="${ok ? 'ok' : 'pending'}">${escapeHtml(label)}：${ok ? '通过' : '待验证'}，${escapeHtml(detail)}</li>`
-  ).join('');
-}
-
 function readConfig() {
   return {
     accountBookNumber: fields.accountBookNumber.value,
@@ -680,7 +686,7 @@ function buildVoucherRequest() {
   const fixedJson = fields.mockFixedJson.value.trim();
   const sourceId = sourceIdInput.value.trim();
   if (!fixedJson && !sourceId) {
-    throw new Error('请先同步分贝通并选择待处理单据，或保留固定 JSON mock 数据。');
+    throw new Error('请先同步分贝通并选择待处理单据，或保留来源数据样例。');
   }
   return {
     fixedJson: fixedJson || undefined,
@@ -734,7 +740,7 @@ function buildPreviewSummary(preview) {
 
 function draftOnlyWarning(record) {
   if (record.erpMockReplacement) {
-    return '模拟保存完成，不是真实 ERP 凭证。真实保存前仍需金蝶 GL_VOUCHER 示例验证。';
+    return '处理结果已保存。外部ERP接口启用前，不写入正式ERP凭证。';
   }
   return '已保存为 ERP 暂存凭证，未审核 / 未过账 / 需人工审核。';
 }
@@ -774,7 +780,7 @@ function showError(step, error) {
     code: error.code || 'FRONTEND_ERROR',
     detail: error.detail || {},
     step
-  }, `失败步骤：${step}；错误编码：${error.code || 'FRONTEND_ERROR'}；原因：${error.message}；下一步：老师看摘要，学生查看接口调试信息中的 detail。`);
+  }, `失败步骤：${step}；错误编码：${error.code || 'FRONTEND_ERROR'}；原因：${error.message}；请根据错误明细修正配置或来源单据后重试。`);
 }
 
 function summarizeValue(value) {

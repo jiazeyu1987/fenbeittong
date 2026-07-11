@@ -10,8 +10,8 @@
     <main class="app-shell">
       <section id="financeWorkbenchHeader" class="workbench-header">
         <div>
-          <h1>报销单列表</h1>
-          <p class="subtitle">财务按来源单据逐张复核费用、税额、科目、辅助核算和借贷平衡；系统只保存金蝶暂存凭证，由财务人工审核。</p>
+          <h1>凭证生成工作台</h1>
+          <p class="subtitle">按报销单逐笔复核费用、税额、科目、辅助核算和借贷平衡；系统仅生成并保存ERP草稿凭证，后续审核由财务在ERP完成。</p>
         </div>
         <span id="statusBadge" class="badge">未连接</span>
       </section>
@@ -49,7 +49,7 @@
           <small id="kingdeeReady">-</small>
         </article>
         <article class="metric">
-          <span>Mock 替代</span>
+          <span>接口状态</span>
           <strong id="mockReplacement">-</strong>
           <small id="mockReason">-</small>
         </article>
@@ -61,7 +61,7 @@
       </section>
 
       <section id="environmentWarning" class="notice warning">
-        当前为可替换 mock 模式。分贝通 token 与金蝶真实保存示例到位后，可切换 real 模式联调；mock 保存不代表真实 ERP 已写入。
+        当前外部接口未全部启用，保存动作仅记录处理结果，不写入正式ERP。接口启用前请以ERP草稿凭证预览为准。
       </section>
 
       <section class="finance-grid">
@@ -69,7 +69,7 @@
           <div class="section-title">
             <div>
               <h2>报销单列表</h2>
-              <p>先从列表选中单据，再查看右侧财务复核结果。mock 单据会明确标记，不伪装成真实来源。</p>
+              <p>按单据状态筛选待处理、异常、已生成和已保存记录，选中单据后在右侧完成凭证复核。</p>
             </div>
             <button id="refreshButton" class="secondary">刷新状态</button>
           </div>
@@ -92,13 +92,13 @@
             <button id="primaryActionButton" class="primary-action">立即同步分贝通数据</button>
             <p id="actionBlockReason" class="block-reason">请先保存配置并同步分贝通数据。</p>
             <div class="actions">
-              <button id="loadTemplateButton" class="secondary">载入标准配置</button>
+              <button id="loadTemplateButton" class="secondary">载入默认设置</button>
               <button id="saveConfigButton" class="secondary">保存配置</button>
               <button id="syncButton">同步分贝通</button>
-              <button id="runSchedulerButton" class="secondary">测试定时任务</button>
+              <button id="runSchedulerButton" class="secondary">执行定时同步</button>
               <button id="previewButton" class="secondary">预览凭证</button>
               <button id="prepareButton" class="secondary">生成待保存凭证</button>
-              <button id="pushErpButton">Mock 保存 ERP 草稿</button>
+              <button id="pushErpButton">保存ERP草稿</button>
             </div>
           </div>
 
@@ -113,7 +113,7 @@
                   <th>部门</th>
                   <th>费用类型</th>
                   <th class="amount">金额</th>
-                  <th>Mock 标识</th>
+                  <th>接口来源</th>
                   <th>更新时间</th>
                 </tr>
               </thead>
@@ -180,40 +180,24 @@
 
       <section class="panel technical-panel">
         <details id="technicalDetails" class="technical-details">
-          <summary>验证与联调信息</summary>
+          <summary>系统设置</summary>
 
           <div class="technical-grid">
             <section class="technical-section">
-              <h2>系统自检</h2>
-              <p class="hint">学生和老师可以用这里确认 mock 流程是否已经具备独立验证条件。</p>
-              <ul id="selfCheckList" class="check-list">
-                <li>配置可用：待检查</li>
-                <li>mock 数据可同步：待检查</li>
-                <li>凭证可预览：待检查</li>
-                <li>ERP mock 保存可验证：待检查</li>
-                <li>真实模式缺失配置会失败提示：待检查</li>
-              </ul>
-            </section>
-
-            <section class="technical-section">
-              <h2>配置完整性</h2>
+              <h2>接口状态</h2>
               <ul id="configValidationList" class="check-list">
                 <li>账簿、凭证字、期间、科目和核算维度：待检查</li>
               </ul>
             </section>
 
             <section class="technical-section">
-              <h2>老师验收清单</h2>
-              <ul id="teacherAcceptanceList" class="check-list">
-                <li>打开页面后按主按钮完成 mock 闭环：待验证</li>
-                <li>凭证只保存，不审核、不过账：待验证</li>
-                <li>mock 与真实接口边界清晰：待验证</li>
-              </ul>
+              <h2>处理结果</h2>
+              <div id="resultSummary" class="result-summary">暂无处理结果。</div>
             </section>
           </div>
 
           <section class="technical-section">
-            <h2>配置管理</h2>
+            <h2>凭证参数</h2>
             <div class="grid">
               <label>账簿编码<input id="accountBookNumber" /></label>
               <label>凭证字编码<input id="voucherGroupNumber" /></label>
@@ -230,25 +214,10 @@
           </section>
 
           <section class="technical-section">
-            <h2>分贝通 mock 数据</h2>
-            <p class="hint">这些字段来自分贝通报销单。真实 token 到位后，mock 适配器可替换为真实分贝通接口。</p>
-            <label>固定 JSON mock 数据<textarea id="mockFixedJson" class="json-input"></textarea></label>
-          </section>
-
-          <section class="technical-section">
-            <h2>处理结果摘要</h2>
-            <div id="resultSummary" class="result-summary">暂无结果，请先执行同步或预览。</div>
+            <h2>来源数据样例</h2>
+            <p class="hint">用于在外部接口启用前保持凭证预览和规则校验可执行，接口启用后由分贝通数据自动填充。</p>
+            <label>来源数据样例<textarea id="mockFixedJson" class="json-input"></textarea></label>
             <pre id="resultOutput">{}</pre>
-          </section>
-
-          <section id="developerValidationPanel" class="technical-section">
-            <h2>开发者验证区</h2>
-            <p class="hint">学生可用这里确认本项目不依赖 IntRuoyi：运行 <code>npm run verify</code>，再按页面主按钮完成 mock 闭环。</p>
-            <div class="summary-grid">
-              <div><span>前端地址</span><strong>http://127.0.0.1:5173</strong></div>
-              <div><span>后端健康检查</span><strong>http://127.0.0.1:3001/api/health</strong></div>
-              <div><span>验证命令</span><strong>npm run verify</strong></div>
-            </div>
           </section>
 
           <section class="technical-section">
