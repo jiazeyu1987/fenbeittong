@@ -15,6 +15,11 @@ const fields = {
 
 const controls = {
   primaryAction: document.querySelector('#primaryActionButton'),
+  import: document.querySelector('#importButton'),
+  exportLedger: document.querySelector('#exportButton'),
+  queryLedger: document.querySelector('#queryLedgerButton'),
+  resetLedger: document.querySelector('#resetButton'),
+  columnSettings: document.querySelector('#columnSettingsButton'),
   loadTemplate: document.querySelector('#loadTemplateButton'),
   saveConfig: document.querySelector('#saveConfigButton'),
   sync: document.querySelector('#syncButton'),
@@ -42,6 +47,8 @@ const statusBadge = document.querySelector('#statusBadge');
 const resultOutput = document.querySelector('#resultOutput');
 const resultSummary = document.querySelector('#resultSummary');
 const sourceIdInput = document.querySelector('#sourceIdInput');
+const sourceSearchInput = document.querySelector('#sourceSearchInput');
+const paginationSummary = document.querySelector('#paginationSummary');
 const recordsTable = document.querySelector('#recordsTable');
 const logsList = document.querySelector('#logsList');
 const voucherPreviewBody = document.querySelector('#voucherPreviewBody');
@@ -55,6 +62,14 @@ const previewHashSummary = document.querySelector('#previewHashSummary');
 const financeReviewSummary = document.querySelector('#financeReviewSummary');
 
 controls.loadTemplate.addEventListener('click', run(loadTemplate));
+controls.import.addEventListener('click', run(syncFenbeitong));
+controls.queryLedger.addEventListener('click', () => renderSourceQueue(state.syncedDocuments));
+controls.resetLedger.addEventListener('click', () => {
+  sourceSearchInput.value = '';
+  renderSourceQueue(state.syncedDocuments);
+});
+controls.exportLedger.addEventListener('click', exportLedgerCsv);
+controls.columnSettings.addEventListener('click', () => show({ columns: visibleLedgerColumns() }, '当前列表字段已按财务处理场景固定展示。'));
 controls.saveConfig.addEventListener('click', run(saveConfig));
 controls.sync.addEventListener('click', run(syncFenbeitong));
 controls.runScheduler.addEventListener('click', run(runSchedulerOnce));
@@ -66,6 +81,11 @@ controls.refresh.addEventListener('click', run(refreshAll));
 controls.listRecords.addEventListener('click', run(refreshRecords));
 controls.primaryAction.addEventListener('click', run(runPrimaryAction));
 sourceQueueBody.addEventListener('click', run(selectQueuedDocument));
+sourceSearchInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    renderSourceQueue(state.syncedDocuments);
+  }
+});
 sourceIdInput.addEventListener('input', () => {
   invalidatePreview('预览已失效：来源单据已变化，请重新预览凭证。');
   renderActionState();
@@ -371,13 +391,17 @@ function renderConfigValidation() {
 }
 
 function renderSourceQueue(records) {
-  if (records.length === 0) {
+  const visibleRecords = filterLedgerRecords(records);
+  if (paginationSummary) {
+    paginationSummary.textContent = `Total ${visibleRecords.length}`;
+  }
+  if (visibleRecords.length === 0) {
     sourceQueueBody.innerHTML = '<tr><td colspan="9">暂无待处理单据，请先同步分贝通数据。</td></tr>';
     renderFinanceReview(state.lastPreview);
     return;
   }
   const selected = sourceIdInput.value.trim();
-  sourceQueueBody.innerHTML = records.map((record) => {
+  sourceQueueBody.innerHTML = visibleRecords.map((record) => {
     const summary = buildSourceSummary(record);
     return `
     <tr class="${record.sourceId === selected ? 'selected' : ''}">
@@ -394,6 +418,59 @@ function renderSourceQueue(records) {
   `;
   }).join('');
   renderFinanceReview(state.lastPreview);
+}
+
+function filterLedgerRecords(records) {
+  const keyword = sourceSearchInput.value.trim().toLowerCase();
+  if (!keyword) {
+    return records;
+  }
+  return records.filter((record) => {
+    const summary = buildSourceSummary(record);
+    return [
+      record.sourceId,
+      record.sourceCode,
+      displaySourceCode(record),
+      displayRequester(record, summary.requester),
+      summary.department,
+      displayExpenseCategories(record, summary.expenseCategories),
+      queueStatus(record)
+    ].some((value) => String(value || '').toLowerCase().includes(keyword));
+  });
+}
+
+function visibleLedgerColumns() {
+  return ['操作', '单据状态', '来源单号', '报销人', '部门', '费用类型', '金额', '接口来源', '更新时间'];
+}
+
+function exportLedgerCsv() {
+  const rows = filterLedgerRecords(state.syncedDocuments);
+  const header = visibleLedgerColumns().slice(1);
+  const csvRows = [
+    header,
+    ...rows.map((record) => {
+      const summary = buildSourceSummary(record);
+      return [
+        queueStatus(record),
+        displaySourceCode(record),
+        displayRequester(record, summary.requester),
+        summary.department,
+        displayExpenseCategories(record, summary.expenseCategories),
+        formatMoney(summary.totalAmount),
+        record.mockReplacement ? '接口未启用' : '正式接口',
+        record.updateTime || ''
+      ];
+    })
+  ];
+  const csv = csvRows.map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\n');
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `报销单列表-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+  show({ count: rows.length }, `已导出 ${rows.length} 条报销单列表数据。`);
 }
 
 function renderVoucherPreview(preview) {

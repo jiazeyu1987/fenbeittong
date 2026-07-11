@@ -6,6 +6,17 @@ test('frontend page exposes expected workflow controls', () => {
   const html = readFileSync('frontend/src/index.html', 'utf8');
   for (const id of [
     'financeWorkbenchHeader',
+    'ledgerToolbar',
+    'sourceSearchInput',
+    'queryLedgerButton',
+    'importButton',
+    'exportButton',
+    'resetButton',
+    'columnSettingsButton',
+    'paginationSummary',
+    'pageSizeSelect',
+    'currentPageButton',
+    'gotoPageInput',
     'financeQueuePanel',
     'financeReviewPanel',
     'exceptionCount',
@@ -51,15 +62,31 @@ test('frontend is centered on a finance source document list', () => {
   const html = readFileSync('frontend/src/index.html', 'utf8');
   const app = readFileSync('frontend/src/app.js', 'utf8');
   assert.match(html, /报销单列表/);
-  assert.match(html, /财务复核/);
-  assert.match(html, /异常单据/);
-  assert.match(html, /已保存草稿/);
-  assert.match(html, /重复风险/);
+  assert.match(html, /报销单号/);
+  assert.match(html, /单据状态/);
   assert.match(html, /来源单号/);
-  assert.match(html, /借贷平衡/);
+  assert.match(html, /报销人/);
+  assert.match(html, /费用类型/);
+  assert.match(html, /接口来源/);
+  assert.match(html, /第三方导入/);
   assert.doesNotMatch(html, /Fenbeitong Kingdee Voucher Integration/);
+  assert.doesNotMatch(html, /class="metric-grid"/);
   assert.match(app, /renderFinanceReview/);
   assert.match(app, /financeReviewSummary/);
+});
+
+test('frontend uses fullscreen ledger table layout', () => {
+  const html = readFileSync('frontend/src/index.html', 'utf8');
+  assert.match(html, /class="ledger-shell"/);
+  assert.match(html, /id="ledgerToolbar"/);
+  assert.match(html, /placeholder="请输入报销单号"/);
+  assert.match(html, /第三方导入/);
+  assert.match(html, /导出/);
+  assert.match(html, /显示字段/);
+  assert.match(html, /Total/);
+  assert.doesNotMatch(html, /class="metric-grid"/);
+  assert.doesNotMatch(html, /财务处理概览/);
+  assert.doesNotMatch(html, /建议下一步/);
 });
 
 test('frontend source is productized rather than a raw debug console', () => {
@@ -88,8 +115,9 @@ test('frontend visible copy remains readable Chinese without mojibake', () => {
   assert.match(html, /保存ERP草稿/);
   assert.match(app, /失败步骤/);
   assert.match(app, /错误编码/);
-  assert.match(html, /操作日志/);
-  assert.match(html, /处理记录/);
+  assert.match(html, /报销单列表/);
+  assert.match(html, /第三方导入/);
+  assert.match(html, /显示字段/);
   assert.match(app, /预览已失效/);
 });
 
@@ -115,10 +143,10 @@ test('frontend visible copy is production finance copy', () => {
     assert.doesNotMatch(app, pattern);
   }
   assert.match(html, /单据状态/);
-  assert.match(html, /凭证状态/);
-  assert.match(html, /接口状态/);
-  assert.match(html, /系统设置/);
-  assert.match(html, /处理记录/);
+  assert.match(html, /报销人/);
+  assert.match(html, /金额/);
+  assert.match(html, /接口来源/);
+  assert.match(html, /更新时间/);
 });
 
 test('frontend api points only to local mock backend', () => {

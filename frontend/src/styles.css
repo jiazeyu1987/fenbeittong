@@ -4,9 +4,167 @@
 
 body {
   margin: 0;
-  background: #eef2f6;
-  color: #182230;
+  background: #f5f7fa;
+  color: #2f3a4a;
   font-family: Arial, "Microsoft YaHei", sans-serif;
+}
+
+.ledger-shell {
+  width: 100vw;
+  min-height: 100vh;
+  padding: 16px 18px 0;
+}
+
+.ledger-header {
+  display: none;
+}
+
+.ledger-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.ledger-toolbar select,
+.ledger-toolbar input {
+  height: 32px;
+  border: 1px solid #d7dde8;
+  border-radius: 4px;
+  background: #fff;
+  color: #4b5565;
+  font-size: 14px;
+}
+
+.ledger-toolbar select {
+  width: 150px;
+  padding: 0 12px;
+}
+
+.ledger-toolbar input {
+  width: 220px;
+  padding: 0 12px;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.compact-action,
+.outline-action,
+.success-action,
+.page-button {
+  height: 32px;
+  border-radius: 4px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+
+.compact-action {
+  min-width: 82px;
+}
+
+.outline-action {
+  border-color: #8bd4d0;
+  background: #eefcfb;
+  color: #008f86;
+}
+
+.success-action {
+  border-color: #b8e4a2;
+  background: #f3fff0;
+  color: #4c9a2a;
+}
+
+.ledger-warning {
+  display: none;
+}
+
+.ledger-table-panel {
+  overflow: auto;
+  height: calc(100vh - 96px);
+  border: 1px solid #d9e1ec;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.ledger-table {
+  width: 100%;
+  min-width: 1180px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 14px;
+}
+
+.ledger-table th,
+.ledger-table td {
+  height: 40px;
+  border-right: 1px solid #e6ebf2;
+  border-bottom: 1px solid #e8edf4;
+  padding: 0 12px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.ledger-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f7f9fc;
+  color: #6b7280;
+  font-weight: 700;
+}
+
+.ledger-table tr:nth-child(even) td {
+  background: #fbfbfc;
+}
+
+.ledger-table tr.selected td {
+  background: #edf7ff;
+}
+
+.ledger-pagination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 74px;
+  border-top: 1px solid #e2e8f0;
+  background: #fff;
+  color: #4b5565;
+  font-size: 14px;
+}
+
+.ledger-pagination select,
+.goto-page input {
+  height: 32px;
+  border: 1px solid #d7dde8;
+  border-radius: 4px;
+  background: #fff;
+  color: #4b5565;
+  padding: 0 10px;
+}
+
+.goto-page input {
+  width: 56px;
+  margin-left: 8px;
+  text-align: center;
+}
+
+.page-button {
+  min-width: 32px;
+  border: 0;
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.page-button.active {
+  background: #009688;
+  color: #fff;
+}
+
+.auxiliary-panel[hidden],
+[hidden] {
+  display: none !important;
 }
 
 .app-shell {

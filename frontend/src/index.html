@@ -7,249 +7,143 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="app-shell">
-      <section id="financeWorkbenchHeader" class="workbench-header">
+    <main class="ledger-shell">
+      <section id="financeWorkbenchHeader" class="ledger-header" aria-label="凭证生成工作台">
         <div>
-          <h1>凭证生成工作台</h1>
-          <p class="subtitle">按报销单逐笔复核费用、税额、科目、辅助核算和借贷平衡；系统仅生成并保存ERP草稿凭证，后续审核由财务在ERP完成。</p>
+          <h1>报销单列表</h1>
+          <p>按报销单逐笔复核费用、税额、科目、辅助核算和借贷平衡，仅保存ERP草稿凭证。</p>
         </div>
         <span id="statusBadge" class="badge">未连接</span>
       </section>
 
-      <section class="metric-grid" aria-label="财务处理概览">
-        <article class="metric">
-          <span>待复核单据</span>
-          <strong id="syncedCount">0</strong>
-          <small>已同步的分贝通报销单</small>
-        </article>
-        <article class="metric">
-          <span>异常单据</span>
-          <strong id="exceptionCount">0</strong>
-          <small>同步或校验失败需处理</small>
-        </article>
-        <article class="metric">
-          <span>已保存草稿</span>
-          <strong id="draftCount">0</strong>
-          <small>金蝶暂存凭证，不审核不过账</small>
-          <span id="pushedCount" hidden>0</span>
-        </article>
-        <article class="metric">
-          <span>重复风险</span>
-          <strong id="riskCount">0</strong>
-          <small>已保存单据再次推送会被拦截</small>
-        </article>
-        <article class="metric">
-          <span>数据来源</span>
-          <strong id="fenbeitongMode">-</strong>
-          <small id="fenbeitongReady">-</small>
-        </article>
-        <article class="metric">
-          <span>金蝶状态</span>
-          <strong id="kingdeeMode">-</strong>
-          <small id="kingdeeReady">-</small>
-        </article>
-        <article class="metric">
-          <span>接口状态</span>
-          <strong id="mockReplacement">-</strong>
-          <small id="mockReason">-</small>
-        </article>
-        <article class="metric">
-          <span>定时任务</span>
-          <strong id="schedulerEnabled">-</strong>
-          <small id="schedulerDetail">-</small>
-        </article>
+      <section id="ledgerToolbar" class="ledger-toolbar" aria-label="报销单查询工具栏">
+        <select aria-label="查询字段">
+          <option>报销单号</option>
+          <option>报销人</option>
+          <option>部门</option>
+          <option>单据状态</option>
+        </select>
+        <select aria-label="匹配方式">
+          <option>包含</option>
+          <option>等于</option>
+          <option>不等于</option>
+        </select>
+        <input id="sourceSearchInput" placeholder="请输入报销单号" />
+        <button id="queryLedgerButton" class="primary-action compact-action">查询</button>
+
+        <div class="toolbar-spacer"></div>
+
+        <button id="importButton" class="outline-action">第三方导入</button>
+        <button id="exportButton" class="success-action">导出</button>
+        <button id="resetButton" class="secondary">重置</button>
+        <button id="columnSettingsButton" class="secondary">显示字段</button>
       </section>
 
-      <section id="environmentWarning" class="notice warning">
-        当前外部接口未全部启用，保存动作仅记录处理结果，不写入正式ERP。接口启用前请以ERP草稿凭证预览为准。
+      <section id="environmentWarning" class="ledger-warning">
+        当前外部接口未全部启用，保存动作仅记录处理结果，不写入正式ERP。
       </section>
 
-      <section class="finance-grid">
-        <section id="financeQueuePanel" class="panel finance-queue-panel">
-          <div class="section-title">
-            <div>
-              <h2>报销单列表</h2>
-              <p>按单据状态筛选待处理、异常、已生成和已保存记录，选中单据后在右侧完成凭证复核。</p>
-            </div>
-            <button id="refreshButton" class="secondary">刷新状态</button>
-          </div>
-
-          <div id="sourceQueueFilters" class="filter-bar" aria-label="列表筛选">
-            <button type="button" class="filter-chip active">全部</button>
-            <button type="button" class="filter-chip">待复核</button>
-            <button type="button" class="filter-chip">异常单据</button>
-            <button type="button" class="filter-chip">已保存草稿</button>
-            <button type="button" class="filter-chip">重复风险</button>
-          </div>
-
-          <div class="finance-command-bar">
-            <div class="next-action">
-              <span>建议下一步</span>
-              <strong id="nextActionText">当前未同步分贝通数据，建议先点击立即同步分贝通数据。</strong>
-            </div>
-            <div id="syncBatchSummary" class="batch-summary">尚未产生同步批次。</div>
-            <div id="previewHashSummary" class="hash-summary">尚未生成凭证预览。</div>
-            <button id="primaryActionButton" class="primary-action">立即同步分贝通数据</button>
-            <p id="actionBlockReason" class="block-reason">请先保存配置并同步分贝通数据。</p>
-            <div class="actions">
-              <button id="loadTemplateButton" class="secondary">载入默认设置</button>
-              <button id="saveConfigButton" class="secondary">保存配置</button>
-              <button id="syncButton">同步分贝通</button>
-              <button id="runSchedulerButton" class="secondary">执行定时同步</button>
-              <button id="previewButton" class="secondary">预览凭证</button>
-              <button id="prepareButton" class="secondary">生成待保存凭证</button>
-              <button id="pushErpButton">保存ERP草稿</button>
-            </div>
-          </div>
-
-          <div class="table-wrap list-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>操作</th>
-                  <th>状态</th>
-                  <th>来源单号</th>
-                  <th>报销人</th>
-                  <th>部门</th>
-                  <th>费用类型</th>
-                  <th class="amount">金额</th>
-                  <th>接口来源</th>
-                  <th>更新时间</th>
-                </tr>
-              </thead>
-              <tbody id="sourceQueueBody">
-                <tr><td colspan="9">暂无待处理单据，请先同步分贝通数据。</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section id="financeReviewPanel" class="panel finance-review-panel">
-          <div class="section-title">
-            <div>
-              <h2>财务复核</h2>
-              <p>重点看来源、金额、税额、期间、科目、辅助核算和借贷平衡。</p>
-            </div>
-          </div>
-
-          <div id="financeReviewSummary" class="review-summary">
-            请先从报销单列表选择一张单据。
-          </div>
-
-          <div class="summary-grid">
-            <div><span>借贷平衡</span><strong id="previewBalanced">-</strong></div>
-            <div><span>借方金额</span><strong id="previewDebitTotal">0.00</strong></div>
-            <div><span>贷方金额</span><strong id="previewCreditTotal">0.00</strong></div>
-            <div><span>分录数</span><strong id="previewLineCount">0</strong></div>
-            <div><span>税额</span><strong id="previewTaxTotal">0.00</strong></div>
-            <div><span>凭证状态</span><strong id="draftOnlyWarning">未审核 / 未过账 / 需人工审核</strong></div>
-          </div>
-
-          <div id="saveConfirmPanel" class="confirm-panel" hidden>
-            <h3>保存前确认</h3>
-            <p id="saveConfirmSummary">请先预览凭证。</p>
-            <p id="saveRiskNotice" class="risk-text">凭证只保存为金蝶暂存，不提交、不审核、不过账。</p>
-          </div>
-
-          <h3>生成前财务校验</h3>
-          <ul id="voucherValidationList" class="check-list">
-            <li>请先预览凭证，系统会校验账簿、凭证字、期间、借贷平衡、税额和科目映射。</li>
-          </ul>
-
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>摘要</th>
-                  <th>来源明细</th>
-                  <th>科目编码</th>
-                  <th>科目名称</th>
-                  <th>核算维度</th>
-                  <th>映射规则</th>
-                  <th class="amount">借方金额</th>
-                  <th class="amount">贷方金额</th>
-                </tr>
-              </thead>
-              <tbody id="voucherPreviewBody">
-                <tr><td colspan="8">暂无凭证预览，请先点击预览凭证。</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
+      <section id="financeQueuePanel" class="ledger-table-panel">
+        <table class="ledger-table">
+          <thead>
+            <tr>
+              <th>操作</th>
+              <th>单据状态</th>
+              <th>来源单号</th>
+              <th>报销人</th>
+              <th>部门</th>
+              <th>费用类型</th>
+              <th class="amount">金额</th>
+              <th>接口来源</th>
+              <th>更新时间</th>
+            </tr>
+          </thead>
+          <tbody id="sourceQueueBody">
+            <tr><td colspan="9">暂无待处理单据，请先执行第三方导入。</td></tr>
+          </tbody>
+        </table>
       </section>
 
-      <section class="panel technical-panel">
-        <details id="technicalDetails" class="technical-details">
+      <section class="ledger-pagination" aria-label="分页">
+        <span id="paginationSummary">Total 0</span>
+        <select id="pageSizeSelect" aria-label="每页条数">
+          <option>20/page</option>
+          <option>50/page</option>
+          <option>100/page</option>
+        </select>
+        <button class="page-button" disabled>‹</button>
+        <button id="currentPageButton" class="page-button active">1</button>
+        <button class="page-button">2</button>
+        <button class="page-button">3</button>
+        <button class="page-button">4</button>
+        <button class="page-button">›</button>
+        <label class="goto-page">Go to <input id="gotoPageInput" value="1" /></label>
+      </section>
+
+      <section id="financeReviewPanel" class="auxiliary-panel" hidden>
+        <div id="financeReviewSummary">请先从报销单列表选择一张单据。</div>
+        <div id="saveConfirmPanel" hidden>
+          <p id="saveConfirmSummary">请先预览凭证。</p>
+          <p id="saveRiskNotice">凭证只保存为金蝶暂存，不提交、不审核、不过账。</p>
+        </div>
+        <div id="voucherValidationList"></div>
+        <div id="voucherPreviewBody"></div>
+        <span id="previewBalanced">-</span>
+        <span id="previewDebitTotal">0.00</span>
+        <span id="previewCreditTotal">0.00</span>
+        <span id="previewLineCount">0</span>
+        <span id="previewTaxTotal">0.00</span>
+        <span id="draftOnlyWarning">未审核 / 未过账 / 需人工审核</span>
+      </section>
+
+      <section class="auxiliary-panel" hidden>
+        <span id="syncedCount">0</span>
+        <span id="exceptionCount">0</span>
+        <span id="draftCount">0</span>
+        <span id="riskCount">0</span>
+        <span id="pushedCount">0</span>
+        <span id="fenbeitongMode">-</span>
+        <span id="fenbeitongReady">-</span>
+        <span id="kingdeeMode">-</span>
+        <span id="kingdeeReady">-</span>
+        <span id="mockReplacement">-</span>
+        <span id="mockReason">-</span>
+        <span id="schedulerEnabled">-</span>
+        <span id="schedulerDetail">-</span>
+        <span id="nextActionText">等待导入来源单据。</span>
+        <span id="syncBatchSummary">尚未产生同步批次。</span>
+        <span id="previewHashSummary">尚未生成凭证预览。</span>
+        <span id="actionBlockReason">请先导入来源单据。</span>
+        <button id="primaryActionButton">主操作</button>
+        <button id="loadTemplateButton">载入默认设置</button>
+        <button id="saveConfigButton">保存配置</button>
+        <button id="syncButton">同步分贝通</button>
+        <button id="runSchedulerButton">执行定时同步</button>
+        <button id="previewButton">预览凭证</button>
+        <button id="prepareButton">生成待保存凭证</button>
+        <button id="pushErpButton">保存ERP草稿</button>
+        <button id="refreshButton">刷新状态</button>
+        <div id="sourceQueueFilters"></div>
+        <details id="technicalDetails">
           <summary>系统设置</summary>
-
-          <div class="technical-grid">
-            <section class="technical-section">
-              <h2>接口状态</h2>
-              <ul id="configValidationList" class="check-list">
-                <li>账簿、凭证字、期间、科目和核算维度：待检查</li>
-              </ul>
-            </section>
-
-            <section class="technical-section">
-              <h2>处理结果</h2>
-              <div id="resultSummary" class="result-summary">暂无处理结果。</div>
-            </section>
-          </div>
-
-          <section class="technical-section">
-            <h2>凭证参数</h2>
-            <div class="grid">
-              <label>账簿编码<input id="accountBookNumber" /></label>
-              <label>凭证字编码<input id="voucherGroupNumber" /></label>
-              <label>模板 FID<input id="templateErpFid" /></label>
-              <label>凭证日期<input id="mockVoucherDate" type="date" /></label>
-              <label>年度<input id="mockYear" type="number" /></label>
-              <label>期间<input id="mockPeriod" type="number" /></label>
-            </div>
-            <div class="grid textareas">
-              <label>币别映射<textarea id="currencyNumbers"></textarea></label>
-              <label>费用科目映射<textarea id="categoryAccountNumbers"></textarea></label>
-              <label>贷方核算维度<textarea id="creditDetailNumbers"></textarea></label>
-            </div>
-          </section>
-
-          <section class="technical-section">
-            <h2>来源数据样例</h2>
-            <p class="hint">用于在外部接口启用前保持凭证预览和规则校验可执行，接口启用后由分贝通数据自动填充。</p>
-            <label>来源数据样例<textarea id="mockFixedJson" class="json-input"></textarea></label>
-            <pre id="resultOutput">{}</pre>
-          </section>
-
-          <section class="technical-section">
-            <h2>处理记录</h2>
-            <p class="hint">本地处理字段用于追踪来源 ID、幂等键、处理阶段、ERP 返回编号，不属于凭证业务字段。</p>
-            <div class="inline">
-              <input id="sourceIdInput" placeholder="来源 ID，例如 MOCK-REIMB-001" />
-              <button id="queryButton" class="secondary">查询单条记录</button>
-              <button id="listRecordsButton" class="secondary">刷新记录列表</button>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>来源 ID</th>
-                    <th>来源单号</th>
-                    <th>处理阶段</th>
-                    <th>ERP FID</th>
-                    <th>更新时间</th>
-                  </tr>
-                </thead>
-                <tbody id="recordsTable">
-                  <tr><td colspan="5">暂无记录，请先同步分贝通数据。</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section class="technical-section">
-            <h2>操作日志</h2>
-            <div id="logsList" class="log-list">暂无日志</div>
-          </section>
+          <ul id="configValidationList"></ul>
+          <div id="resultSummary">暂无处理结果。</div>
+          <pre id="resultOutput">{}</pre>
+          <input id="accountBookNumber" />
+          <input id="voucherGroupNumber" />
+          <input id="templateErpFid" />
+          <input id="mockVoucherDate" type="date" />
+          <input id="mockYear" type="number" />
+          <input id="mockPeriod" type="number" />
+          <textarea id="currencyNumbers"></textarea>
+          <textarea id="categoryAccountNumbers"></textarea>
+          <textarea id="creditDetailNumbers"></textarea>
+          <textarea id="mockFixedJson"></textarea>
+          <input id="sourceIdInput" />
+          <button id="queryButton">查询单条记录</button>
+          <button id="listRecordsButton">刷新记录列表</button>
+          <table><tbody id="recordsTable"></tbody></table>
+          <div id="logsList"></div>
         </details>
       </section>
     </main>
