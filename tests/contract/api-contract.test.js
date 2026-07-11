@@ -2,6 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildMockTemplate } from '../../backend/src/mock-template.js';
 import { buildVoucherPreview } from '../../backend/src/voucher-mapper.js';
+import { getSystemStatus } from '../../backend/src/services/system-status.js';
+import { resetRepository } from '../../backend/src/repository.js';
+import { validateFenbeitongConfig } from '../../backend/src/config.js';
 
 test('mock template contains required fields and no real token', () => {
   const template = buildMockTemplate();
@@ -25,3 +28,54 @@ test('preview response keeps stable contract fields', () => {
     assert.ok(Object.hasOwn(preview, field), `${field} should exist`);
   }
 });
+
+test('voucher payload writes only Kingdee GL_VOUCHER fields', () => {
+  const template = buildMockTemplate();
+  const preview = buildVoucherPreview({
+    fixedJson: template.mockFixedJson,
+    voucherDate: template.mockVoucherDate,
+    year: template.mockYear,
+    period: template.mockPeriod,
+    config: template
+  });
+
+  assert.ok(Object.hasOwn(preview.payload.Model, 'FAccountBookID'));
+  assert.ok(Object.hasOwn(preview.payload.Model, 'FVOUCHERGROUPID'));
+  assert.ok(Object.hasOwn(preview.payload.Model, 'FEntity'));
+  assert.equal(Object.hasOwn(preview.payload.Model, 'reimb_id'), false);
+  assert.equal(Object.hasOwn(preview.payload.Model.FEntity[0], 'cost_category'), false);
+});
+
+test('system status exposes mode and readiness for formal workflow', () => {
+  resetRepository();
+  const status = getSystemStatus();
+  assert.equal(status.mode.fenbeitong, 'mock');
+  assert.equal(status.mode.kingdee, 'mock');
+  assert.equal(status.readiness.fenbeitong.ready, true);
+  assert.equal(status.readiness.kingdee.ready, true);
+  assert.ok(Object.hasOwn(status.summary.counts, 'syncedDocuments'));
+  assert.equal(status.config.fenbeitong.accessTokenConfigured, false);
+});
+
+test('real Fenbeitong mode fails fast when required config is missing', () => {
+  const previousMode = process.env.FENBEITONG_MODE;
+  const previousUrl = process.env.FENBEITONG_BASE_URL;
+  const previousToken = process.env.FENBEITONG_ACCESS_TOKEN;
+  process.env.FENBEITONG_MODE = 'real';
+  process.env.FENBEITONG_BASE_URL = '';
+  process.env.FENBEITONG_ACCESS_TOKEN = '';
+
+  assert.throws(() => validateFenbeitongConfig(), /FENBEITONG_BASE_URL/);
+
+  restoreEnv('FENBEITONG_MODE', previousMode);
+  restoreEnv('FENBEITONG_BASE_URL', previousUrl);
+  restoreEnv('FENBEITONG_ACCESS_TOKEN', previousToken);
+});
+
+function restoreEnv(name, value) {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}

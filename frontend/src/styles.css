@@ -4,22 +4,41 @@
 
 body {
   margin: 0;
-  background: #f4f6f8;
-  color: #1f2937;
+  background: #eef2f6;
+  color: #182230;
   font-family: Arial, "Microsoft YaHei", sans-serif;
 }
 
 .app-shell {
-  max-width: 1180px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 28px;
 }
 
-.toolbar {
+.hero,
+.panel,
+.metric {
+  border: 1px solid #d9e1ea;
+  background: #fff;
+}
+
+.hero {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 20px;
   margin-bottom: 16px;
+  border-radius: 8px;
+  padding: 22px;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
 }
 
 h1,
@@ -29,25 +48,34 @@ p {
 }
 
 h1 {
-  font-size: 28px;
+  font-size: 30px;
+  line-height: 1.2;
 }
 
 h2 {
-  margin-bottom: 14px;
+  margin-bottom: 10px;
   font-size: 18px;
 }
 
-p {
-  margin-top: 6px;
+.subtitle,
+.hint,
+.section-title p,
+.metric small {
   color: #667085;
 }
 
+.subtitle {
+  margin-top: 8px;
+}
+
 .badge {
+  min-width: 110px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   padding: 8px 12px;
-  background: #fff;
+  background: #f8fafc;
   color: #475569;
+  text-align: center;
 }
 
 .badge.ok {
@@ -55,12 +83,47 @@ p {
   color: #047857;
 }
 
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.metric {
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.metric span,
+.metric small {
+  display: block;
+  font-size: 13px;
+}
+
+.metric strong {
+  display: block;
+  margin: 8px 0 4px;
+  font-size: 24px;
+}
+
 .panel {
   margin-bottom: 16px;
-  border: 1px solid #e5e7eb;
   border-radius: 8px;
-  background: #fff;
   padding: 18px;
+}
+
+.section-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
+  gap: 16px;
 }
 
 .grid {
@@ -76,7 +139,7 @@ p {
 label {
   display: grid;
   gap: 6px;
-  color: #334155;
+  color: #344054;
   font-size: 14px;
 }
 
@@ -101,13 +164,15 @@ textarea {
 }
 
 .json-input {
-  min-height: 220px;
+  min-height: 300px;
   font-family: Consolas, monospace;
+  font-size: 13px;
 }
 
 .actions,
 .inline {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 14px;
 }
@@ -128,21 +193,80 @@ button:hover {
   background: #115e59;
 }
 
+button.secondary {
+  border-color: #cbd5e1;
+  background: #fff;
+  color: #344054;
+}
+
+button.secondary:hover {
+  background: #f8fafc;
+}
+
+.table-wrap {
+  overflow: auto;
+  margin-top: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+th,
+td {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  background: #f8fafc;
+  color: #475467;
+}
+
 .result-panel pre {
   overflow: auto;
-  min-height: 220px;
+  min-height: 260px;
   border-radius: 6px;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: #101828;
+  color: #e4e7ec;
   padding: 14px;
 }
 
-@media (max-width: 860px) {
+.log-list {
+  display: grid;
+  gap: 10px;
+  color: #667085;
+}
+
+.log-item {
+  border-bottom: 1px solid #eaecf0;
+  padding-bottom: 10px;
+}
+
+.log-item strong,
+.log-item span {
+  display: block;
+}
+
+.log-item strong {
+  color: #182230;
+}
+
+@media (max-width: 960px) {
+  .metric-grid,
+  .layout,
   .grid {
     grid-template-columns: 1fr;
   }
 
-  .toolbar,
+  .hero,
+  .section-title,
   .actions,
   .inline {
     align-items: stretch;

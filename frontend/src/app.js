@@ -13,46 +13,128 @@ const fields = {
   mockFixedJson: document.querySelector('#mockFixedJson')
 };
 
-const resultOutput = document.querySelector('#resultOutput');
 const statusBadge = document.querySelector('#statusBadge');
+const resultOutput = document.querySelector('#resultOutput');
 const sourceIdInput = document.querySelector('#sourceIdInput');
+const recordsTable = document.querySelector('#recordsTable');
+const logsList = document.querySelector('#logsList');
 
-document.querySelector('#loadTemplateButton').addEventListener('click', loadTemplate);
-document.querySelector('#saveConfigButton').addEventListener('click', saveConfig);
-document.querySelector('#previewButton').addEventListener('click', preview);
-document.querySelector('#prepareButton').addEventListener('click', prepare);
-document.querySelector('#queryButton').addEventListener('click', queryProcess);
+document.querySelector('#loadTemplateButton').addEventListener('click', run(loadTemplate));
+document.querySelector('#saveConfigButton').addEventListener('click', run(saveConfig));
+document.querySelector('#syncButton').addEventListener('click', run(syncFenbeitong));
+document.querySelector('#previewButton').addEventListener('click', run(preview));
+document.querySelector('#prepareButton').addEventListener('click', run(prepare));
+document.querySelector('#pushErpButton').addEventListener('click', run(pushErp));
+document.querySelector('#queryButton').addEventListener('click', run(queryProcess));
+document.querySelector('#refreshButton').addEventListener('click', run(refreshAll));
+document.querySelector('#listRecordsButton').addEventListener('click', run(refreshRecords));
 
-api.health()
-  .then(() => {
-    statusBadge.textContent = '后端已连接';
-    statusBadge.classList.add('ok');
-  })
-  .catch((error) => {
-    statusBadge.textContent = error.message;
-  });
+run(async () => {
+  await api.health();
+  statusBadge.textContent = '后端已连接';
+  statusBadge.classList.add('ok');
+  await loadTemplate();
+  await refreshAll();
+})();
 
 async function loadTemplate() {
-  show(await api.getMockTemplate());
-  applyTemplate(await api.getMockTemplate());
+  const template = await api.getMockTemplate();
+  applyTemplate(template);
+  show(template);
 }
 
 async function saveConfig() {
   show(await api.saveConfig(readConfig()));
+  await refreshLogs();
+}
+
+async function syncFenbeitong() {
+  const result = await api.syncFenbeitong();
+  const firstRecord = result.records[0];
+  if (firstRecord) {
+    sourceIdInput.value = firstRecord.sourceId;
+  }
+  show(result);
+  await refreshAll();
 }
 
 async function preview() {
-  show(await api.preview(buildRequest()));
+  show(await api.preview(buildVoucherRequest()));
 }
 
 async function prepare() {
-  const record = await api.prepare(buildRequest());
+  const record = await api.prepare(buildVoucherRequest());
   sourceIdInput.value = record.sourceId;
   show(record);
+  await refreshAll();
+}
+
+async function pushErp() {
+  const sourceId = requiredSourceId();
+  const record = await api.pushErp({
+    sourceId,
+    voucherDate: fields.mockVoucherDate.value,
+    year: Number(fields.mockYear.value),
+    period: Number(fields.mockPeriod.value),
+    config: readConfig()
+  });
+  show(record);
+  await refreshAll();
 }
 
 async function queryProcess() {
-  show(await api.getProcess(sourceIdInput.value));
+  show(await api.getProcess(requiredSourceId()));
+}
+
+async function refreshAll() {
+  const status = await api.systemStatus();
+  renderStatus(status);
+  await refreshRecords();
+  await refreshLogs();
+}
+
+async function refreshRecords() {
+  const records = await api.listProcessRecords();
+  if (records.length === 0) {
+    recordsTable.innerHTML = '<tr><td colspan="5">暂无记录</td></tr>';
+    return;
+  }
+  recordsTable.innerHTML = records.map((record) => `
+    <tr>
+      <td>${escapeHtml(record.sourceId)}</td>
+      <td>${escapeHtml(record.sourceCode || '')}</td>
+      <td>${escapeHtml(stageName(record.processStage))}</td>
+      <td>${escapeHtml(record.erpFid || '-')}</td>
+      <td>${escapeHtml(record.updateTime || '')}</td>
+    </tr>
+  `).join('');
+}
+
+async function refreshLogs() {
+  const logs = await api.listLogs();
+  if (logs.length === 0) {
+    logsList.textContent = '暂无日志';
+    return;
+  }
+  logsList.innerHTML = logs.slice(0, 8).map((log) => `
+    <div class="log-item">
+      <strong>${escapeHtml(log.action)}</strong>
+      <span>${escapeHtml(log.status)} · ${escapeHtml(log.createdAt)}</span>
+    </div>
+  `).join('');
+}
+
+function renderStatus(status) {
+  document.querySelector('#fenbeitongMode').textContent = status.mode.fenbeitong.toUpperCase();
+  document.querySelector('#kingdeeMode').textContent = status.mode.kingdee.toUpperCase();
+  document.querySelector('#fenbeitongReady').textContent = status.readiness.fenbeitong.message;
+  document.querySelector('#kingdeeReady').textContent = status.readiness.kingdee.message;
+  document.querySelector('#syncedCount').textContent = status.summary.counts.syncedDocuments;
+  document.querySelector('#pushedCount').textContent = status.summary.counts.pushedVouchers;
+  const batch = status.summary.latestBatch;
+  const mockReplacement = Boolean(batch?.mockReplacement || status.mode.kingdee === 'mock' || status.mode.fenbeitong === 'mock');
+  document.querySelector('#mockReplacement').textContent = mockReplacement ? '启用' : '关闭';
+  document.querySelector('#mockReason').textContent = batch?.mockReason || (mockReplacement ? '外部依赖未全部就绪' : '真实接口模式');
 }
 
 function applyTemplate(template) {
@@ -73,12 +155,12 @@ function readConfig() {
     accountBookNumber: fields.accountBookNumber.value,
     voucherGroupNumber: fields.voucherGroupNumber.value,
     templateErpFid: fields.templateErpFid.value,
-    currencyNumbers: parseJson(fields.currencyNumbers.value, '币种映射'),
+    currencyNumbers: parseJson(fields.currencyNumbers.value, '币别映射'),
     categoryAccountNumbers: parseJson(fields.categoryAccountNumbers.value, '费用科目映射'),
     departmentDetailField: 'FDETAILID__FFLEX5',
     employeeDetailField: 'FDETAILID__FFLEX7',
     creditAccountNumber: '1002.01',
-    creditDetailNumbers: parseJson(fields.creditDetailNumbers.value, '贷方维度'),
+    creditDetailNumbers: parseJson(fields.creditDetailNumbers.value, '贷方核算维度'),
     exchangeRateTypeNumber: 'HLTX01_SYS',
     exchangeRate: 1,
     splitDeductibleTax: true,
@@ -86,12 +168,15 @@ function readConfig() {
   };
 }
 
-function buildRequest() {
-  if (!fields.mockFixedJson.value.trim()) {
-    throw new Error('固定 JSON 不能为空');
+function buildVoucherRequest() {
+  const fixedJson = fields.mockFixedJson.value.trim();
+  const sourceId = sourceIdInput.value.trim();
+  if (!fixedJson && !sourceId) {
+    throw new Error('请先同步分贝通，或保留固定 JSON mock 数据');
   }
   return {
-    fixedJson: fields.mockFixedJson.value,
+    fixedJson: fixedJson || undefined,
+    sourceId: sourceId || undefined,
     voucherDate: fields.mockVoucherDate.value,
     year: Number(fields.mockYear.value),
     period: Number(fields.mockPeriod.value),
@@ -111,10 +196,42 @@ function parseJson(text, label) {
   }
 }
 
+function requiredSourceId() {
+  const sourceId = sourceIdInput.value.trim();
+  if (!sourceId) {
+    throw new Error('请先同步分贝通，或输入来源 ID');
+  }
+  return sourceId;
+}
+
+function stageName(stage) {
+  const names = {
+    PREPARED: '已准备',
+    ERP_PUSHED: '已推送 ERP',
+    SYNCED: '已同步'
+  };
+  return names[stage] || stage || '-';
+}
+
 function show(value) {
   resultOutput.textContent = JSON.stringify(value, null, 2);
 }
 
-window.addEventListener('error', (event) => {
-  show({ error: event.error?.message || event.message });
-});
+function run(fn) {
+  return async () => {
+    try {
+      await fn();
+    } catch (error) {
+      show({ error: error.message });
+    }
+  };
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}

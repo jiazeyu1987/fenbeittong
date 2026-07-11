@@ -12,12 +12,21 @@ function startServer() {
   });
 }
 
-test('mock user path can template, preview, prepare, and query', async () => {
+test('mock user path can template, sync Fenbeitong, push ERP, and query', async () => {
   const { server, baseUrl } = await startServer();
   try {
     const templateResponse = await fetch(`${baseUrl}/api/fenbeitong-voucher/config/mock-template`);
     const templateBody = await templateResponse.json();
     assert.equal(templateBody.success, true);
+
+    const statusResponse = await fetch(`${baseUrl}/api/system/status`);
+    const statusBody = await statusResponse.json();
+    assert.equal(statusBody.data.mode.fenbeitong, 'mock');
+    assert.equal(statusBody.data.config.fenbeitong.accessTokenConfigured, false);
+
+    const readyResponse = await fetch(`${baseUrl}/api/ready`);
+    const readyBody = await readyResponse.json();
+    assert.equal(readyBody.data.ready, true);
 
     const template = templateBody.data;
     const request = {
@@ -31,12 +40,34 @@ test('mock user path can template, preview, prepare, and query', async () => {
     const previewBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/preview`, request);
     assert.equal(previewBody.data.balanced, true);
 
-    const prepareBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/prepare`, request);
-    assert.equal(prepareBody.data.processStage, 'PREPARED');
+    const syncBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/sync`, {});
+    assert.equal(syncBody.data.batch.status, 'SUCCESS');
+    assert.equal(syncBody.data.batch.mockReplacement, true);
+    assert.equal(syncBody.data.records[0].processStage, 'SYNCED');
+    assert.equal(syncBody.data.records[0].mockReplacement, true);
+
+    const pushBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/push-erp`, {
+      sourceId: syncBody.data.records[0].sourceId,
+      voucherDate: template.mockVoucherDate,
+      year: template.mockYear,
+      period: template.mockPeriod,
+      config: template
+    });
+    assert.equal(pushBody.data.processStage, 'ERP_PUSHED');
+    assert.equal(pushBody.data.erpFid, 'MOCK-KINGDEE-FID');
+    assert.equal(pushBody.data.erpMockReplacement, true);
 
     const queryResponse = await fetch(`${baseUrl}/api/fenbeitong-voucher/process/MOCK-REIMB-001`);
     const queryBody = await queryResponse.json();
     assert.equal(queryBody.data.sourceId, 'MOCK-REIMB-001');
+
+    const recordsResponse = await fetch(`${baseUrl}/api/fenbeitong-voucher/process`);
+    const recordsBody = await recordsResponse.json();
+    assert.equal(recordsBody.data.length, 1);
+
+    const logsResponse = await fetch(`${baseUrl}/api/operations/logs`);
+    const logsBody = await logsResponse.json();
+    assert.ok(logsBody.data.some((log) => log.action === 'ERP_PUSH'));
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

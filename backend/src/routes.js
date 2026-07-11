@@ -1,13 +1,14 @@
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { buildMockTemplate } from './mock-template.js';
-import { buildVoucherPreview } from './voucher-mapper.js';
-import { findPreparedRecord, getConfig, saveConfig, savePreparedRecord } from './repository.js';
 import { readJson, sendError, sendJson } from './http-utils.js';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const root = resolve(here, '../..');
+import { getReadinessStatus, getSystemStatus } from './services/system-status.js';
+import { prepareVoucher, previewVoucher, pushVoucherToErp, syncFenbeitongDocuments } from './services/voucher-workflow.js';
+import {
+  findPreparedRecord,
+  getConfig,
+  listOperationLogs,
+  listProcessRecords,
+  saveConfig
+} from './repository.js';
 
 export async function handleApi(request, response) {
   if (request.method === 'OPTIONS') {
@@ -18,6 +19,16 @@ export async function handleApi(request, response) {
   try {
     if (request.method === 'GET' && url.pathname === '/api/health') {
       return sendJson(response, 200, { success: true, status: 'ok' });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/ready') {
+      const readiness = getReadinessStatus();
+      return sendJson(response, readiness.ready ? 200 : 503, { success: readiness.ready, data: readiness });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/system/status') {
+      return sendJson(response, 200, { success: true, data: getSystemStatus() });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/system/config-summary') {
+      return sendJson(response, 200, { success: true, data: getSystemStatus().config });
     }
     if (request.method === 'GET' && url.pathname === '/api/fenbeitong-voucher/config/mock-template') {
       return sendJson(response, 200, { success: true, data: buildMockTemplate() });
@@ -32,12 +43,20 @@ export async function handleApi(request, response) {
       }
       return sendJson(response, 200, { success: true, data: current });
     }
+    if (request.method === 'POST' && url.pathname === '/api/fenbeitong-voucher/sync') {
+      return sendJson(response, 200, { success: true, data: await syncFenbeitongDocuments() });
+    }
     if (request.method === 'POST' && url.pathname === '/api/fenbeitong-voucher/preview') {
-      return sendJson(response, 200, { success: true, data: buildVoucherPreview(await readJson(request)) });
+      return sendJson(response, 200, { success: true, data: previewVoucher(await readJson(request)) });
     }
     if (request.method === 'POST' && url.pathname === '/api/fenbeitong-voucher/prepare') {
-      const preview = buildVoucherPreview(await readJson(request));
-      return sendJson(response, 200, { success: true, data: savePreparedRecord(preview) });
+      return sendJson(response, 200, { success: true, data: prepareVoucher(await readJson(request)) });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/fenbeitong-voucher/push-erp') {
+      return sendJson(response, 200, { success: true, data: await pushVoucherToErp(await readJson(request)) });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/fenbeitong-voucher/process') {
+      return sendJson(response, 200, { success: true, data: listProcessRecords() });
     }
     if (request.method === 'GET' && url.pathname.startsWith('/api/fenbeitong-voucher/process/')) {
       const sourceId = decodeURIComponent(url.pathname.split('/').pop());
@@ -47,20 +66,8 @@ export async function handleApi(request, response) {
       }
       return sendJson(response, 200, { success: true, data: record });
     }
-    if (request.method === 'POST' && url.pathname === '/api/mock/fenbeitong/reimbursements/pull') {
-      const fixedJson = readFileSync(resolve(root, 'mock-data/fenbeitong-reimbursement-valid.json'), 'utf8');
-      return sendJson(response, 200, { success: true, data: JSON.parse(fixedJson) });
-    }
-    if (request.method === 'POST' && url.pathname === '/api/mock/kingdee/voucher/save') {
-      return sendJson(response, 200, {
-        success: true,
-        data: {
-          simulated: true,
-          erpFid: 'MOCK-KINGDEE-FID',
-          erpNumber: 'MOCK-KINGDEE-NUMBER',
-          documentStatus: 'Z'
-        }
-      });
+    if (request.method === 'GET' && url.pathname === '/api/operations/logs') {
+      return sendJson(response, 200, { success: true, data: listOperationLogs() });
     }
     return sendJson(response, 404, { success: false, error: { message: 'not found' } });
   } catch (error) {

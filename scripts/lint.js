@@ -33,8 +33,8 @@ console.log(`lint ok: ${files.length} files checked`);
 
 function collectFiles(root, extensions) {
   const result = [];
-  for (const name of readdirSync(root)) {
-    if (name === 'node_modules' || name === '.git') continue;
+for (const name of readdirSync(root)) {
+    if (['node_modules', '.git', 'dist', 'runtime-data', 'data'].includes(name)) continue;
     const path = join(root, name);
     const stat = statSync(path);
     if (stat.isDirectory()) {

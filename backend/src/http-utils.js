@@ -25,10 +25,31 @@ export function sendJson(response, statusCode, body) {
 }
 
 export function sendError(response, error) {
-  sendJson(response, 400, {
+  const statusCode = error.statusCode || 400;
+  sendJson(response, statusCode, {
     success: false,
     error: {
-      message: error.message
+      code: error.code || 'REQUEST_FAILED',
+      message: error.message,
+      detail: sanitize(error.detail || {})
     }
   });
+}
+
+function sanitize(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitize(item));
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  const safe = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (/token|password|secret|key|authorization|auth/i.test(key)) {
+      safe[key] = '[REDACTED]';
+    } else {
+      safe[key] = sanitize(item);
+    }
+  }
+  return safe;
 }

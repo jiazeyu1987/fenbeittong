@@ -14,10 +14,16 @@ async function request(path, options = {}) {
 
 export const api = {
   health: () => request('/api/health'),
+  ready: () => request('/api/ready'),
+  systemStatus: () => request('/api/system/status'),
   getMockTemplate: () => request('/api/fenbeitong-voucher/config/mock-template'),
   saveConfig: (data) => request('/api/fenbeitong-voucher/config', {
     method: 'PUT',
     body: JSON.stringify(data)
+  }),
+  syncFenbeitong: () => request('/api/fenbeitong-voucher/sync', {
+    method: 'POST',
+    body: JSON.stringify({})
   }),
   preview: (data) => request('/api/fenbeitong-voucher/preview', {
     method: 'POST',
@@ -27,5 +33,11 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(data)
   }),
-  getProcess: (sourceId) => request(`/api/fenbeitong-voucher/process/${encodeURIComponent(sourceId)}`)
+  pushErp: (data) => request('/api/fenbeitong-voucher/push-erp', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  }),
+  listProcessRecords: () => request('/api/fenbeitong-voucher/process'),
+  getProcess: (sourceId) => request(`/api/fenbeitong-voucher/process/${encodeURIComponent(sourceId)}`),
+  listLogs: () => request('/api/operations/logs')
 };
