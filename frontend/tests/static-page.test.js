@@ -77,6 +77,7 @@ test('frontend is centered on a finance source document list', () => {
 
 test('frontend uses fullscreen ledger table layout', () => {
   const html = readFileSync('frontend/src/index.html', 'utf8');
+  const css = readFileSync('frontend/src/styles.css', 'utf8');
   assert.match(html, /class="ledger-shell"/);
   assert.match(html, /id="ledgerToolbar"/);
   assert.match(html, /placeholder="请输入报销单号"/);
@@ -87,6 +88,9 @@ test('frontend uses fullscreen ledger table layout', () => {
   assert.doesNotMatch(html, /class="metric-grid"/);
   assert.doesNotMatch(html, /财务处理概览/);
   assert.doesNotMatch(html, /建议下一步/);
+  assert.match(css, /\.ledger-toolbar \.primary-action\s*{[^}]*width:\s*auto;/s);
+  assert.match(css, /\.ledger-toolbar button,[\s\S]*?height:\s*32px;/);
+  assert.match(css, /\.ledger-toolbar button,[\s\S]*?white-space:\s*nowrap;/);
 });
 
 test('frontend source is productized rather than a raw debug console', () => {

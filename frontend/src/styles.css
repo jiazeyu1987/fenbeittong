@@ -24,6 +24,7 @@ body {
   align-items: center;
   gap: 10px;
   margin-bottom: 14px;
+  white-space: nowrap;
 }
 
 .ledger-toolbar select,
@@ -50,18 +51,33 @@ body {
   flex: 1;
 }
 
-.compact-action,
-.outline-action,
-.success-action,
+.ledger-toolbar button,
 .page-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   height: 32px;
   border-radius: 4px;
+  margin: 0;
   padding: 0 14px;
   font-size: 14px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.ledger-toolbar .primary-action {
+  width: auto;
+  margin-top: 0;
 }
 
 .compact-action {
+  width: 82px;
   min-width: 82px;
+}
+
+.outline-action {
+  width: 88px;
+  min-width: 88px;
 }
 
 .outline-action {
@@ -71,9 +87,21 @@ body {
 }
 
 .success-action {
+  width: 62px;
+  min-width: 62px;
   border-color: #b8e4a2;
   background: #f3fff0;
   color: #4c9a2a;
+}
+
+.ledger-toolbar button.secondary {
+  width: 62px;
+  min-width: 62px;
+}
+
+.ledger-toolbar #columnSettingsButton {
+  width: 74px;
+  min-width: 74px;
 }
 
 .ledger-warning {
