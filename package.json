@@ -11,12 +11,16 @@
     "test:frontend": "node --test frontend/tests/*.test.js",
     "test:contract": "node --test tests/contract/*.test.js",
     "test:e2e": "node --test e2e/*.test.js",
+    "test:e2e:ui": "node --test e2e-ui/*.test.js",
     "lint": "node scripts/lint.js",
     "format": "node scripts/check-format.js",
     "build": "node scripts/build.js",
-    "verify": "npm run lint && npm run format && npm run test:backend && npm run test:frontend && npm run test:contract && npm run test:e2e && npm run build"
+    "verify": "npm run lint && npm run format && npm run test:backend && npm run test:frontend && npm run test:contract && npm run test:e2e && npm run test:e2e:ui && npm run build"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.1"
   }
 }

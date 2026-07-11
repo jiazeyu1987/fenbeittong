@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { handleApi } from '../backend/src/routes.js';
+import { resetRepository } from '../backend/src/repository.js';
 
 function startServer() {
   const server = createServer(handleApi);
@@ -13,6 +14,7 @@ function startServer() {
 }
 
 test('mock user path can template, sync Fenbeitong, push ERP, and query', async () => {
+  resetRepository();
   const { server, baseUrl } = await startServer();
   try {
     const templateResponse = await fetch(`${baseUrl}/api/fenbeitong-voucher/config/mock-template`);

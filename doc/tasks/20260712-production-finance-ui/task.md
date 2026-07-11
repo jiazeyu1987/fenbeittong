@@ -11,11 +11,13 @@ Make the finance ledger usable before external tokens/examples are ready: sync a
 - [x] Replace the row select button with checkbox selection and support selecting multiple rows.
 - [x] Add sortable source number, amount, and time columns.
 - [x] Update E2E flow for the larger mock data set.
+- [x] Add browser E2E verification for each finance toolbar button.
 - [x] Run backend, frontend, contract, E2E, and build verification.
 
 ## Expected Verification
 
 - `npm run test:e2e`
+- `npm run test:e2e:ui`
 - `npm run test:contract`
 - `npm run test:frontend`
 - `npm run test:backend`
