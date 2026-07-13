@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { loadMockKingdeeTemplateModel } from './mock-template.js';
 
 function money(value, field) {
   const amount = Number(value);
@@ -137,6 +138,8 @@ export function buildVoucherPreview(input) {
       explanation: `${document.reimbursementCode}/${expense.categoryName}`,
       accountNumber,
       currencyNumber,
+      exchangeRateTypeNumber: config.exchangeRateTypeNumber,
+      exchangeRate: config.exchangeRate,
       debit: debitAmount,
       credit: 0,
       detail: buildDetail(config, document)
@@ -157,6 +160,8 @@ export function buildVoucherPreview(input) {
         explanation: `${document.reimbursementCode}/deductible tax`,
         accountNumber: taxAccountNumber,
         currencyNumber,
+        exchangeRateTypeNumber: config.exchangeRateTypeNumber,
+        exchangeRate: config.exchangeRate,
         debit: tax,
         credit: 0,
         detail: buildDetail(config, document)
@@ -179,6 +184,8 @@ export function buildVoucherPreview(input) {
     explanation: `${document.reimbursementCode}/payment`,
     accountNumber: creditAccountNumber,
     currencyNumber,
+    exchangeRateTypeNumber: config.exchangeRateTypeNumber,
+    exchangeRate: config.exchangeRate,
     debit: 0,
     credit: document.paymentAmount,
     detail: config.creditDetailNumbers || {}
@@ -204,20 +211,23 @@ export function buildVoucherPreview(input) {
   const payload = {
     NeedUpDateFields: [],
     NeedReturnFields: [],
-    IsDeleteEntry: true,
-    ValidateFlag: true,
-    NumberSearch: true,
-    Model: {
-      FAccountBookID: { FNumber: requireText(config.accountBookNumber, 'accountBookNumber') },
-      FDate: voucherDate,
-      FBUSDATE: voucherDate,
-      FYEAR: year,
-      FPERIOD: period,
-      FVOUCHERGROUPID: { FNumber: requireText(config.voucherGroupNumber, 'voucherGroupNumber') },
-      FVOUCHERGROUPNO: config.voucherGroupNo || '',
-      FDocumentStatus: 'Z',
-      FEntity: lines
-    }
+    IsDeleteEntry: 'true',
+    SubSystemId: '',
+    IsVerifyBaseDataField: 'false',
+    IsEntryBatchFill: 'true',
+    ValidateFlag: 'true',
+    NumberSearch: 'true',
+    IsAutoAdjustField: 'false',
+    InterationFlags: '',
+    IgnoreInterationFlag: '',
+    IsControlPrecision: 'false',
+    ValidateRepeatJson: 'false',
+    Model: buildKingdeeSaveModel(config, {
+      voucherDate,
+      year,
+      period,
+      lines
+    })
   };
 
   const contentHash = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
@@ -296,15 +306,96 @@ export function buildVoucherPreview(input) {
   };
 }
 
-function voucherLine({ explanation, accountNumber, currencyNumber, debit, credit, detail }) {
+function buildKingdeeSaveModel(config, draft) {
+  const templateModel = resolveKingdeeTemplateModel(config);
+  validateTemplateReference(
+    templateModel.AccountBookID,
+    requireText(config.accountBookNumber, 'accountBookNumber'),
+    'Kingdee voucher template AccountBookID'
+  );
+  validateTemplateReference(
+    templateModel.VOUCHERGROUPID,
+    requireText(config.voucherGroupNumber, 'voucherGroupNumber'),
+    'Kingdee voucher template VOUCHERGROUPID'
+  );
+
+  const model = structuredClone(templateModel);
+  delete model.FID;
+  delete model.GL_VOUCHERENTRY;
+  model.Id = 0;
+  model.BillNo = '';
+  model.Date = draft.voucherDate;
+  model.BUSDATE = draft.voucherDate;
+  model.YEAR = draft.year;
+  model.PERIOD = draft.period;
+  model.VOUCHERGROUPNO = config.voucherGroupNo || '';
+  model.DocumentStatus = 'Z';
+  model.FEntity = draft.lines;
+  return model;
+}
+
+function resolveKingdeeTemplateModel(config) {
+  if (config.erpTemplateModel && typeof config.erpTemplateModel === 'object' && !Array.isArray(config.erpTemplateModel)) {
+    return structuredClone(config.erpTemplateModel);
+  }
+  if (
+    config.templateErpFid === '780047'
+    && config.accountBookNumber === '908'
+    && config.voucherGroupNumber === 'PZZ9'
+  ) {
+    return loadMockKingdeeTemplateModel();
+  }
+  throw new Error('erpTemplateModel is required for Kingdee GL_VOUCHER Save payload');
+}
+
+function validateTemplateReference(reference, expectedNumber, label) {
+  const actual = referenceNumber(reference);
+  if (!actual) {
+    throw new Error(`${label} is required`);
+  }
+  if (actual !== expectedNumber) {
+    throw new Error(`${label} ${actual} does not match configured number ${expectedNumber}`);
+  }
+}
+
+function referenceNumber(reference) {
+  if (!reference || typeof reference !== 'object') {
+    return '';
+  }
+  return reference.FNumber || reference.Number || '';
+}
+
+function voucherLine({
+  explanation,
+  accountNumber,
+  currencyNumber,
+  exchangeRateTypeNumber,
+  exchangeRate,
+  debit,
+  credit,
+  detail
+}) {
+  const roundedDebit = round(debit);
+  const roundedCredit = round(credit);
   return {
+    FEntryID: 0,
     FEXPLANATION: explanation,
     FACCOUNTID: { FNumber: accountNumber },
     FDetailID: detail,
     FCURRENCYID: { FNumber: currencyNumber },
-    FEXCHANGERATE: 1,
-    FDEBIT: round(debit),
-    FCREDIT: round(credit)
+    FEXCHANGERATETYPE: { FNumber: requireText(exchangeRateTypeNumber, 'exchangeRateTypeNumber') },
+    FEXCHANGERATE: Number(exchangeRate || 1),
+    FUnitId: { FNUMBER: '' },
+    FPrice: 0,
+    FQty: 0,
+    FAMOUNTFOR: roundedDebit || roundedCredit,
+    FDEBIT: roundedDebit,
+    FCREDIT: roundedCredit,
+    FDC: roundedDebit > 0 ? '1' : '-1',
+    FSettleTypeID: { FNumber: '' },
+    FSETTLENO: '',
+    FBUSNO: explanation,
+    FEXPORTENTRYID: 0
   };
 }
 
@@ -346,7 +437,9 @@ function resolveAccountName(config, accountNumber) {
     '6601.09': 'Travel expense',
     '6601.15': 'Office expense',
     '1002.01': 'Bank deposit',
-    '2221.01.01.05': 'Input VAT'
+    '2221.01.01.05': 'Input VAT',
+    '1001.01': 'Cash',
+    '6111': 'Investment income'
   };
   return accountNames[accountNumber] || '';
 }

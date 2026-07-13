@@ -1,0 +1,80 @@
+{
+  "Id": 780047,
+  "BillNo": "627260",
+  "AccountBookID_Id": 5581725,
+  "AccountBookID": {
+    "Id": 5581725,
+    "msterID": 5581725,
+    "Number": "908",
+    "Currency_Id": 1,
+    "AccountTable_Id": 102697,
+    "DefualtRateType_Id": 1,
+    "BookType": "1",
+    "AcctSystemID_Id": 1,
+    "DefaultvoucherType_Id": 105316,
+    "CURRENTPERIOD": 1,
+    "CURRENTYEAR": 2026,
+    "AcctPolicyID_Id": 1,
+    "AccountOrgID_Id": 5575924
+  },
+  "Date": "2026-07-13",
+  "ISFOREIGNCUR": false,
+  "VOUCHERGROUPID_Id": 105318,
+  "VOUCHERGROUPID": {
+    "Id": 105318,
+    "msterID": 105318,
+    "Number": "PZZ9",
+    "AcctTableId_Id": 102697
+  },
+  "ATTACHMENTS": 0,
+  "YEAR": 2026,
+  "PERIOD": 7,
+  "DEBITTOTAL": 0,
+  "FCREDITTOTAL": 0,
+  "Invalid": "0",
+  "CHECKERID_Id": 0,
+  "CHECKERID": null,
+  "POSTERID_Id": 0,
+  "POSTERID": null,
+  "CASHIERID_Id": 0,
+  "CASHIERID": null,
+  "DocumentStatus": "Z",
+  "FOperateType": "",
+  "ISADJUSTVOUCHER": false,
+  "CashierRecheck": false,
+  "CancleRecheck": false,
+  "FSystemID_Id": "GL",
+  "FSystemID": {
+    "Id": "GL",
+    "Number": "gl"
+  },
+  "FSourceBillKey_Id": "78050206-2fa6-40e3-b7c8-bd608146fa38",
+  "FSourceBillKey": {
+    "Id": "78050206-2fa6-40e3-b7c8-bd608146fa38",
+    "Number": "78050206-2fa6-40e3-b7c8-bd608146fa38"
+  },
+  "FBASECURRENCYID_Id": 1,
+  "FBASECURRENCYID": {
+    "Id": 1,
+    "msterID": 1,
+    "Number": "PRE001"
+  },
+  "ACCBOOKORGID_Id": 5575924,
+  "ACCBOOKORGID": {
+    "Id": 5575924,
+    "Number": "908"
+  },
+  "ISCASHFLOW": false,
+  "IsSplit": 0,
+  "VOUCHERGROUPNO": "",
+  "IsQty": false,
+  "FAmountDisplay": null,
+  "F_GL_PrintTimes": 0,
+  "ADJPRD": "",
+  "IMPORTVERSION": " ",
+  "DepositIn": " ",
+  "DepositOut": " ",
+  "BUSDATE": "2026-07-13",
+  "FISREDWRITEOFF": false,
+  "GL_VOUCHERENTRY": []
+}

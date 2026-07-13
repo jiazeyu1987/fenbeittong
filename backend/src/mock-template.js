@@ -12,27 +12,26 @@ export function buildMockTemplate() {
   );
 
   return {
-    accountBookNumber: '011',
-    voucherGroupNumber: 'PZZ8',
+    accountBookNumber: '908',
+    voucherGroupNumber: 'PZZ9',
     voucherGroupNo: '',
-    templateErpFid: '779869',
+    templateErpFid: '780047',
     currencyNumbers: { CNY: 'PRE001' },
     categoryAccountNumbers: {
-      TRAVEL: '6601.09',
-      OFFICE: '6601.15'
+      TRAVEL: '1001.01',
+      OFFICE: '1001.01'
     },
-    departmentDetailField: 'FDETAILID__FFLEX5',
-    employeeDetailField: 'FDETAILID__FFLEX7',
-    creditAccountNumber: '1002.01',
-    creditDetailNumbers: {
-      FDETAILID__FF100009: '31050179420000002440'
-    },
+    departmentDetailField: '',
+    employeeDetailField: '',
+    creditAccountNumber: '6111',
+    creditDetailNumbers: {},
     exchangeRateTypeNumber: 'HLTX01_SYS',
     exchangeRate: 1,
-    splitDeductibleTax: true,
-    taxAccountNumber: '2221.01.01.05',
+    splitDeductibleTax: false,
+    taxAccountNumber: '',
+    erpTemplateModel: loadMockKingdeeTemplateModel(),
     mockFixedJson: fixedJson,
-    mockVoucherDate: '2026-07-11',
+    mockVoucherDate: '2026-07-13',
     mockYear: 2026,
     mockPeriod: 7,
     fenbeitongBaseUrl: '',
@@ -40,4 +39,11 @@ export function buildMockTemplate() {
     fenbeitongReimbursementApplyState: 4,
     fenbeitongReimbursementPageSize: 20
   };
+}
+
+export function loadMockKingdeeTemplateModel() {
+  return JSON.parse(readFileSync(
+    resolve(root, 'mock-data/kingdee-voucher-template-908-pzz9.json'),
+    'utf8'
+  ));
 }

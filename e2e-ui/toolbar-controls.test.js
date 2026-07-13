@@ -52,6 +52,25 @@ test('finance toolbar controls each produce observable E2E effects', async () =>
     await page.click('#syncFenbeitongButton');
     await expectTotal(page, 'Total 100');
     assert.equal(await rowCount(page), 100);
+    assert.equal(await page.locator('th[data-column-key="operationPanel"]').innerText(), '\u64cd\u4f5c\u9762\u677f');
+    assert.equal(await page.locator('button.row-generate-voucher').count(), 100);
+
+    const selectedBeforeRowAction = await page.locator('input.row-checkbox:checked').count();
+    const singleRowAction = page.locator('button.row-generate-voucher').nth(1);
+    const singleRowSourceId = await singleRowAction.getAttribute('data-source-id');
+    await singleRowAction.click();
+    await waitForApiCondition(
+      'http://127.0.0.1:3001/api/fenbeitong-voucher/process',
+      (body) => body.data.filter((record) => record.processStage === 'ERP_PUSHED').length === 1
+        && body.data.some((record) => record.sourceId === singleRowSourceId && record.processStage === 'ERP_PUSHED')
+    );
+    await page.waitForSelector('#operationFeedback:not([hidden])');
+    assert.equal(await page.locator('#operationFeedback').innerText(), '保存成功');
+    await page.waitForFunction((sourceId) => {
+      const output = document.querySelector('#resultOutput')?.textContent || '';
+      return output.includes(sourceId) && output.includes('ERP_PUSHED');
+    }, singleRowSourceId);
+    assert.equal(await page.locator('input.row-checkbox:checked').count(), selectedBeforeRowAction);
 
     const requester = await firstCellText(page, 'requester');
     await page.selectOption('#searchFieldSelect', 'requester');
@@ -95,29 +114,32 @@ test('finance toolbar controls each produce observable E2E effects', async () =>
     await page.check('input[data-column-toggle="requester"]');
     assert.equal(await page.locator('th[data-column-key="requester"]').isVisible(), true);
 
-    await page.locator('input.row-checkbox').nth(0).check();
-    await page.locator('input.row-checkbox').nth(1).check();
+    await clearCheckedRows(page);
+    await page.locator('input.row-checkbox').nth(2).check();
+    await page.locator('input.row-checkbox').nth(3).check();
     assert.equal(await page.locator('input.row-checkbox:checked').count(), 2);
     await page.waitForFunction(() => document.querySelector('#resultSummary')?.textContent.includes('已选择 2 张来源单据'));
 
-    assert.equal(await page.locator('#generateVoucherButton').isEnabled(), true);
+    assert.equal(await page.locator('#generateVoucherButton').innerText(), '\u751f\u6210\u51ed\u8bc1');
+    assert.equal(await page.locator('#saveErpButton').innerText(), '\u4fdd\u5b58\u81f3ERP');
+    const selectedSourceIds = await page.locator('input.row-checkbox:checked').evaluateAll((checkboxes) =>
+      checkboxes.map((checkbox) => checkbox.dataset.sourceId)
+    );
     await page.click('#generateVoucherButton');
-    await page.waitForFunction(async () => {
-      const body = await fetch('http://127.0.0.1:3001/api/fenbeitong-voucher/process').then((response) => response.json());
-      return body.data.length === 2;
-    });
-    const preparedRecords = await fetchJson('http://127.0.0.1:3001/api/fenbeitong-voucher/process');
-    assert.equal(preparedRecords.data.length, 2);
-    assert.equal(preparedRecords.data.every((record) => record.processStage === 'PREPARED'), true);
-
+    await waitForApiCondition(
+      'http://127.0.0.1:3001/api/fenbeitong-voucher/process',
+      (body) => selectedSourceIds.every((sourceId) =>
+        body.data.some((record) => record.sourceId === sourceId && record.processStage === 'PREPARED')
+      )
+    );
     assert.equal(await page.locator('#saveErpButton').isEnabled(), true);
     await page.click('#saveErpButton');
-    await page.waitForFunction(async () => {
-      const body = await fetch('http://127.0.0.1:3001/api/fenbeitong-voucher/process').then((response) => response.json());
-      return body.data.filter((record) => record.processStage === 'ERP_PUSHED').length === 2;
-    });
+    await waitForApiCondition(
+      'http://127.0.0.1:3001/api/fenbeitong-voucher/process',
+      (body) => body.data.filter((record) => record.processStage === 'ERP_PUSHED').length === 3
+    );
     const pushedRecords = await fetchJson('http://127.0.0.1:3001/api/fenbeitong-voucher/process');
-    assert.equal(pushedRecords.data.filter((record) => record.processStage === 'ERP_PUSHED').length, 2);
+    assert.equal(pushedRecords.data.filter((record) => record.processStage === 'ERP_PUSHED').length, 3);
 
     await page.click('#viewVoucherButton');
     await page.waitForFunction(() => document.querySelector('#resultOutput')?.textContent.includes('ERP_PUSHED'));
@@ -154,6 +176,12 @@ async function waitForTotalValue(page, total) {
   return total;
 }
 
+async function clearCheckedRows(page) {
+  while (await page.locator('input.row-checkbox:checked').count() > 0) {
+    await page.locator('input.row-checkbox:checked').first().click();
+  }
+}
+
 async function rowCount(page) {
   return page.locator('#sourceQueueBody tr').count();
 }
@@ -176,6 +204,19 @@ async function amountValues(page) {
 async function fetchJson(url) {
   const response = await fetch(url);
   return response.json();
+}
+
+async function waitForApiCondition(url, predicate, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastBody = null;
+  while (Date.now() < deadline) {
+    lastBody = await fetchJson(url);
+    if (predicate(lastBody)) {
+      return lastBody;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`timed out waiting for API condition at ${url}; last body: ${JSON.stringify(lastBody)}`);
 }
 
 function parseTotal(text) {

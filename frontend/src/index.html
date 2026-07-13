@@ -42,6 +42,8 @@
         <button id="columnSettingsButton" class="secondary">&#x663E;&#x793A;&#x5B57;&#x6BB5;</button>
       </section>
 
+      <section id="operationFeedback" class="operation-feedback" hidden aria-live="polite"></section>
+
       <section id="columnSettingsPanel" class="column-settings-panel" hidden aria-label="&#x663E;&#x793A;&#x5B57;&#x6BB5;">
         <label><input type="checkbox" data-column-toggle="status" checked />&#x5355;&#x636E;&#x72B6;&#x6001;</label>
         <label><input type="checkbox" data-column-toggle="sourceCode" checked />&#x6765;&#x6E90;&#x5355;&#x53F7;</label>
@@ -70,10 +72,11 @@
               <th data-column-key="amount" class="amount"><button class="sort-header" data-sort-field="amount" type="button">金额</button></th>
               <th data-column-key="interfaceSource">接口来源</th>
               <th data-column-key="time"><button class="sort-header" data-sort-field="time" type="button">更新时间</button></th>
+              <th data-column-key="operationPanel">&#x64CD;&#x4F5C;&#x9762;&#x677F;</th>
             </tr>
           </thead>
           <tbody id="sourceQueueBody">
-            <tr><td colspan="9">&#x6682;&#x65E0;&#x5F85;&#x5904;&#x7406;&#x5355;&#x636E;&#xFF0C;&#x8BF7;&#x5148;&#x6267;&#x884C;&#x540C;&#x6B65;&#x5206;&#x8D1D;&#x901A;&#x3002;</td></tr>
+            <tr><td colspan="10">&#x6682;&#x65E0;&#x5F85;&#x5904;&#x7406;&#x5355;&#x636E;&#xFF0C;&#x8BF7;&#x5148;&#x6267;&#x884C;&#x540C;&#x6B65;&#x5206;&#x8D1D;&#x901A;&#x3002;</td></tr>
           </tbody>
         </table>
       </section>

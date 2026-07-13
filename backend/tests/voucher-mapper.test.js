@@ -19,7 +19,7 @@ test('valid fixed JSON creates a balanced voucher preview', () => {
   assert.equal(preview.debitTotal, 228);
   assert.equal(preview.creditTotal, 228);
   assert.equal(preview.balanced, true);
-  assert.equal(preview.payload.Model.FDocumentStatus, 'Z');
+  assert.equal(preview.payload.Model.DocumentStatus, 'Z');
 });
 
 test('missing reimbursement id fails fast', () => {
@@ -88,6 +88,20 @@ test('required detail dimensions fail fast for expense lines', () => {
     voucherDate: template.mockVoucherDate,
     year: template.mockYear,
     period: template.mockPeriod,
-    config: template
+    config: { ...template, departmentDetailField: 'FDETAILID__FFLEX5' }
   }), /department detail dimension is required/);
+});
+
+test('missing ERP template model fails before Kingdee save payload generation', () => {
+  const config = structuredClone(template);
+  config.templateErpFid = 'UNCONFIRMED-TEMPLATE';
+  delete config.erpTemplateModel;
+
+  assert.throws(() => buildVoucherPreview({
+    fixedJson: template.mockFixedJson,
+    voucherDate: template.mockVoucherDate,
+    year: template.mockYear,
+    period: template.mockPeriod,
+    config
+  }), /erpTemplateModel is required/);
 });

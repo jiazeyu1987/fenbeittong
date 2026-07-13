@@ -25,7 +25,7 @@ export async function saveKingdeeVoucher(payload) {
     headers,
     body: JSON.stringify({
       formid: 'GL_VOUCHER',
-      data: payload
+      data: JSON.stringify(payload)
     })
   });
   const body = await response.json();

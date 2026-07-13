@@ -32,6 +32,7 @@ test('frontend page exposes expected workflow controls', () => {
     'financeReviewSummary',
     'sourceQueueFilters',
     'environmentWarning',
+    'operationFeedback',
     'nextActionText',
     'primaryActionButton',
     'actionBlockReason',
@@ -74,6 +75,8 @@ test('frontend is centered on a finance source document list', () => {
   assert.match(html, /&#x751F;&#x6210;&#x51ED;&#x8BC1;/);
   assert.match(html, /&#x4FDD;&#x5B58;&#x81F3;ERP/);
   assert.match(html, /&#x67E5;&#x770B;&#x51ED;&#x8BC1;/);
+  assert.match(html, /data-column-key="operationPanel"/);
+  assert.match(html, /&#x64CD;&#x4F5C;&#x9762;&#x677F;/);
   assert.doesNotMatch(html, /Fenbeitong Kingdee Voucher Integration/);
   assert.doesNotMatch(html, /class="metric-grid"/);
   assert.match(app, /renderFinanceReview/);
@@ -84,6 +87,13 @@ test('frontend is centered on a finance source document list', () => {
   assert.match(app, /matchesLedgerQuery/);
   assert.match(app, /toggleColumnSettings/);
   assert.match(app, /visibleColumnKeys/);
+  assert.match(app, /generateVoucherFromRow/);
+  assert.match(app, /row-generate-voucher/);
+  assert.match(app, /showOperationFeedback/);
+  assert.match(app, /saveRowVoucherToErp/);
+  assert.match(app, /api\.pushErp/);
+  assert.match(app, /api\.getProcess/);
+  assert.match(app, /保存成功/);
 });
 
 test('frontend uses fullscreen ledger table layout', () => {
@@ -102,6 +112,7 @@ test('frontend uses fullscreen ledger table layout', () => {
   assert.match(html, /data-sort-field="sourceCode"/);
   assert.match(html, /data-sort-field="amount"/);
   assert.match(html, /data-sort-field="time"/);
+  assert.match(html, /data-column-key="operationPanel"/);
   assert.match(html, /id="selectAllRowsCheckbox"/);
   assert.match(html, /data-column-toggle="amount"/);
   assert.match(html, /data-column-toggle="requester"/);
@@ -110,6 +121,17 @@ test('frontend uses fullscreen ledger table layout', () => {
   assert.match(css, /\.ledger-toolbar \.primary-action\s*{[^}]*width:\s*auto;/s);
   assert.match(css, /\.ledger-toolbar button,[\s\S]*?height:\s*32px;/);
   assert.match(css, /\.ledger-toolbar button,[\s\S]*?white-space:\s*nowrap;/);
+});
+
+test('row operation actions use compact text-button styling', () => {
+  const css = readFileSync('frontend/src/styles.css', 'utf8');
+  assert.match(css, /\.operation-panel-cell\s*{[^}]*min-width:\s*88px;/s);
+  assert.match(css, /\.row-action\s*{[^}]*padding:\s*0 2px;/s);
+  assert.match(css, /\.row-action\s*{[^}]*height:\s*auto;/s);
+  assert.match(css, /\.row-generate-voucher\s*{[^}]*min-width:\s*auto;/s);
+  assert.match(css, /\.row-generate-voucher\s*{[^}]*border:\s*0;/s);
+  assert.match(css, /\.row-generate-voucher\s*{[^}]*background:\s*transparent;/s);
+  assert.doesNotMatch(css, /\.row-generate-voucher\s*{[^}]*min-width:\s*\d+px;/s);
 });
 
 test('frontend source is productized rather than a raw debug console', () => {

@@ -10,8 +10,14 @@ import { getSchedulerStatus, runSchedulerOnce, stopSchedulerForTest } from '../.
 
 test('mock template contains required fields and no real token', () => {
   const template = buildMockTemplate();
-  assert.equal(template.accountBookNumber, '011');
-  assert.equal(template.voucherGroupNumber, 'PZZ8');
+  assert.equal(template.accountBookNumber, '908');
+  assert.equal(template.voucherGroupNumber, 'PZZ9');
+  assert.equal(template.templateErpFid, '780047');
+  assert.equal(template.categoryAccountNumbers.TRAVEL, '1001.01');
+  assert.equal(template.creditAccountNumber, '6111');
+  assert.equal(template.splitDeductibleTax, false);
+  assert.equal(template.erpTemplateModel.AccountBookID.Number, '908');
+  assert.equal(template.erpTemplateModel.VOUCHERGROUPID.Number, 'PZZ9');
   assert.equal(template.fenbeitongAccessToken, '');
   assert.match(template.mockFixedJson, /MOCK-REIMB-001/);
 });
@@ -33,7 +39,7 @@ test('preview response keeps stable contract fields', () => {
   assert.ok(preview.voucherLines.length > 0);
   assert.ok(Array.isArray(preview.sourceSummary.expenseCategories));
   assert.equal(preview.sourceSummary.requester, 'Mock User');
-  assert.equal(preview.taxSummary.deductibleTaxAmount, 6.11);
+  assert.equal(preview.taxSummary.deductibleTaxAmount, 0);
   assert.equal(preview.voucherLines[0].sourceExpenseId, 'EXP-001');
   assert.match(preview.voucherLines[0].mappingRule, /category TRAVEL/);
   assert.equal(preview.financialSummary.documentStatusName, 'Saved draft only; not submitted, audited, or posted');
@@ -50,9 +56,18 @@ test('voucher payload writes only Kingdee GL_VOUCHER fields', () => {
     config: template
   });
 
-  assert.ok(Object.hasOwn(preview.payload.Model, 'FAccountBookID'));
-  assert.ok(Object.hasOwn(preview.payload.Model, 'FVOUCHERGROUPID'));
+  assert.ok(Object.hasOwn(preview.payload.Model, 'AccountBookID'));
+  assert.ok(Object.hasOwn(preview.payload.Model, 'VOUCHERGROUPID'));
   assert.ok(Object.hasOwn(preview.payload.Model, 'FEntity'));
+  assert.equal(Object.hasOwn(preview.payload.Model, 'FAccountBookID'), false);
+  assert.equal(Object.hasOwn(preview.payload.Model, 'FVOUCHERGROUPID'), false);
+  assert.equal(preview.payload.Model.AccountBookID.Number, '908');
+  assert.equal(preview.payload.Model.VOUCHERGROUPID.Number, 'PZZ9');
+  assert.equal(preview.payload.Model.FEntity[0].FEXCHANGERATETYPE.FNumber, 'HLTX01_SYS');
+  assert.equal(preview.payload.Model.FEntity[0].FAMOUNTFOR, 108);
+  assert.equal(preview.payload.Model.FEntity[0].FDC, '1');
+  assert.equal(preview.payload.Model.FEntity[0].FACCOUNTID.FNumber, '1001.01');
+  assert.equal(preview.payload.Model.FEntity.at(-1).FACCOUNTID.FNumber, '6111');
   assert.equal(Object.hasOwn(preview.payload.Model, 'reimb_id'), false);
   assert.equal(Object.hasOwn(preview.payload.Model.FEntity[0], 'cost_category'), false);
 });

@@ -104,6 +104,24 @@ body {
   min-width: 74px;
 }
 
+.operation-feedback {
+  min-height: 34px;
+  margin: -4px 0 12px;
+  border: 1px solid #b8e4a2;
+  border-radius: 4px;
+  background: #f3fff0;
+  color: #2f7d20;
+  padding: 8px 12px;
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.operation-feedback.error {
+  border-color: #f5b5b5;
+  background: #fff5f5;
+  color: #b42318;
+}
+
 .ledger-warning {
   display: none;
 }
@@ -136,7 +154,7 @@ body {
 
 .ledger-table-panel {
   overflow: auto;
-  height: calc(100vh - 96px);
+  height: calc(100vh - 132px);
   border: 1px solid #d9e1ec;
   border-radius: 6px;
   background: #fff;
@@ -144,7 +162,7 @@ body {
 
 .ledger-table {
   width: 100%;
-  min-width: 1180px;
+  min-width: 1280px;
   border-collapse: collapse;
   table-layout: fixed;
   font-size: 14px;
@@ -770,7 +788,35 @@ th.amount {
 }
 
 .row-action {
-  padding: 6px 10px;
+  height: auto;
+  padding: 0 2px;
+  line-height: 1.4;
+}
+
+.operation-panel-cell {
+  min-width: 88px;
+}
+
+.row-generate-voucher {
+  min-width: auto;
+  border: 0;
+  background: transparent;
+  color: #008f86;
+  font-weight: 700;
+}
+
+.row-generate-voucher:hover {
+  background: transparent;
+  color: #006d66;
+  text-decoration: underline;
+}
+
+.row-generate-voucher:disabled,
+.row-generate-voucher:disabled:hover {
+  border: 0;
+  background: transparent;
+  color: #98a2b3;
+  text-decoration: none;
 }
 
 .log-list {

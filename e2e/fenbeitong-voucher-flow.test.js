@@ -48,8 +48,8 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
     assert.equal(previewBody.data.balanced, true);
     assert.ok(previewBody.data.voucherLines.length >= 2);
     assert.equal(previewBody.data.sourceSummary.requester, 'Mock User');
-    assert.equal(previewBody.data.taxSummary.deductibleTaxAmount, 6.11);
-    assert.ok(previewBody.data.voucherLines.some((line) => line.lineType === 'TAX'));
+    assert.equal(previewBody.data.taxSummary.deductibleTaxAmount, 0);
+    assert.equal(previewBody.data.voucherLines.some((line) => line.lineType === 'TAX'), false);
     assert.equal(previewBody.data.financialSummary.documentStatusName, 'Saved draft only; not submitted, audited, or posted');
 
     const syncBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/sync`, {});

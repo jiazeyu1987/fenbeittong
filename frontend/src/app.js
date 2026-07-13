@@ -47,7 +47,8 @@ const state = {
   previewSignature: '',
   previewInvalidReason: '',
   preparedSourceIds: new Set(),
-  pushedSourceIds: new Set()
+  pushedSourceIds: new Set(),
+  erpTemplateModel: null
 };
 
 const statusBadge = document.querySelector('#statusBadge');
@@ -72,6 +73,7 @@ const actionBlockReason = document.querySelector('#actionBlockReason');
 const voucherValidationList = document.querySelector('#voucherValidationList');
 const previewHashSummary = document.querySelector('#previewHashSummary');
 const financeReviewSummary = document.querySelector('#financeReviewSummary');
+const operationFeedback = document.querySelector('#operationFeedback');
 
 controls.loadTemplate.addEventListener('click', run(loadTemplate));
 controls.syncFenbeitong.addEventListener('click', run(syncFenbeitong));
@@ -98,6 +100,7 @@ controls.refresh.addEventListener('click', run(refreshAll));
 controls.listRecords.addEventListener('click', run(refreshRecords));
 controls.primaryAction.addEventListener('click', run(runPrimaryAction));
 sourceQueueBody.addEventListener('change', run(toggleQueuedDocument));
+sourceQueueBody.addEventListener('click', run(generateVoucherFromRow));
 selectAllRowsCheckbox.addEventListener('change', () => toggleAllVisibleDocuments(selectAllRowsCheckbox.checked));
 columnSettingsPanel.addEventListener('change', run(updateVisibleColumn));
 financeQueuePanel.addEventListener('click', (event) => {
@@ -200,18 +203,46 @@ async function generateVoucherFromLedger() {
   }
   const prepared = [];
   for (const record of records) {
-    setActiveSourceRecord(record, false);
-    const request = buildVoucherRequestForRecord(record);
-    const previewResult = await api.preview(request);
-    const preparedRecord = await api.prepare(request);
-    state.lastPreview = previewResult;
-    state.previewSignature = requestSignature(request);
-    state.previewInvalidReason = '';
-    state.preparedSourceIds.add(preparedRecord.sourceId);
-    prepared.push(preparedRecord);
+    prepared.push(await generateVoucherForRecord(record));
   }
   show({ count: prepared.length, records: prepared }, `已生成 ${prepared.length} 张待保存凭证。`);
   await refreshAll();
+}
+
+async function generateVoucherFromRow(event) {
+  const button = event.target.closest('button.row-generate-voucher');
+  if (!button) return;
+  event.preventDefault();
+  const sourceId = button.dataset.sourceId;
+  const record = state.syncedDocuments.find((item) => item.sourceId === sourceId);
+  if (!record) throw new Error(`待处理单据不存在：${sourceId}`);
+  const savedRecord = await saveRowVoucherToErp(record);
+  show({ count: 1, record: savedRecord }, '保存成功');
+  await refreshAll();
+}
+
+async function saveRowVoucherToErp(record) {
+  setActiveSourceRecord(record, false);
+  const saved = await api.pushErp(buildVoucherRequestForRecord(record));
+  const queried = await api.getProcess(saved.sourceId);
+  if (!queried || queried.processStage !== 'ERP_PUSHED') {
+    throw new Error(`ERP保存后查询未确认成功：${record.sourceId}`);
+  }
+  state.pushedSourceIds.add(queried.sourceId);
+  state.preparedSourceIds.delete(queried.sourceId);
+  return queried;
+}
+
+async function generateVoucherForRecord(record) {
+  setActiveSourceRecord(record, false);
+  const request = buildVoucherRequestForRecord(record);
+  const previewResult = await api.preview(request);
+  const preparedRecord = await api.prepare(request);
+  state.lastPreview = previewResult;
+  state.previewSignature = requestSignature(request);
+  state.previewInvalidReason = '';
+  state.preparedSourceIds.add(preparedRecord.sourceId);
+  return preparedRecord;
 }
 
 async function pushSelectedToErp() {
@@ -454,7 +485,7 @@ function renderSourceQueue(records) {
   if (paginationSummary) paginationSummary.textContent = `Total ${visibleRecords.length}`;
   renderSelectAllState(visibleRecords);
   if (visibleRecords.length === 0) {
-    sourceQueueBody.innerHTML = `<tr><td colspan="${visibleLedgerColumns().length}">暂无符合条件的报销单，请调整查询条件或先同步分贝通。</td></tr>`;
+    sourceQueueBody.innerHTML = `<tr><td colspan="${ledgerTableColumnCount()}">暂无符合条件的报销单，请调整查询条件或先同步分贝通。</td></tr>`;
     renderColumnVisibility();
     renderFinanceReview(state.lastPreview);
     return;
@@ -462,6 +493,10 @@ function renderSourceQueue(records) {
   sourceQueueBody.innerHTML = visibleRecords.map((record) => {
     const summary = buildSourceSummary(record);
     const selected = state.selectedSourceIds.has(record.sourceId);
+    const prepared = state.preparedSourceIds.has(record.sourceId);
+    const pushed = state.pushedSourceIds.has(record.sourceId);
+    const actionText = pushed ? '已保存ERP' : prepared ? '重新生成' : '生成凭证';
+    const disabled = pushed ? 'disabled' : '';
     return `
       <tr class="${selected ? 'selected' : ''}">
         <td><input class="row-checkbox" type="checkbox" data-source-id="${escapeHtml(record.sourceId)}" aria-label="选择 ${escapeHtml(displaySourceCode(record))}" ${selected ? 'checked' : ''} /></td>
@@ -473,6 +508,9 @@ function renderSourceQueue(records) {
         ${renderLedgerCell('amount', formatMoney(summary.totalAmount), 'amount')}
         ${renderLedgerCell('interfaceSource', escapeHtml(record.mockReplacement ? '接口未启用' : '正式接口'))}
         ${renderLedgerCell('time', escapeHtml(summary.createTime || record.updateTime || ''))}
+        <td data-column-key="operationPanel" class="operation-panel-cell">
+          <button class="row-action row-generate-voucher" type="button" data-source-id="${escapeHtml(record.sourceId)}" aria-label="为 ${escapeHtml(displaySourceCode(record))} 生成并保存至ERP" ${disabled}>${actionText}</button>
+        </td>
       </tr>
     `;
   }).join('');
@@ -531,7 +569,11 @@ function setLedgerSort(field) {
 }
 
 function visibleLedgerColumns() {
-  return ['操作', ...ledgerColumnDefinitions().filter((column) => state.visibleColumnKeys.has(column.key)).map((column) => column.label)];
+  return ['选择', ...ledgerColumnDefinitions().filter((column) => state.visibleColumnKeys.has(column.key)).map((column) => column.label)];
+}
+
+function ledgerTableColumnCount() {
+  return visibleLedgerColumns().length + 1;
 }
 
 function renderLedgerCell(key, content, className = '') {
@@ -744,6 +786,7 @@ function readinessText(readiness) {
 }
 
 function applyTemplate(template) {
+  state.erpTemplateModel = template.erpTemplateModel || null;
   fields.accountBookNumber.value = template.accountBookNumber;
   fields.voucherGroupNumber.value = template.voucherGroupNumber;
   fields.templateErpFid.value = template.templateErpFid;
@@ -811,14 +854,15 @@ function readConfig() {
     templateErpFid: fields.templateErpFid.value,
     currencyNumbers: parseJson(fields.currencyNumbers.value, '币别映射'),
     categoryAccountNumbers: parseJson(fields.categoryAccountNumbers.value, '费用科目映射'),
-    departmentDetailField: 'FDETAILID__FFLEX5',
-    employeeDetailField: 'FDETAILID__FFLEX7',
-    creditAccountNumber: '1002.01',
+    departmentDetailField: '',
+    employeeDetailField: '',
+    creditAccountNumber: '6111',
     creditDetailNumbers: parseJson(fields.creditDetailNumbers.value, '贷方核算维度'),
     exchangeRateTypeNumber: 'HLTX01_SYS',
     exchangeRate: 1,
-    splitDeductibleTax: true,
-    taxAccountNumber: '2221.01.01.05'
+    splitDeductibleTax: false,
+    taxAccountNumber: '',
+    erpTemplateModel: state.erpTemplateModel
   };
 }
 
@@ -910,8 +954,17 @@ function logLabel(action) {
 }
 
 function show(value, summary = '') {
+  const message = summary || summarizeValue(value);
   resultOutput.textContent = JSON.stringify(value, null, 2);
-  resultSummary.textContent = summary || summarizeValue(value);
+  resultSummary.textContent = message;
+  showOperationFeedback(message, Boolean(value?.error));
+}
+
+function showOperationFeedback(message, isError = false) {
+  if (!operationFeedback) return;
+  operationFeedback.textContent = message;
+  operationFeedback.hidden = false;
+  operationFeedback.classList.toggle('error', isError);
 }
 
 function showError(step, error) {
