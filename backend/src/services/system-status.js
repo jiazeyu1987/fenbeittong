@@ -1,9 +1,14 @@
 import { getAppConfig, getSanitizedConfigSummary } from '../config.js';
 import { getDashboardSummary } from '../repository.js';
+import { getFenbeitongTenant, getTenantStorePath, listFenbeitongTenants } from '../tenant-store.js';
 import { getSchedulerStatus } from './scheduler.js';
 
 export function getSystemStatus() {
   const config = getAppConfig();
+  const defaultTenant = getFenbeitongTenant(config.fenbeitong.defaultTenantKey);
+  const sanitizedConfig = getSanitizedConfigSummary();
+  sanitizedConfig.fenbeitong.tenants = listFenbeitongTenants();
+  sanitizedConfig.fenbeitong.tenantStorePath = getTenantStorePath();
   return {
     productName: 'Fenbeitong Kingdee Voucher Integration',
     mode: {
@@ -11,13 +16,13 @@ export function getSystemStatus() {
       kingdee: config.kingdee.mode
     },
     readiness: {
-      fenbeitong: readiness(config.fenbeitong.mode, fenbeitongReadinessFields(config.fenbeitong)),
+      fenbeitong: fenbeitongReadiness(config.fenbeitong.mode, defaultTenant),
       kingdee: readiness(config.kingdee.mode, [
         ['KINGDEE_SAVE_URL', config.kingdee.saveUrl]
       ])
     },
     summary: getDashboardSummary(),
-    config: getSanitizedConfigSummary(),
+    config: sanitizedConfig,
     scheduler: getSchedulerStatus()
   };
 }
@@ -31,20 +36,29 @@ export function getReadinessStatus() {
   };
 }
 
-function fenbeitongReadinessFields(config) {
+function fenbeitongReadiness(mode, tenant) {
+  if (mode === 'mock') {
+    return {
+      ready: true,
+      message: 'mock mode enabled',
+      missing: []
+    };
+  }
   const fields = [
-    ['FENBEITONG_BASE_URL', config.baseUrl],
-    ['FENBEITONG_PULL_PATH', config.pullPath]
+    ['tenant', tenant],
+    ['tenant.baseUrl', tenant?.baseUrl],
+    ['tenant.pullPath', tenant?.pullPath],
+    ['tenant.detailPath', tenant?.detailPath]
   ];
-  if (config.authMode === 'access-token') {
-    fields.push(['FENBEITONG_ACCESS_TOKEN', config.accessToken]);
+  if (tenant?.status === 'waiting_development') {
+    fields.push(['tenant.credentials', '']);
+  } else if (tenant?.authMode === 'access-token') {
+    fields.push(['tenant.accessToken', tenant?.credentialsConfigured]);
+  } else {
+    fields.push(['tenant.appCredentials', tenant?.credentialsConfigured]);
+    fields.push(['tenant.authPath', tenant?.authPath]);
   }
-  if (config.authMode === 'app-key') {
-    fields.push(['FENBEITONG_APP_ID', config.appId]);
-    fields.push(['FENBEITONG_APP_KEY', config.appKey]);
-    fields.push(['FENBEITONG_AUTH_PATH', config.authPath]);
-  }
-  return fields;
+  return readiness(mode, fields);
 }
 
 function readiness(mode, fields) {

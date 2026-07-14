@@ -12,7 +12,6 @@ function startServer() {
     });
   });
 }
-
 test('mock user path can template, sync Fenbeitong, push ERP, and query', async () => {
   const restoreEnv = forceMockExternalEnv();
   resetRepository();
@@ -25,7 +24,8 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
     const statusResponse = await fetch(`${baseUrl}/api/system/status`);
     const statusBody = await statusResponse.json();
     assert.equal(statusBody.data.mode.fenbeitong, 'mock');
-    assert.equal(statusBody.data.config.fenbeitong.accessTokenConfigured, false);
+    assert.equal(statusBody.data.config.fenbeitong.credentialStore, 'sqlite');
+    assert.equal(Object.hasOwn(statusBody.data.config.fenbeitong.tenants[0], 'appKey'), false);
 
     const readyResponse = await fetch(`${baseUrl}/api/ready`);
     const readyBody = await readyResponse.json();
@@ -120,16 +120,12 @@ async function postJson(url, body) {
 
 function forceMockExternalEnv() {
   const previous = {
+    APP_DATA_DIR: process.env.APP_DATA_DIR,
     FENBEITONG_MODE: process.env.FENBEITONG_MODE,
-    FENBEITONG_ACCESS_TOKEN: process.env.FENBEITONG_ACCESS_TOKEN,
-    FENBEITONG_APP_ID: process.env.FENBEITONG_APP_ID,
-    FENBEITONG_APP_KEY: process.env.FENBEITONG_APP_KEY,
     KINGDEE_MODE: process.env.KINGDEE_MODE
   };
+  process.env.APP_DATA_DIR = 'runtime-data/e2e-flow';
   process.env.FENBEITONG_MODE = 'mock';
-  process.env.FENBEITONG_ACCESS_TOKEN = '';
-  process.env.FENBEITONG_APP_ID = '';
-  process.env.FENBEITONG_APP_KEY = '';
   process.env.KINGDEE_MODE = 'mock';
   return () => {
     for (const [name, value] of Object.entries(previous)) {

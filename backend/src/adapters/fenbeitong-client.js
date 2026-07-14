@@ -2,17 +2,25 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getAppConfig, getRootDir, validateFenbeitongConfig } from '../config.js';
 import { dependencyError } from '../errors.js';
-
-const accessTokenTtlMs = 7200 * 1000;
-const accessTokenCache = new Map();
+import {
+  getFenbeitongTenant,
+  updateFenbeitongTenantToken
+} from '../tenant-store.js';
 
 export function clearFenbeitongTokenCacheForTest() {
-  accessTokenCache.clear();
+  const tenant = getFenbeitongTenant('puhui', { includeSecrets: true });
+  if (!tenant) {
+    return;
+  }
+  updateFenbeitongTenantToken('puhui', {
+    accessToken: 'cleared-for-test',
+    expiresAt: '1970-01-01T00:00:00.000Z'
+  });
 }
 
 export async function pullFenbeitongReimbursements(options = {}) {
   const config = getAppConfig().fenbeitong;
-  const tenant = resolveTenant(config, options.tenantKey);
+  const tenant = resolveTenant(config.defaultTenantKey, options.tenantKey);
   if (config.mode === 'mock') {
     const fixedJson = readFileSync(
       resolve(getRootDir(), 'mock-data/fenbeitong-reimbursement-valid.json'),
@@ -23,19 +31,23 @@ export async function pullFenbeitongReimbursements(options = {}) {
       mode: 'mock',
       tenantKey: tenant.key,
       mockReplacement: true,
-      mockReason: 'Fenbeitong access token is not available yet',
+      mockReason: 'Fenbeitong real interface is not enabled for this run',
       documents: buildMockReimbursements(baseDocument, 100)
     };
   }
 
-  validateFenbeitongConfig();
-  const accessToken = await resolveAccessToken(config, tenant);
-  const listBody = await postFenbeitongApi(config, config.pullPath, accessToken, config.listPayload);
+  validateFenbeitongConfig(tenant);
+  const accessToken = await resolveAccessToken(tenant);
+  const listPayload = {
+    ...tenant.listPayload,
+    ...config.listPayloadOverrides
+  };
+  const listBody = await postFenbeitongApi(tenant, tenant.pullPath, accessToken, listPayload);
   const summaries = extractReimbursementSummaries(listBody);
   const documents = [];
   for (const summary of summaries) {
     const detailPayload = buildDetailRequestPayload(summary);
-    const detailBody = await postFenbeitongApi(config, config.detailPath, accessToken, detailPayload);
+    const detailBody = await postFenbeitongApi(tenant, tenant.detailPath, accessToken, detailPayload);
     documents.push(validateDetailDocument(detailBody));
   }
   return {
@@ -47,36 +59,37 @@ export async function pullFenbeitongReimbursements(options = {}) {
   };
 }
 
-function resolveTenant(config, tenantKey) {
-  const key = tenantKey || config.defaultTenantKey || 'puhui';
-  const tenant = config.tenants.find((item) => item.key === key);
+function resolveTenant(defaultTenantKey, tenantKey) {
+  const key = tenantKey || defaultTenantKey || 'puhui';
+  const tenant = getFenbeitongTenant(key, { includeSecrets: true });
   if (!tenant) {
     throw dependencyError('FENBEITONG_TENANT_UNKNOWN', `Fenbeitong tenant is not configured: ${key}`);
   }
   if (tenant.status === 'waiting_development') {
     throw dependencyError('FENBEITONG_TENANT_WAITING_DEVELOPMENT', `${tenant.name}接口等待开发中`);
   }
+  if (tenant.status === 'disabled') {
+    throw dependencyError('FENBEITONG_TENANT_DISABLED', `${tenant.name}接口已停用`);
+  }
   return tenant;
 }
 
-async function resolveAccessToken(config, tenant) {
-  if (config.authMode === 'access-token') {
-    return config.accessToken;
+async function resolveAccessToken(tenant) {
+  if (tenant.authMode === 'access-token') {
+    return tenant.accessToken;
   }
-  const cacheKey = buildAccessTokenCacheKey(config, tenant);
-  const cached = accessTokenCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.token;
+  if (tenant.accessToken && Date.parse(tenant.tokenExpiresAt || '') > Date.now()) {
+    return tenant.accessToken;
   }
-  const url = new URL(config.authPath, config.baseUrl);
+  const url = new URL(tenant.authPath, tenant.baseUrl);
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      app_id: config.appId,
-      app_key: config.appKey
+      app_id: tenant.appId,
+      app_key: tenant.appKey
     })
   });
   const body = await response.json();
@@ -95,24 +108,15 @@ async function resolveAccessToken(config, tenant) {
   if (!token) {
     throw dependencyError('FENBEITONG_AUTH_TOKEN_MISSING', 'Fenbeitong auth response did not include data token string');
   }
-  accessTokenCache.set(cacheKey, {
-    token,
-    expiresAt: Date.now() + accessTokenTtlMs
+  updateFenbeitongTenantToken(tenant.key, {
+    accessToken: token,
+    expiresAt: new Date(Date.now() + tenant.refreshIntervalSeconds * 1000).toISOString()
   });
   return token;
 }
 
-function buildAccessTokenCacheKey(config, tenant) {
-  return [
-    tenant.key,
-    config.baseUrl,
-    config.authPath,
-    config.appId
-  ].join('|');
-}
-
-async function postFenbeitongApi(config, path, accessToken, payload) {
-  const url = new URL(path, config.baseUrl);
+async function postFenbeitongApi(tenant, path, accessToken, payload) {
+  const url = new URL(path, tenant.baseUrl);
   const response = await fetch(url, {
     method: 'POST',
     headers: {

@@ -11,7 +11,6 @@ function startApiServer() {
     server.listen(3001, '127.0.0.1', () => resolve(server));
   });
 }
-
 function startFrontendServer() {
   const root = new URL('../frontend/src/', import.meta.url);
   const server = createServer(async (request, response) => {
@@ -244,16 +243,12 @@ function assertNumberSorted(values, direction) {
 
 function forceMockExternalEnv() {
   const previous = {
+    APP_DATA_DIR: process.env.APP_DATA_DIR,
     FENBEITONG_MODE: process.env.FENBEITONG_MODE,
-    FENBEITONG_ACCESS_TOKEN: process.env.FENBEITONG_ACCESS_TOKEN,
-    FENBEITONG_APP_ID: process.env.FENBEITONG_APP_ID,
-    FENBEITONG_APP_KEY: process.env.FENBEITONG_APP_KEY,
     KINGDEE_MODE: process.env.KINGDEE_MODE
   };
+  process.env.APP_DATA_DIR = 'runtime-data/e2e-ui-toolbar';
   process.env.FENBEITONG_MODE = 'mock';
-  process.env.FENBEITONG_ACCESS_TOKEN = '';
-  process.env.FENBEITONG_APP_ID = '';
-  process.env.FENBEITONG_APP_KEY = '';
   process.env.KINGDEE_MODE = 'mock';
   return () => {
     for (const [name, value] of Object.entries(previous)) {

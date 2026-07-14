@@ -48,7 +48,7 @@ npm run verify
 
 ## Environment
 
-`.env.example` exists. No real Fenbeitong token, Kingdee credential, database URL, or production secret is required.
+`.env.example` exists. Fenbeitong company secrets are stored in the ignored SQLite tenant store, not in environment variables. No Kingdee credential, database URL, or production secret is required for mock verification.
 
 ## CI Status
 
@@ -56,7 +56,7 @@ No remote CI is configured yet. Local `npm run verify` is the current acceptance
 
 ## Known Blockers
 
-- Real Fenbeitong token is intentionally absent.
+- Additional Fenbeitong companies need SQLite tenant credentials before real sync.
 - Real Kingdee Save remains outside this student kit.
 - Teacher must integrate accepted work into `IntRuoyi` later.
 

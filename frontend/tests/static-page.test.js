@@ -141,6 +141,13 @@ test('row operation actions use compact text-button styling', () => {
   assert.doesNotMatch(css, /\.row-generate-voucher\s*{[^}]*min-width:\s*\d+px;/s);
 });
 
+test('long expense type text wraps inside the ledger cell', () => {
+  const css = readFileSync('frontend/src/styles.css', 'utf8');
+  assert.match(css, /\.ledger-table td\[data-column-key="expenseCategories"\]\s*{[^}]*white-space:\s*normal;/s);
+  assert.match(css, /\.ledger-table td\[data-column-key="expenseCategories"\]\s*{[^}]*overflow-wrap:\s*anywhere;/s);
+  assert.match(css, /\.ledger-table td\[data-column-key="expenseCategories"\]\s*{[^}]*word-break:\s*break-word;/s);
+});
+
 test('frontend source is productized rather than a raw debug console', () => {
   const html = readFileSync('frontend/src/index.html', 'utf8');
   const app = readFileSync('frontend/src/app.js', 'utf8');

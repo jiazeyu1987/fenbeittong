@@ -65,7 +65,7 @@ Finance toolbar browser E2E validation for the Fenbeitong reimbursement to Kingd
 ## Failed, Skipped, Flaky, Or Blocked Tests
 
 - No skipped tests are planned.
-- Real Fenbeitong token and real Kingdee GL_VOUCHER save examples remain external blockers and are not production-readiness evidence.
+- Additional Fenbeitong companies require SQLite tenant credentials before real sync; real Kingdee GL_VOUCHER save examples remain external blockers and are not production-readiness evidence.
 
 ## CI Impact And Release Recommendation
 

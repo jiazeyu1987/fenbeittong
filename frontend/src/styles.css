@@ -203,6 +203,16 @@ body {
   font-weight: 700;
 }
 
+.ledger-table td[data-column-key="expenseCategories"] {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.45;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  text-align: left;
+}
+
 .sort-header {
   display: inline-flex;
   align-items: center;

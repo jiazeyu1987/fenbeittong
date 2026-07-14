@@ -20,7 +20,7 @@ Allow a student developer to independently build and verify the frontend and bac
 
 ## Out of Scope
 
-- Real Fenbeitong access-token.
+- Committed real Fenbeitong secrets.
 - Real Kingdee Save.
 - Submit, Audit, posting, approval, or deletion.
 - Full `IntRuoyi` permission, tenant, menu, and database implementation.

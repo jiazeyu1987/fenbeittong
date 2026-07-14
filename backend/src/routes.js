@@ -3,6 +3,7 @@ import { readJson, sendError, sendJson } from './http-utils.js';
 import { getSchedulerStatus, runSchedulerOnce } from './services/scheduler.js';
 import { getReadinessStatus, getSystemStatus } from './services/system-status.js';
 import { prepareVoucher, previewVoucher, pushVoucherToErp, syncFenbeitongDocuments } from './services/voucher-workflow.js';
+import { listFenbeitongTenants, saveFenbeitongTenantCredentials } from './tenant-store.js';
 import {
   findPreparedRecord,
   getConfig,
@@ -40,6 +41,19 @@ export async function handleApi(request, response) {
     }
     if (request.method === 'GET' && url.pathname === '/api/fenbeitong-voucher/config/mock-template') {
       return sendJson(response, 200, { success: true, data: buildMockTemplate() });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/fenbeitong-voucher/tenants') {
+      return sendJson(response, 200, { success: true, data: listFenbeitongTenants() });
+    }
+    if (request.method === 'PUT' && url.pathname.startsWith('/api/fenbeitong-voucher/tenants/')) {
+      const tenantKey = decodeURIComponent(url.pathname.split('/').pop());
+      return sendJson(response, 200, {
+        success: true,
+        data: saveFenbeitongTenantCredentials({
+          ...(await readJson(request)),
+          key: tenantKey
+        })
+      });
     }
     if (request.method === 'PUT' && url.pathname === '/api/fenbeitong-voucher/config') {
       return sendJson(response, 200, { success: true, data: saveConfig(await readJson(request)) });

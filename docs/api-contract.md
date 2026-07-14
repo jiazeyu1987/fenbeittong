@@ -16,7 +16,7 @@ Returns product mode, dependency readiness, local state path, latest sync batch,
 
 ## GET `/api/system/config-summary`
 
-Returns sanitized configuration booleans only, including Fenbeitong auth mode, whether base URL, access-token, app_id, app_key, auth path, pull path, and detail path are configured, and which list payload keys are active. It never returns tokens, app keys, passwords, or authorization header values.
+Returns sanitized configuration only. Fenbeitong reports `credentialStore: "sqlite"`, the default tenant key, list override keys, tenant store path, and a tenant list with public fields such as `key`, `name`, `status`, `authMode`, endpoint paths, `credentialsConfigured`, token expiry, refresh interval, and display order. It never returns tokens, app keys, passwords, or authorization header values.
 
 ## GET `/api/scheduler/status`
 
@@ -45,6 +45,30 @@ Runs one scheduler cycle immediately. This uses the configured Fenbeitong adapte
 
 Returns a non-secret mock configuration and fixed source JSON.
 
+## GET `/api/fenbeitong-voucher/tenants`
+
+Returns public Fenbeitong tenant records from SQLite. The response includes `璞慧` and `瑛泰`; secret fields are always omitted.
+
+## PUT `/api/fenbeitong-voucher/tenants/:tenantKey`
+
+Creates or updates one Fenbeitong tenant in SQLite. This is where company-specific `appId`, `appKey`, cached `accessToken`, token expiry, refresh interval, API paths, and list payload are stored. The response is sanitized and does not echo secrets.
+
+```json
+{
+  "name": "璞慧",
+  "status": "ready",
+  "authMode": "app-key",
+  "baseUrl": "https://openapi.fenbeitong.com",
+  "authPath": "/openapi/auth/getToken",
+  "pullPath": "/openapi/reimbursement/v1/list",
+  "detailPath": "/openapi/reimbursement/v2/detail",
+  "appId": "<company-app-id>",
+  "appKey": "<company-app-key>",
+  "refreshIntervalSeconds": 7200,
+  "listPayload": { "page_index": 1, "page_size": 20 }
+}
+```
+
 ## PUT `/api/fenbeitong-voucher/config`
 
 Stores local mock configuration in memory.
@@ -71,7 +95,7 @@ Creates a local prepared process record. This does not call real Kingdee.
 
 ## POST `/api/fenbeitong-voucher/sync`
 
-Runs the Fenbeitong adapter. Request body accepts optional `{ "tenantKey": "puhui" | "yingtai" }`; missing `tenantKey` defaults to `puhui`. `yingtai` fails fast with `瑛泰接口等待开发中` and never falls back to Puhui credentials. In `FENBEITONG_MODE=mock`, it loads the fixed JSON fixture. In `real` mode, `FENBEITONG_AUTH_MODE=access-token` uses the configured access-token directly, and `FENBEITONG_AUTH_MODE=app-key` first posts `app_id/app_key` as JSON to `/openapi/auth/getToken` or the configured `FENBEITONG_AUTH_PATH` to obtain the token string returned in `data`; the app-key token is reused for 7200 seconds before refresh. The adapter then calls the reimbursement list endpoint with configured pagination/status filters and calls the reimbursement detail endpoint for each returned item before queue persistence; missing real interface configuration or missing detail expense lines fails fast.
+Runs the Fenbeitong adapter. Request body accepts optional `{ "tenantKey": "puhui" | "yingtai" }`; missing `tenantKey` defaults to `puhui`. `yingtai` fails fast with `瑛泰接口等待开发中` and never falls back to Puhui credentials. In `FENBEITONG_MODE=mock`, it loads the fixed JSON fixture. In `real` mode, the selected tenant is read from SQLite. `authMode=access-token` uses the stored access token directly; `authMode=app-key` posts the tenant `appId/appKey` as JSON to the tenant `authPath`, stores the returned token and expiry in SQLite, and reuses it until the tenant-specific refresh interval expires. The adapter then calls the tenant list endpoint and reimbursement detail endpoint for each returned item before queue persistence; missing tenant configuration or missing detail expense lines fails fast.
 
 ## GET `/api/fenbeitong-voucher/synced-documents`
 

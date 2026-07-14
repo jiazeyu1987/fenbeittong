@@ -13,14 +13,14 @@
 
 ## Joint Debug Acceptance
 
-- [ ] Real Fenbeitong and Kingdee modes are not accepted until token, URLs and a successful Kingdee `GL_VOUCHER` Save sample are provided.
+- [ ] Real Fenbeitong mode is not accepted until the selected company has SQLite tenant credentials and a confirmed token/list/detail pull.
 - [ ] If real mode is configured without required values, readiness must show the missing field names.
 - [ ] Error summary must show failure step, error code, reason and the next person-action.
 - [ ] Technical details may contain JSON, but teachers should only need the summary and checklist to judge the result.
 
 ## Real ERP Acceptance Blockers
 
-- [ ] Fenbeitong access token is provided and confirmed usable.
+- [ ] Fenbeitong company credentials are stored in SQLite and confirmed usable.
 - [ ] Kingdee test account has a proven `GL_VOUCHER` Save request/response with FID and Number.
 - [ ] Finance confirms account, tax and detail-dimension mappings.
 - [ ] A real saved voucher can be queried in Kingdee and remains draft only: not submitted, not audited and not posted.

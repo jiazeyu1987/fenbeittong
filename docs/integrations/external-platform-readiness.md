@@ -13,7 +13,7 @@ Fenbeitong production OpenAPI and Kingdee GL_VOUCHER save integration readiness 
 
 ## Credentials And Secrets
 
-- Fenbeitong credentials are present only in local `.env`; no token, app key, password, or auth header value is recorded in this document.
+- Fenbeitong company credentials are stored in the local SQLite tenant store under `runtime-data/`; no token, app key, password, or auth header value is recorded in this document.
 - Kingdee real write credentials are not configured in the local workbench.
 
 ## Domains

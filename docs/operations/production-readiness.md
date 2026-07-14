@@ -32,9 +32,9 @@ Mock replacement is visible in API responses, local records, sync batches, opera
 
 ## Data Storage
 
-Local state is stored in `runtime-data/state.json` for this standalone teaching project. The directory is ignored by Git and can be replaced by a real database later without changing the workflow contract.
+Local state is stored in `runtime-data/state.json`. Fenbeitong company credentials, cached tokens, token expiry, refresh intervals, endpoint paths, and per-company list payloads are stored in `runtime-data/fenbeitong-tenants.sqlite`. The directory is ignored by Git.
 
 ## Current External Blockers
 
-- Fenbeitong access token is not available yet.
+- Additional Fenbeitong companies remain blocked until their SQLite tenant credentials are configured.
 - Kingdee `GL_VOUCHER` real save sample is not confirmed yet.

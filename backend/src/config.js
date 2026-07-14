@@ -7,11 +7,6 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
 let envLoaded = false;
 
-const fenbeitongTenants = [
-  { key: 'puhui', name: '璞慧', status: 'ready' },
-  { key: 'yingtai', name: '瑛泰', status: 'waiting_development' }
-];
-
 export function loadLocalEnv() {
   if (envLoaded) {
     return;
@@ -45,17 +40,9 @@ export function getAppConfig() {
     appDataDir: process.env.APP_DATA_DIR || process.env.DATA_DIR || 'runtime-data',
     fenbeitong: {
       mode: readMode('FENBEITONG_MODE'),
-      authMode: readFenbeitongAuthMode(),
       defaultTenantKey: process.env.FENBEITONG_TENANT_KEY || 'puhui',
-      tenants: fenbeitongTenants.map((tenant) => ({ ...tenant })),
-      baseUrl: process.env.FENBEITONG_BASE_URL || '',
-      accessToken: process.env.FENBEITONG_ACCESS_TOKEN || '',
-      appId: process.env.FENBEITONG_APP_ID || '',
-      appKey: process.env.FENBEITONG_APP_KEY || '',
-      authPath: process.env.FENBEITONG_AUTH_PATH || '/openapi/auth/getToken',
-      pullPath: process.env.FENBEITONG_PULL_PATH || '/openapi/reimbursement/v1/list',
-      detailPath: process.env.FENBEITONG_DETAIL_PATH || '/openapi/reimbursement/v2/detail',
-      listPayload: buildFenbeitongListPayload()
+      credentialStore: 'sqlite',
+      listPayloadOverrides: buildFenbeitongListPayload()
     },
     kingdee: {
       mode: readMode('KINGDEE_MODE'),
@@ -71,22 +58,24 @@ export function getAppConfig() {
   };
 }
 
-export function validateFenbeitongConfig() {
+export function validateFenbeitongConfig(tenant) {
   const config = getAppConfig().fenbeitong;
   if (config.mode === 'mock') {
     return;
   }
   const missing = [];
-  if (!config.baseUrl) missing.push('FENBEITONG_BASE_URL');
-  if (config.authMode === 'access-token' && !config.accessToken) {
-    missing.push('FENBEITONG_ACCESS_TOKEN');
+  if (!tenant) missing.push('FENBEITONG_TENANT');
+  if (tenant && !tenant.baseUrl) missing.push('tenant.baseUrl');
+  if (tenant && !tenant.pullPath) missing.push('tenant.pullPath');
+  if (tenant && !tenant.detailPath) missing.push('tenant.detailPath');
+  if (tenant?.authMode === 'access-token' && !tenant.accessToken) {
+    missing.push('tenant.accessToken');
   }
-  if (config.authMode === 'app-key') {
-    if (!config.appId) missing.push('FENBEITONG_APP_ID');
-    if (!config.appKey) missing.push('FENBEITONG_APP_KEY');
+  if (tenant?.authMode === 'app-key') {
+    if (!tenant.appId) missing.push('tenant.appId');
+    if (!tenant.appKey) missing.push('tenant.appKey');
+    if (!tenant.authPath) missing.push('tenant.authPath');
   }
-  if (!config.pullPath) missing.push('FENBEITONG_PULL_PATH');
-  if (!config.detailPath) missing.push('FENBEITONG_DETAIL_PATH');
   if (missing.length > 0) {
     throw missingConfigError('Fenbeitong', missing);
   }
@@ -110,24 +99,9 @@ export function getSanitizedConfigSummary() {
     appDataDir: config.appDataDir,
     fenbeitong: {
       mode: config.fenbeitong.mode,
-      authMode: config.fenbeitong.authMode,
-      baseUrlConfigured: Boolean(config.fenbeitong.baseUrl),
-      accessTokenConfigured: Boolean(config.fenbeitong.accessToken),
-      appIdConfigured: Boolean(config.fenbeitong.appId),
-      appKeyConfigured: Boolean(config.fenbeitong.appKey),
-      authPathConfigured: Boolean(config.fenbeitong.authPath),
-      pullPathConfigured: Boolean(config.fenbeitong.pullPath),
-      detailPathConfigured: Boolean(config.fenbeitong.detailPath),
+      credentialStore: config.fenbeitong.credentialStore,
       defaultTenantKey: config.fenbeitong.defaultTenantKey,
-      tenants: config.fenbeitong.tenants.map((tenant) => ({
-        key: tenant.key,
-        name: tenant.name,
-        status: tenant.status,
-        credentialsConfigured: tenant.key === 'puhui'
-          ? Boolean(config.fenbeitong.appId || config.fenbeitong.appKey || config.fenbeitong.accessToken)
-          : false
-      })),
-      listPayloadKeys: Object.keys(config.fenbeitong.listPayload).sort()
+      listPayloadOverrideKeys: Object.keys(config.fenbeitong.listPayloadOverrides).sort()
     },
     kingdee: {
       mode: config.kingdee.mode,
@@ -146,12 +120,16 @@ export function getRootDir() {
   return root;
 }
 
-
 function buildFenbeitongListPayload() {
-  const payload = {
-    page_index: readPositiveInteger('FENBEITONG_REIMBURSEMENT_PAGE_INDEX', 1),
-    page_size: readPositiveInteger('FENBEITONG_REIMBURSEMENT_PAGE_SIZE', 20)
-  };
+  const payload = {};
+  const pageIndex = readOptionalPositiveInteger('FENBEITONG_REIMBURSEMENT_PAGE_INDEX');
+  if (pageIndex !== undefined) {
+    payload.page_index = pageIndex;
+  }
+  const pageSize = readOptionalPositiveInteger('FENBEITONG_REIMBURSEMENT_PAGE_SIZE');
+  if (pageSize !== undefined) {
+    payload.page_size = pageSize;
+  }
   const applyState = readOptionalInteger('FENBEITONG_REIMBURSEMENT_APPLY_STATE');
   if (applyState !== undefined) {
     payload.apply_state = applyState;
@@ -175,18 +153,21 @@ function readOptionalInteger(name) {
   return value;
 }
 
+function readOptionalPositiveInteger(name) {
+  const value = readOptionalInteger(name);
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return value;
+}
+
 function readMode(name) {
   const mode = (process.env[name] || 'mock').trim().toLowerCase();
   if (mode !== 'mock' && mode !== 'real') {
     throw new Error(`${name} must be mock or real`);
-  }
-  return mode;
-}
-
-function readFenbeitongAuthMode() {
-  const mode = (process.env.FENBEITONG_AUTH_MODE || 'access-token').trim().toLowerCase();
-  if (mode !== 'access-token' && mode !== 'app-key') {
-    throw new Error('FENBEITONG_AUTH_MODE must be access-token or app-key');
   }
   return mode;
 }
