@@ -38,7 +38,8 @@ Teacher review should require `npm run verify` to pass before accepting student 
 Copy `.env.example` to `.env` when local configuration is needed.
 
 - `FENBEITONG_MODE=mock`: loads fixed local JSON.
-- `FENBEITONG_MODE=real`: requires `FENBEITONG_BASE_URL`, `FENBEITONG_ACCESS_TOKEN`, and `FENBEITONG_PULL_PATH`.
+- `FENBEITONG_MODE=real` with `FENBEITONG_AUTH_MODE=access-token`: requires `FENBEITONG_BASE_URL`, `FENBEITONG_ACCESS_TOKEN`, and `FENBEITONG_PULL_PATH`.
+- `FENBEITONG_MODE=real` with `FENBEITONG_AUTH_MODE=app-key`: requires `FENBEITONG_BASE_URL`, `FENBEITONG_APP_ID`, `FENBEITONG_APP_KEY`, and `FENBEITONG_PULL_PATH`; it defaults token acquisition to `/openapi/auth/getToken`.
 - `KINGDEE_MODE=mock`: simulates ERP save response.
 - `KINGDEE_MODE=real`: requires `KINGDEE_SAVE_URL` and optional auth header values.
 

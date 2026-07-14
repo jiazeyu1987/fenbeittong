@@ -11,11 +11,7 @@ export function getSystemStatus() {
       kingdee: config.kingdee.mode
     },
     readiness: {
-      fenbeitong: readiness(config.fenbeitong.mode, [
-        ['FENBEITONG_BASE_URL', config.fenbeitong.baseUrl],
-        ['FENBEITONG_ACCESS_TOKEN', config.fenbeitong.accessToken],
-        ['FENBEITONG_PULL_PATH', config.fenbeitong.pullPath]
-      ]),
+      fenbeitong: readiness(config.fenbeitong.mode, fenbeitongReadinessFields(config.fenbeitong)),
       kingdee: readiness(config.kingdee.mode, [
         ['KINGDEE_SAVE_URL', config.kingdee.saveUrl]
       ])
@@ -33,6 +29,22 @@ export function getReadinessStatus() {
     dependencies: status.readiness,
     mode: status.mode
   };
+}
+
+function fenbeitongReadinessFields(config) {
+  const fields = [
+    ['FENBEITONG_BASE_URL', config.baseUrl],
+    ['FENBEITONG_PULL_PATH', config.pullPath]
+  ];
+  if (config.authMode === 'access-token') {
+    fields.push(['FENBEITONG_ACCESS_TOKEN', config.accessToken]);
+  }
+  if (config.authMode === 'app-key') {
+    fields.push(['FENBEITONG_APP_ID', config.appId]);
+    fields.push(['FENBEITONG_APP_KEY', config.appKey]);
+    fields.push(['FENBEITONG_AUTH_PATH', config.authPath]);
+  }
+  return fields;
 }
 
 function readiness(mode, fields) {

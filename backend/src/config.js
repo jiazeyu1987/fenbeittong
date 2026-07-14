@@ -40,8 +40,12 @@ export function getAppConfig() {
     appDataDir: process.env.APP_DATA_DIR || process.env.DATA_DIR || 'runtime-data',
     fenbeitong: {
       mode: readMode('FENBEITONG_MODE'),
+      authMode: readFenbeitongAuthMode(),
       baseUrl: process.env.FENBEITONG_BASE_URL || '',
       accessToken: process.env.FENBEITONG_ACCESS_TOKEN || '',
+      appId: process.env.FENBEITONG_APP_ID || '',
+      appKey: process.env.FENBEITONG_APP_KEY || '',
+      authPath: process.env.FENBEITONG_AUTH_PATH || '/openapi/auth/getToken',
       pullPath: process.env.FENBEITONG_PULL_PATH || '/reimbursements/pull'
     },
     kingdee: {
@@ -65,7 +69,13 @@ export function validateFenbeitongConfig() {
   }
   const missing = [];
   if (!config.baseUrl) missing.push('FENBEITONG_BASE_URL');
-  if (!config.accessToken) missing.push('FENBEITONG_ACCESS_TOKEN');
+  if (config.authMode === 'access-token' && !config.accessToken) {
+    missing.push('FENBEITONG_ACCESS_TOKEN');
+  }
+  if (config.authMode === 'app-key') {
+    if (!config.appId) missing.push('FENBEITONG_APP_ID');
+    if (!config.appKey) missing.push('FENBEITONG_APP_KEY');
+  }
   if (!config.pullPath) missing.push('FENBEITONG_PULL_PATH');
   if (missing.length > 0) {
     throw missingConfigError('Fenbeitong', missing);
@@ -90,8 +100,12 @@ export function getSanitizedConfigSummary() {
     appDataDir: config.appDataDir,
     fenbeitong: {
       mode: config.fenbeitong.mode,
+      authMode: config.fenbeitong.authMode,
       baseUrlConfigured: Boolean(config.fenbeitong.baseUrl),
       accessTokenConfigured: Boolean(config.fenbeitong.accessToken),
+      appIdConfigured: Boolean(config.fenbeitong.appId),
+      appKeyConfigured: Boolean(config.fenbeitong.appKey),
+      authPathConfigured: Boolean(config.fenbeitong.authPath),
       pullPathConfigured: Boolean(config.fenbeitong.pullPath)
     },
     kingdee: {
@@ -115,6 +129,14 @@ function readMode(name) {
   const mode = (process.env[name] || 'mock').trim().toLowerCase();
   if (mode !== 'mock' && mode !== 'real') {
     throw new Error(`${name} must be mock or real`);
+  }
+  return mode;
+}
+
+function readFenbeitongAuthMode() {
+  const mode = (process.env.FENBEITONG_AUTH_MODE || 'access-token').trim().toLowerCase();
+  if (mode !== 'access-token' && mode !== 'app-key') {
+    throw new Error('FENBEITONG_AUTH_MODE must be access-token or app-key');
   }
   return mode;
 }

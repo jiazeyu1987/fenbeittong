@@ -119,17 +119,91 @@ test('mock Fenbeitong pull returns finance-sized sortable reimbursement ledger',
 
 test('real Fenbeitong mode fails fast when required config is missing', () => {
   const previousMode = process.env.FENBEITONG_MODE;
+  const previousAuthMode = process.env.FENBEITONG_AUTH_MODE;
   const previousUrl = process.env.FENBEITONG_BASE_URL;
   const previousToken = process.env.FENBEITONG_ACCESS_TOKEN;
   process.env.FENBEITONG_MODE = 'real';
+  process.env.FENBEITONG_AUTH_MODE = 'access-token';
   process.env.FENBEITONG_BASE_URL = '';
   process.env.FENBEITONG_ACCESS_TOKEN = '';
 
   assert.throws(() => validateFenbeitongConfig(), /FENBEITONG_BASE_URL/);
 
   restoreEnv('FENBEITONG_MODE', previousMode);
+  restoreEnv('FENBEITONG_AUTH_MODE', previousAuthMode);
   restoreEnv('FENBEITONG_BASE_URL', previousUrl);
   restoreEnv('FENBEITONG_ACCESS_TOKEN', previousToken);
+});
+
+test('real Fenbeitong app-key mode requires app credentials', () => {
+  const previous = snapshotFenbeitongEnv();
+  process.env.FENBEITONG_MODE = 'real';
+  process.env.FENBEITONG_AUTH_MODE = 'app-key';
+  process.env.FENBEITONG_BASE_URL = 'https://openapi.example.test';
+  process.env.FENBEITONG_APP_ID = '';
+  process.env.FENBEITONG_APP_KEY = '';
+  process.env.FENBEITONG_AUTH_PATH = '';
+  process.env.FENBEITONG_PULL_PATH = '/openapi/reimbursement/v1/list';
+
+  assert.throws(
+    () => validateFenbeitongConfig(),
+    /FENBEITONG_APP_ID, FENBEITONG_APP_KEY/
+  );
+
+  restoreFenbeitongEnv(previous);
+});
+
+test('real Fenbeitong app-key mode obtains token from official getToken endpoint before reimbursement pull', async () => {
+  const previousEnv = snapshotFenbeitongEnv();
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  process.env.FENBEITONG_MODE = 'real';
+  process.env.FENBEITONG_AUTH_MODE = 'app-key';
+  process.env.FENBEITONG_BASE_URL = 'https://openapi.example.test';
+  process.env.FENBEITONG_APP_ID = 'app-id-for-test';
+  process.env.FENBEITONG_APP_KEY = 'app-key-for-test';
+  process.env.FENBEITONG_AUTH_PATH = '';
+  process.env.FENBEITONG_PULL_PATH = '/openapi/reimbursement/v1/list';
+
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), options });
+    if (String(url).endsWith('/openapi/auth/getToken')) {
+      assert.equal(Object.hasOwn(options.headers, 'appId'), false);
+      assert.equal(Object.hasOwn(options.headers, 'appKey'), false);
+      assert.deepEqual(JSON.parse(options.body), {
+        app_id: 'app-id-for-test',
+        app_key: 'app-key-for-test'
+      });
+      return jsonResponse({ code: 0, data: 'issued-access-token' });
+    }
+    assert.equal(options.headers['access-token'], 'issued-access-token');
+    return jsonResponse({
+      code: 0,
+      msg: 'success',
+      data: {
+        reimbursements: [
+          {
+            id: 'REAL-REIMB-001',
+            proposer_name: 'Real User',
+            total_amount: '100.00'
+          }
+        ]
+      }
+    });
+  };
+
+  const result = await pullFenbeitongReimbursements();
+
+  assert.equal(result.mode, 'real');
+  assert.equal(result.mockReplacement, false);
+  assert.equal(result.documents.length, 1);
+  assert.equal(result.documents[0].data.reimb_id, 'REAL-REIMB-001');
+  assert.equal(result.documents[0].data.reimb_code, 'REAL-REIMB-001');
+  assert.equal(result.documents[0].data.proposer_name, 'Real User');
+  assert.equal(calls.length, 2);
+
+  globalThis.fetch = previousFetch;
+  restoreFenbeitongEnv(previousEnv);
 });
 
 function restoreEnv(name, value) {
@@ -138,4 +212,30 @@ function restoreEnv(name, value) {
   } else {
     process.env[name] = value;
   }
+}
+
+function snapshotFenbeitongEnv() {
+  return {
+    FENBEITONG_MODE: process.env.FENBEITONG_MODE,
+    FENBEITONG_AUTH_MODE: process.env.FENBEITONG_AUTH_MODE,
+    FENBEITONG_BASE_URL: process.env.FENBEITONG_BASE_URL,
+    FENBEITONG_ACCESS_TOKEN: process.env.FENBEITONG_ACCESS_TOKEN,
+    FENBEITONG_APP_ID: process.env.FENBEITONG_APP_ID,
+    FENBEITONG_APP_KEY: process.env.FENBEITONG_APP_KEY,
+    FENBEITONG_AUTH_PATH: process.env.FENBEITONG_AUTH_PATH,
+    FENBEITONG_PULL_PATH: process.env.FENBEITONG_PULL_PATH
+  };
+}
+
+function restoreFenbeitongEnv(previous) {
+  for (const [name, value] of Object.entries(previous)) {
+    restoreEnv(name, value);
+  }
+}
+
+function jsonResponse(body, init = {}) {
+  return new Response(JSON.stringify(body), {
+    status: init.status || 200,
+    headers: { 'Content-Type': 'application/json' }
+  });
 }

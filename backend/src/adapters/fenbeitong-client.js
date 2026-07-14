@@ -20,12 +20,13 @@ export async function pullFenbeitongReimbursements() {
   }
 
   validateFenbeitongConfig();
+  const accessToken = await resolveAccessToken(config);
   const url = new URL(config.pullPath, config.baseUrl);
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'access-token': config.accessToken
+      'access-token': accessToken
     },
     body: JSON.stringify({})
   });
@@ -46,7 +47,19 @@ export async function pullFenbeitongReimbursements() {
       mode: 'real',
       mockReplacement: false,
       mockReason: '',
-      documents: body.data.map((item) => ({ code: '0', msg: body.msg || '', data: item }))
+      documents: body.data.map((item) => ({ code: '0', msg: body.msg || '', data: normalizeReimbursementSummary(item) }))
+    };
+  }
+  if (Array.isArray(body.data?.reimbursements)) {
+    return {
+      mode: 'real',
+      mockReplacement: false,
+      mockReason: '',
+      documents: body.data.reimbursements.map((item) => ({
+        code: '0',
+        msg: body.msg || '',
+        data: normalizeReimbursementSummary(item)
+      }))
     };
   }
   if (body.data && typeof body.data === 'object') {
@@ -60,6 +73,52 @@ export async function pullFenbeitongReimbursements() {
   throw dependencyError('FENBEITONG_INVALID_RESPONSE', 'Fenbeitong response data must be an object or array');
 }
 
+async function resolveAccessToken(config) {
+  if (config.authMode === 'access-token') {
+    return config.accessToken;
+  }
+  const url = new URL(config.authPath, config.baseUrl);
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      app_id: config.appId,
+      app_key: config.appKey
+    })
+  });
+  const body = await response.json();
+  if (!response.ok) {
+    throw dependencyError('FENBEITONG_AUTH_HTTP_FAILED', `Fenbeitong auth failed: HTTP ${response.status}`, {
+      status: response.status
+    });
+  }
+  if (String(body.code) !== '0') {
+    throw dependencyError('FENBEITONG_AUTH_RESPONSE_FAILED', `Fenbeitong auth failed: code=${body.code}, msg=${body.msg || ''}`, {
+      code: body.code,
+      msg: body.msg || ''
+    });
+  }
+  const token = typeof body.data === 'string' ? body.data : '';
+  if (!token) {
+    throw dependencyError('FENBEITONG_AUTH_TOKEN_MISSING', 'Fenbeitong auth response did not include data token string');
+  }
+  return token;
+}
+
+function normalizeReimbursementSummary(item) {
+  const sourceId = item?.reimb_id || item?.id;
+  if (!sourceId) {
+    throw dependencyError('FENBEITONG_INVALID_RESPONSE', 'Fenbeitong reimbursement item is missing id');
+  }
+  return {
+    ...item,
+    reimb_id: sourceId,
+    reimb_code: item.reimb_code || item.reimburse_code || sourceId
+  };
+}
+
 function buildMockReimbursements(baseDocument, count) {
   const requesters = [
     ['PL0189', '陈彩灵', 'BM000330', '华东区'],
@@ -67,9 +126,9 @@ function buildMockReimbursements(baseDocument, count) {
     ['PL0187', '陈英凤', 'BM000321', '南四区'],
     ['X011', '顾硕', 'BM000341', '华东地区'],
     ['X015', '颜建鑫', 'BM000341', '华东地区'],
-    ['PL0219', '马魏峰', 'BM000337', '华南地区'],
+    ['PL0219', '马巍峰', 'BM000337', '华南地区'],
     ['X005', '魏玉川', 'BM000340', '山河地区'],
-    ['A202011', '李妹', 'BM000330', '组装']
+    ['A202011', '李姝', 'BM000330', '组装']
   ];
   const categories = [
     ['TRAVEL', '差旅费'],
