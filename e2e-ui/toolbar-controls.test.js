@@ -38,6 +38,7 @@ function startFrontendServer() {
 }
 
 test('finance toolbar controls each produce observable E2E effects', async () => {
+  const restoreEnv = forceMockExternalEnv();
   resetRepository();
   await stopKnownDevServers();
   const apiServer = await startApiServer();
@@ -155,6 +156,7 @@ test('finance toolbar controls each produce observable E2E effects', async () =>
     await browser.close();
     await new Promise((resolve) => apiServer.close(resolve));
     await new Promise((resolve) => frontendServer.close(resolve));
+    restoreEnv();
   }
 });
 
@@ -238,6 +240,30 @@ function assertNumberSorted(values, direction) {
     expected.reverse();
   }
   assert.deepEqual(values, expected);
+}
+
+function forceMockExternalEnv() {
+  const previous = {
+    FENBEITONG_MODE: process.env.FENBEITONG_MODE,
+    FENBEITONG_ACCESS_TOKEN: process.env.FENBEITONG_ACCESS_TOKEN,
+    FENBEITONG_APP_ID: process.env.FENBEITONG_APP_ID,
+    FENBEITONG_APP_KEY: process.env.FENBEITONG_APP_KEY,
+    KINGDEE_MODE: process.env.KINGDEE_MODE
+  };
+  process.env.FENBEITONG_MODE = 'mock';
+  process.env.FENBEITONG_ACCESS_TOKEN = '';
+  process.env.FENBEITONG_APP_ID = '';
+  process.env.FENBEITONG_APP_KEY = '';
+  process.env.KINGDEE_MODE = 'mock';
+  return () => {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+    }
+  };
 }
 
 async function stopKnownDevServers() {

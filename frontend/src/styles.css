@@ -51,6 +51,22 @@ body {
   flex: 1;
 }
 
+.company-selector {
+  width: 86px !important;
+  min-width: 86px;
+}
+
+.tenant-status {
+  min-width: 104px;
+  color: #667085;
+  font-size: 13px;
+}
+
+.tenant-status.waiting {
+  color: #b45309;
+  font-weight: 700;
+}
+
 .ledger-toolbar button,
 .page-button {
   display: inline-flex;

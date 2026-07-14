@@ -5,7 +5,10 @@ import { buildVoucherPreview } from '../../backend/src/voucher-mapper.js';
 import { getSystemStatus } from '../../backend/src/services/system-status.js';
 import { resetRepository } from '../../backend/src/repository.js';
 import { validateFenbeitongConfig } from '../../backend/src/config.js';
-import { pullFenbeitongReimbursements } from '../../backend/src/adapters/fenbeitong-client.js';
+import {
+  clearFenbeitongTokenCacheForTest,
+  pullFenbeitongReimbursements
+} from '../../backend/src/adapters/fenbeitong-client.js';
 import { getSchedulerStatus, runSchedulerOnce, stopSchedulerForTest } from '../../backend/src/services/scheduler.js';
 
 test('mock template contains required fields and no real token', () => {
@@ -14,6 +17,7 @@ test('mock template contains required fields and no real token', () => {
   assert.equal(template.voucherGroupNumber, 'PZZ9');
   assert.equal(template.templateErpFid, '780047');
   assert.equal(template.categoryAccountNumbers.TRAVEL, '1001.01');
+  assert.equal(template.categoryAccountNumbers.CI007, '6601.10');
   assert.equal(template.creditAccountNumber, '6111');
   assert.equal(template.splitDeductibleTax, false);
   assert.equal(template.erpTemplateModel.AccountBookID.Number, '908');
@@ -73,48 +77,66 @@ test('voucher payload writes only Kingdee GL_VOUCHER fields', () => {
 });
 
 test('system status exposes mode and readiness for formal workflow', () => {
-  resetRepository();
-  const status = getSystemStatus();
-  assert.equal(status.mode.fenbeitong, 'mock');
-  assert.equal(status.mode.kingdee, 'mock');
-  assert.equal(status.readiness.fenbeitong.ready, true);
-  assert.equal(status.readiness.kingdee.ready, true);
-  assert.equal(status.scheduler.enabled, false);
-  assert.equal(status.scheduler.autoPushErp, false);
-  assert.ok(Object.hasOwn(status.summary.counts, 'syncedDocuments'));
-  assert.ok(Object.hasOwn(status.summary.counts, 'operationLogs'));
-  assert.equal(status.config.fenbeitong.accessTokenConfigured, false);
+  const restore = forceMockFenbeitongEnv();
+  try {
+    resetRepository();
+    const status = getSystemStatus();
+    assert.equal(status.mode.fenbeitong, 'mock');
+    assert.equal(status.mode.kingdee, 'mock');
+    assert.equal(status.readiness.fenbeitong.ready, true);
+    assert.equal(status.readiness.kingdee.ready, true);
+    assert.equal(status.scheduler.enabled, false);
+    assert.equal(status.scheduler.autoPushErp, false);
+    assert.ok(Object.hasOwn(status.summary.counts, 'syncedDocuments'));
+    assert.ok(Object.hasOwn(status.summary.counts, 'operationLogs'));
+    assert.equal(status.config.fenbeitong.accessTokenConfigured, false);
+    assert.deepEqual(status.config.fenbeitong.tenants.map((tenant) => tenant.key), ['puhui', 'yingtai']);
+    assert.equal(status.config.fenbeitong.tenants.find((tenant) => tenant.key === 'puhui').name, '璞慧');
+    assert.equal(status.config.fenbeitong.tenants.find((tenant) => tenant.key === 'yingtai').status, 'waiting_development');
+  } finally {
+    restore();
+  }
 });
 
 test('scheduler is explicit and can run one sync with mock replacement', async () => {
-  resetRepository();
-  stopSchedulerForTest();
-  const initialStatus = getSchedulerStatus();
-  assert.equal(initialStatus.enabled, false);
-  assert.equal(initialStatus.running, false);
+  const restore = forceMockFenbeitongEnv();
+  try {
+    resetRepository();
+    stopSchedulerForTest();
+    const initialStatus = getSchedulerStatus();
+    assert.equal(initialStatus.enabled, false);
+    assert.equal(initialStatus.running, false);
 
-  const result = await runSchedulerOnce('contract-test');
-  assert.equal(result.sync.batch.status, 'SUCCESS');
-  assert.equal(result.sync.batch.mockReplacement, true);
-  assert.equal(result.sync.records[0].processStage, 'SYNCED');
-  assert.equal(getSchedulerStatus().runCount, 1);
+    const result = await runSchedulerOnce('contract-test');
+    assert.equal(result.sync.batch.status, 'SUCCESS');
+    assert.equal(result.sync.batch.mockReplacement, true);
+    assert.equal(result.sync.records[0].processStage, 'SYNCED');
+    assert.equal(getSchedulerStatus().runCount, 1);
+  } finally {
+    restore();
+  }
 });
 
 test('mock Fenbeitong pull returns finance-sized sortable reimbursement ledger', async () => {
-  const result = await pullFenbeitongReimbursements();
-  assert.equal(result.mode, 'mock');
-  assert.equal(result.mockReplacement, true);
-  assert.equal(result.documents.length, 100);
+  const restore = forceMockFenbeitongEnv();
+  try {
+    const result = await pullFenbeitongReimbursements();
+    assert.equal(result.mode, 'mock');
+    assert.equal(result.mockReplacement, true);
+    assert.equal(result.documents.length, 100);
 
-  const sourceIds = result.documents.map((document) => document.data.reimb_id);
-  const sourceCodes = result.documents.map((document) => document.data.reimb_code);
-  const amounts = result.documents.map((document) => Number(document.data.total_amount));
-  const times = result.documents.map((document) => document.data.create_time);
+    const sourceIds = result.documents.map((document) => document.data.reimb_id);
+    const sourceCodes = result.documents.map((document) => document.data.reimb_code);
+    const amounts = result.documents.map((document) => Number(document.data.total_amount));
+    const times = result.documents.map((document) => document.data.create_time);
 
-  assert.equal(new Set(sourceIds).size, 100);
-  assert.equal(new Set(sourceCodes).size, 100);
-  assert.ok(new Set(amounts).size > 20);
-  assert.ok(new Set(times).size > 20);
+    assert.equal(new Set(sourceIds).size, 100);
+    assert.equal(new Set(sourceCodes).size, 100);
+    assert.ok(new Set(amounts).size > 20);
+    assert.ok(new Set(times).size > 20);
+  } finally {
+    restore();
+  }
 });
 
 test('real Fenbeitong mode fails fast when required config is missing', () => {
@@ -157,6 +179,7 @@ test('real Fenbeitong app-key mode obtains token from official getToken endpoint
   const previousEnv = snapshotFenbeitongEnv();
   const previousFetch = globalThis.fetch;
   const calls = [];
+  clearFenbeitongTokenCacheForTest();
   process.env.FENBEITONG_MODE = 'real';
   process.env.FENBEITONG_AUTH_MODE = 'app-key';
   process.env.FENBEITONG_BASE_URL = 'https://openapi.example.test';
@@ -233,12 +256,14 @@ test('real Fenbeitong app-key mode obtains token from official getToken endpoint
 
   globalThis.fetch = previousFetch;
   restoreFenbeitongEnv(previousEnv);
+  clearFenbeitongTokenCacheForTest();
 });
 
 test('real Fenbeitong app-key mode pulls reimbursement detail after list summary', async () => {
   const previousEnv = snapshotFenbeitongEnv();
   const previousFetch = globalThis.fetch;
   const calls = [];
+  clearFenbeitongTokenCacheForTest();
   process.env.FENBEITONG_MODE = 'real';
   process.env.FENBEITONG_AUTH_MODE = 'app-key';
   process.env.FENBEITONG_BASE_URL = 'https://openapi.example.test';
@@ -322,9 +347,98 @@ test('real Fenbeitong app-key mode pulls reimbursement detail after list summary
   restoreFenbeitongEnv(previousEnv);
 });
 
+test('real Fenbeitong app-key mode reuses Puhui access token within two hours', async () => {
+  const previousEnv = snapshotFenbeitongEnv();
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  clearFenbeitongTokenCacheForTest();
+  process.env.FENBEITONG_MODE = 'real';
+  process.env.FENBEITONG_AUTH_MODE = 'app-key';
+  process.env.FENBEITONG_BASE_URL = 'https://openapi.example.test';
+  process.env.FENBEITONG_APP_ID = 'puhui-app-id';
+  process.env.FENBEITONG_APP_KEY = 'puhui-app-key';
+  process.env.FENBEITONG_AUTH_PATH = '';
+  process.env.FENBEITONG_PULL_PATH = '/openapi/reimbursement/v1/list';
+  process.env.FENBEITONG_DETAIL_PATH = '/openapi/reimbursement/v2/detail';
+  process.env.FENBEITONG_REIMBURSEMENT_APPLY_STATE = '';
+  process.env.FENBEITONG_REIMBURSEMENT_PAYMENT_STATE = '';
+  process.env.FENBEITONG_REIMBURSEMENT_PAGE_INDEX = '';
+  process.env.FENBEITONG_REIMBURSEMENT_PAGE_SIZE = '';
+
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), options });
+    if (String(url).endsWith('/openapi/auth/getToken')) {
+      return jsonResponse({ code: 0, data: 'cached-access-token' });
+    }
+    if (String(url).endsWith('/openapi/reimbursement/v1/list')) {
+      assert.equal(options.headers['access-token'], 'cached-access-token');
+      return jsonResponse({
+        code: 0,
+        msg: 'success',
+        data: { reimbursements: [{ id: 'REAL-CODE-CACHE' }] }
+      });
+    }
+    return jsonResponse({
+      code: 0,
+      msg: 'success',
+      data: {
+        reimb_id: 'REAL-ID-CACHE',
+        reimb_code: 'REAL-CODE-CACHE',
+        currency_code: 'CNY',
+        total_amount: '100.00',
+        payment_amount: '100.00',
+        expenses: [
+          {
+            id: 'EXP-CACHE',
+            cost_category: { code: 'TRAVEL', name: 'Travel' },
+            total_amount: '100.00',
+            invoices: []
+          }
+        ]
+      }
+    });
+  };
+
+  await pullFenbeitongReimbursements({ tenantKey: 'puhui' });
+  await pullFenbeitongReimbursements({ tenantKey: 'puhui' });
+
+  assert.equal(calls.filter((call) => call.url.endsWith('/openapi/auth/getToken')).length, 1);
+  assert.equal(calls.filter((call) => call.url.endsWith('/openapi/reimbursement/v1/list')).length, 2);
+
+  globalThis.fetch = previousFetch;
+  restoreFenbeitongEnv(previousEnv);
+  clearFenbeitongTokenCacheForTest();
+});
+
+test('Yingtai tenant fails fast without falling back to Puhui credentials', async () => {
+  const previousEnv = snapshotFenbeitongEnv();
+  const previousFetch = globalThis.fetch;
+  let fetchCalled = false;
+  process.env.FENBEITONG_MODE = 'real';
+  process.env.FENBEITONG_AUTH_MODE = 'app-key';
+  process.env.FENBEITONG_BASE_URL = 'https://openapi.example.test';
+  process.env.FENBEITONG_APP_ID = 'puhui-app-id';
+  process.env.FENBEITONG_APP_KEY = 'puhui-app-key';
+  globalThis.fetch = async () => {
+    fetchCalled = true;
+    return jsonResponse({ code: 0, data: 'should-not-be-used' });
+  };
+
+  await assert.rejects(
+    () => pullFenbeitongReimbursements({ tenantKey: 'yingtai' }),
+    /瑛泰接口等待开发中/
+  );
+  assert.equal(fetchCalled, false);
+
+  globalThis.fetch = previousFetch;
+  restoreFenbeitongEnv(previousEnv);
+  clearFenbeitongTokenCacheForTest();
+});
+
 test('real Fenbeitong detail failure does not return mock reimbursement data', async () => {
   const previousEnv = snapshotFenbeitongEnv();
   const previousFetch = globalThis.fetch;
+  clearFenbeitongTokenCacheForTest();
   process.env.FENBEITONG_MODE = 'real';
   process.env.FENBEITONG_AUTH_MODE = 'app-key';
   process.env.FENBEITONG_BASE_URL = 'https://openapi.example.test';
@@ -359,6 +473,7 @@ test('real Fenbeitong detail failure does not return mock reimbursement data', a
 
   globalThis.fetch = previousFetch;
   restoreFenbeitongEnv(previousEnv);
+  clearFenbeitongTokenCacheForTest();
 });
 
 function restoreEnv(name, value) {
@@ -391,6 +506,19 @@ function restoreFenbeitongEnv(previous) {
   for (const [name, value] of Object.entries(previous)) {
     restoreEnv(name, value);
   }
+}
+
+function forceMockFenbeitongEnv() {
+  const previous = {
+    ...snapshotFenbeitongEnv(),
+    KINGDEE_MODE: process.env.KINGDEE_MODE
+  };
+  process.env.FENBEITONG_MODE = 'mock';
+  process.env.FENBEITONG_ACCESS_TOKEN = '';
+  process.env.FENBEITONG_APP_ID = '';
+  process.env.FENBEITONG_APP_KEY = '';
+  process.env.KINGDEE_MODE = 'mock';
+  return () => restoreFenbeitongEnv(previous);
 }
 
 function jsonResponse(body, init = {}) {

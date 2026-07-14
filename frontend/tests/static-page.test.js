@@ -7,6 +7,8 @@ test('frontend page exposes expected workflow controls', () => {
   for (const id of [
     'financeWorkbenchHeader',
     'ledgerToolbar',
+    'companySelect',
+    'tenantStatusText',
     'searchFieldSelect',
     'matchModeSelect',
     'sourceSearchInput',
@@ -72,6 +74,11 @@ test('frontend is centered on a finance source document list', () => {
   assert.match(html, /&#x62A5;&#x9500;&#x5355;&#x53F7;/);
   assert.match(html, /&#x5355;&#x636E;&#x72B6;&#x6001;/);
   assert.match(html, /&#x540C;&#x6B65;&#x5206;&#x8D1D;&#x901A;/);
+  assert.match(html, /璞慧/);
+  assert.match(html, /瑛泰/);
+  assert.match(app, /selectedTenantKey/);
+  assert.match(app, /接口等待开发中/);
+  assert.match(app, /syncFenbeitong\(\{ tenantKey: state\.selectedTenantKey \}\)/);
   assert.match(html, /&#x751F;&#x6210;&#x51ED;&#x8BC1;/);
   assert.match(html, /&#x4FDD;&#x5B58;&#x81F3;ERP/);
   assert.match(html, /&#x67E5;&#x770B;&#x51ED;&#x8BC1;/);

@@ -38,6 +38,7 @@ const controls = {
 const state = {
   configSaved: false,
   currentStatus: null,
+  selectedTenantKey: 'puhui',
   syncedDocuments: [],
   selectedSourceIds: new Set(),
   visibleColumnKeys: new Set(['status', 'sourceCode', 'requester', 'department', 'expenseCategories', 'amount', 'interfaceSource', 'time']),
@@ -59,6 +60,8 @@ const searchFieldSelect = document.querySelector('#searchFieldSelect');
 const matchModeSelect = document.querySelector('#matchModeSelect');
 const sourceSearchInput = document.querySelector('#sourceSearchInput');
 const paginationSummary = document.querySelector('#paginationSummary');
+const companySelect = document.querySelector('#companySelect');
+const tenantStatusText = document.querySelector('#tenantStatusText');
 const recordsTable = document.querySelector('#recordsTable');
 const logsList = document.querySelector('#logsList');
 const voucherPreviewBody = document.querySelector('#voucherPreviewBody');
@@ -99,6 +102,14 @@ controls.query.addEventListener('click', run(queryProcess));
 controls.refresh.addEventListener('click', run(refreshAll));
 controls.listRecords.addEventListener('click', run(refreshRecords));
 controls.primaryAction.addEventListener('click', run(runPrimaryAction));
+companySelect.addEventListener('change', () => {
+  state.selectedTenantKey = companySelect.value;
+  renderTenantState();
+  renderActionState();
+  if (isSelectedTenantWaiting()) {
+    show({ tenantKey: state.selectedTenantKey, status: 'waiting_development' }, '接口等待开发中');
+  }
+});
 sourceQueueBody.addEventListener('change', run(toggleQueuedDocument));
 sourceQueueBody.addEventListener('click', run(generateVoucherFromRow));
 selectAllRowsCheckbox.addEventListener('change', () => toggleAllVisibleDocuments(selectAllRowsCheckbox.checked));
@@ -152,7 +163,11 @@ async function saveConfig() {
 }
 
 async function syncFenbeitong() {
-  const result = await api.syncFenbeitong();
+  if (isSelectedTenantWaiting()) {
+    show({ tenantKey: state.selectedTenantKey, status: 'waiting_development' }, '接口等待开发中');
+    return;
+  }
+  const result = await api.syncFenbeitong({ tenantKey: state.selectedTenantKey });
   selectFirstRecord(result.records);
   invalidatePreview('预览已失效：同步结果已变化，请重新预览凭证。');
   show(result, `同步完成，新增或更新 ${result.records.length} 张来源单据。`);
@@ -407,6 +422,8 @@ function renderSelectAllState(visibleRecords) {
 }
 
 function renderStatus(status) {
+  renderTenantOptions(status.config?.fenbeitong?.tenants || []);
+  renderTenantState();
   document.querySelector('#fenbeitongMode').textContent = status.mode.fenbeitong === 'real' ? '已启用' : '待启用';
   document.querySelector('#kingdeeMode').textContent = status.mode.kingdee === 'real' ? '已启用' : '待启用';
   document.querySelector('#fenbeitongReady').textContent = readinessText(status.readiness.fenbeitong);
@@ -446,6 +463,9 @@ function renderActionState() {
   const hasSelection = state.selectedSourceIds.size > 0;
   const hasSource = Boolean(hasSelection || sourceId || fields.mockFixedJson.value.trim());
   const pushed = sourceId ? state.pushedSourceIds.has(sourceId) : false;
+  const tenantWaiting = isSelectedTenantWaiting();
+  controls.syncFenbeitong.disabled = tenantWaiting;
+  controls.sync.disabled = tenantWaiting;
   controls.generateVoucher.disabled = !hasSource;
   controls.saveErp.disabled = !hasSource || pushed;
   controls.viewVoucher.disabled = !sourceId && !hasSelection;
@@ -454,16 +474,41 @@ function renderActionState() {
   controls.pushErp.disabled = !hasSource || pushed;
   controls.primaryAction.dataset.action = !state.configSaved ? 'save-config' : state.syncedDocuments.length === 0 ? 'sync' : 'prepare';
   controls.primaryAction.textContent = !state.configSaved ? '保存配置' : state.syncedDocuments.length === 0 ? '立即同步分贝通数据' : '生成待保存凭证';
-  controls.primaryAction.disabled = false;
+  controls.primaryAction.disabled = tenantWaiting && controls.primaryAction.dataset.action === 'sync';
   actionBlockReason.textContent = getActionBlockReason({ sourceId, pushed });
 }
 
 function getActionBlockReason({ sourceId, pushed }) {
+  if (isSelectedTenantWaiting()) return '瑛泰接口等待开发中。';
   if (!state.configSaved) return '未满足原因：请先保存配置。';
   if (state.syncedDocuments.length === 0) return '未满足原因：请先同步分贝通单据。';
   if (!sourceId && state.selectedSourceIds.size === 0) return '未满足原因：请先选择待处理单据。';
   if (pushed) return '该单据已保存，下一步由财务人工审核。';
   return '当前可生成凭证或保存 ERP 草稿。';
+}
+
+function renderTenantOptions(tenants) {
+  if (!Array.isArray(tenants) || tenants.length === 0) {
+    return;
+  }
+  const currentKey = state.selectedTenantKey;
+  companySelect.innerHTML = tenants.map((tenant) =>
+    `<option value="${escapeHtml(tenant.key)}">${escapeHtml(tenant.name)}</option>`
+  ).join('');
+  state.selectedTenantKey = tenants.some((tenant) => tenant.key === currentKey) ? currentKey : 'puhui';
+  companySelect.value = state.selectedTenantKey;
+}
+
+function renderTenantState() {
+  companySelect.value = state.selectedTenantKey;
+  const waiting = isSelectedTenantWaiting();
+  const name = companySelect.options[companySelect.selectedIndex]?.textContent || state.selectedTenantKey;
+  tenantStatusText.textContent = waiting ? '接口等待开发中' : `${name}接口已启用`;
+  tenantStatusText.classList.toggle('waiting', waiting);
+}
+
+function isSelectedTenantWaiting() {
+  return state.selectedTenantKey === 'yingtai';
 }
 
 function renderConfigValidation() {

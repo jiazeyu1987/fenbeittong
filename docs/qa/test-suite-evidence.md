@@ -38,11 +38,29 @@ Finance toolbar browser E2E validation for the Fenbeitong reimbursement to Kingd
 
 - `npm run test:e2e:ui` -> PASS, 1/1 browser E2E test passed.
 - `npm run test:e2e` -> PASS, 1/1 API E2E test passed.
-- `npm run test:frontend` -> PASS, 8/8 frontend tests passed.
-- `npm run test:contract` -> PASS, 7/7 contract tests passed.
-- `npm run test:backend` -> PASS, 15/15 backend tests passed.
+- `npm run test:frontend` -> PASS, 9/9 frontend tests passed.
+- `npm run test:contract` -> PASS, 11/11 contract tests passed.
+- `npm run test:backend` -> PASS, 17/17 backend tests passed.
 - `npm run build` -> PASS, `dist` created.
 - `npm run verify` -> PASS, full local verification chain passed with browser toolbar E2E included.
+
+## Real Data E2E Evidence
+
+- Scope: browser-driven real Fenbeitong sync plus row-level voucher generation/save through the configured ERP adapter.
+- RED: backend test failed until real detail payloads where expenses match `payment_amount` were accepted.
+- RED: contract test failed until real category `CI007` was mapped to Kingdee account `6601.10`.
+- GREEN: Playwright clicked visible `同步分贝通`, loaded 5 real rows marked `正式接口`, clicked row `B1IELSHBX26061600002` `生成凭证`, and received `保存成功`.
+- GREEN: final API query confirmed target source `B1IELSHBX26061600002` reached `ERP_PUSHED`.
+- Evidence: `E:\ProjectPackage\fenbeitong\doc\tasks\20260714-real-data-e2e-validation\runtime\real-data-e2e-api-verification-1784017369173.json`.
+
+## Verification
+
+- `npm run verify` -> PASS with `FENBEITONG_MODE=mock` and `KINGDEE_MODE=mock` for isolated local suite verification.
+- Real browser E2E evidence -> PASS for Fenbeitong production data sync and configured ERP adapter save/query.
+
+## Blockers
+
+- Full real Kingdee write remains blocked until `KINGDEE_MODE=real`, `KINGDEE_SAVE_URL`, and required authentication/session configuration are available.
 
 ## Failed, Skipped, Flaky, Or Blocked Tests
 

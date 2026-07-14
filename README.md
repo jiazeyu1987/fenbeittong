@@ -39,7 +39,8 @@ Copy `.env.example` to `.env` when local configuration is needed.
 
 - `FENBEITONG_MODE=mock`: loads fixed local JSON.
 - `FENBEITONG_MODE=real` with `FENBEITONG_AUTH_MODE=access-token`: requires `FENBEITONG_BASE_URL`, `FENBEITONG_ACCESS_TOKEN`, `FENBEITONG_PULL_PATH`, and `FENBEITONG_DETAIL_PATH`.
-- `FENBEITONG_MODE=real` with `FENBEITONG_AUTH_MODE=app-key`: requires `FENBEITONG_BASE_URL`, `FENBEITONG_APP_ID`, `FENBEITONG_APP_KEY`, `FENBEITONG_PULL_PATH`, and `FENBEITONG_DETAIL_PATH`; it defaults token acquisition to `/openapi/auth/getToken`, list pull to `/openapi/reimbursement/v1/list`, and detail pull to `/openapi/reimbursement/v2/detail`. Optional list filters are `FENBEITONG_REIMBURSEMENT_APPLY_STATE`, `FENBEITONG_REIMBURSEMENT_PAYMENT_STATE`, `FENBEITONG_REIMBURSEMENT_PAGE_INDEX`, and `FENBEITONG_REIMBURSEMENT_PAGE_SIZE`.
+- `FENBEITONG_MODE=real` with `FENBEITONG_AUTH_MODE=app-key`: requires `FENBEITONG_BASE_URL`, `FENBEITONG_APP_ID`, `FENBEITONG_APP_KEY`, `FENBEITONG_PULL_PATH`, and `FENBEITONG_DETAIL_PATH`; it defaults token acquisition to `/openapi/auth/getToken`, list pull to `/openapi/reimbursement/v1/list`, and detail pull to `/openapi/reimbursement/v2/detail`. The acquired token is cached for 7200 seconds before refresh. Optional list filters are `FENBEITONG_REIMBURSEMENT_APPLY_STATE`, `FENBEITONG_REIMBURSEMENT_PAYMENT_STATE`, `FENBEITONG_REIMBURSEMENT_PAGE_INDEX`, and `FENBEITONG_REIMBURSEMENT_PAGE_SIZE`.
+- `FENBEITONG_TENANT_KEY=puhui`: defaults the Fenbeitong tenant to Puhui. The frontend also shows `璞慧` and `瑛泰`; `瑛泰` is intentionally blocked with `接口等待开发中` until credentials and interface rules are supplied.
 - `KINGDEE_MODE=mock`: simulates ERP save response.
 - `KINGDEE_MODE=real`: requires `KINGDEE_SAVE_URL` and optional auth header values.
 

@@ -32,6 +32,41 @@ test('expense total mismatch fails fast', () => {
   assert.throws(() => parseFenbeitongDetail(fixedJson), /expense total/);
 });
 
+test('real paid amount detail can voucher when expenses match payment amount', () => {
+  const config = structuredClone(template);
+  config.categoryAccountNumbers.CI007 = '6601.10';
+  const preview = buildVoucherPreview({
+    fixedJson: JSON.stringify({
+      code: 0,
+      data: {
+        reimb_id: 'REAL-ID-CI007',
+        reimb_code: 'REAL-CODE-CI007',
+        currency_code: 'CNY',
+        total_amount: 3243.74,
+        payment_amount: 186.38,
+        apply_reason: 'Real paid reimbursement',
+        user: {},
+        expenses: [
+          {
+            id: 'REAL-EXP-CI007',
+            cost_category: { code: 'CI007', name: '通讯费-个人' },
+            total_amount: 186.38,
+            invoices: []
+          }
+        ]
+      }
+    }),
+    voucherDate: template.mockVoucherDate,
+    year: template.mockYear,
+    period: template.mockPeriod,
+    config
+  });
+
+  assert.equal(preview.debitTotal, 186.38);
+  assert.equal(preview.creditTotal, 186.38);
+  assert.equal(preview.payload.Model.FEntity[0].FACCOUNTID.FNumber, '6601.10');
+});
+
 test('missing category account mapping fails before payload generation', () => {
   const config = structuredClone(template);
   delete config.categoryAccountNumbers.TRAVEL;

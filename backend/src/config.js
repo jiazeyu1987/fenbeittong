@@ -7,6 +7,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
 let envLoaded = false;
 
+const fenbeitongTenants = [
+  { key: 'puhui', name: '璞慧', status: 'ready' },
+  { key: 'yingtai', name: '瑛泰', status: 'waiting_development' }
+];
+
 export function loadLocalEnv() {
   if (envLoaded) {
     return;
@@ -41,6 +46,8 @@ export function getAppConfig() {
     fenbeitong: {
       mode: readMode('FENBEITONG_MODE'),
       authMode: readFenbeitongAuthMode(),
+      defaultTenantKey: process.env.FENBEITONG_TENANT_KEY || 'puhui',
+      tenants: fenbeitongTenants.map((tenant) => ({ ...tenant })),
       baseUrl: process.env.FENBEITONG_BASE_URL || '',
       accessToken: process.env.FENBEITONG_ACCESS_TOKEN || '',
       appId: process.env.FENBEITONG_APP_ID || '',
@@ -111,6 +118,15 @@ export function getSanitizedConfigSummary() {
       authPathConfigured: Boolean(config.fenbeitong.authPath),
       pullPathConfigured: Boolean(config.fenbeitong.pullPath),
       detailPathConfigured: Boolean(config.fenbeitong.detailPath),
+      defaultTenantKey: config.fenbeitong.defaultTenantKey,
+      tenants: config.fenbeitong.tenants.map((tenant) => ({
+        key: tenant.key,
+        name: tenant.name,
+        status: tenant.status,
+        credentialsConfigured: tenant.key === 'puhui'
+          ? Boolean(config.fenbeitong.appId || config.fenbeitong.appKey || config.fenbeitong.accessToken)
+          : false
+      })),
       listPayloadKeys: Object.keys(config.fenbeitong.listPayload).sort()
     },
     kingdee: {

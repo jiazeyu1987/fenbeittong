@@ -35,6 +35,7 @@ export function parseFenbeitongDetail(fixedJson) {
     reimbursementId: requireText(data.reimb_id, 'data.reimb_id'),
     reimbursementCode: requireText(data.reimb_code, 'data.reimb_code'),
     currencyCode: requireText(data.currency_code, 'data.currency_code'),
+    reportedTotalAmount: money(data.total_amount, 'data.total_amount'),
     totalAmount: money(data.total_amount, 'data.total_amount'),
     paymentAmount: money(data.payment_amount, 'data.payment_amount'),
     reason: data.apply_reason || data.reimb_code,
@@ -96,9 +97,10 @@ export function parseFenbeitongDetail(fixedJson) {
   });
 
   const expenseTotal = round(document.expenses.reduce((sum, expense) => sum + expense.amount, 0));
-  if (expenseTotal !== document.totalAmount) {
-    throw new Error(`expense total ${expenseTotal.toFixed(2)} does not match document total ${document.totalAmount.toFixed(2)}`);
+  if (expenseTotal !== document.paymentAmount) {
+    throw new Error(`expense total ${expenseTotal.toFixed(2)} does not match payment amount ${document.paymentAmount.toFixed(2)}`);
   }
+  document.totalAmount = expenseTotal;
 
   return document;
 }
@@ -253,6 +255,7 @@ export function buildVoucherPreview(input) {
     currencyCode: document.currencyCode,
     totalAmount: document.totalAmount,
     paymentAmount: document.paymentAmount,
+    reportedTotalAmount: document.reportedTotalAmount,
     expenseCount: document.expenses.length,
     invoiceCount,
     expenseCategories: document.expenses.map((expense) => ({

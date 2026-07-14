@@ -3,8 +3,16 @@ import { resolve } from 'node:path';
 import { getAppConfig, getRootDir, validateFenbeitongConfig } from '../config.js';
 import { dependencyError } from '../errors.js';
 
-export async function pullFenbeitongReimbursements() {
+const accessTokenTtlMs = 7200 * 1000;
+const accessTokenCache = new Map();
+
+export function clearFenbeitongTokenCacheForTest() {
+  accessTokenCache.clear();
+}
+
+export async function pullFenbeitongReimbursements(options = {}) {
   const config = getAppConfig().fenbeitong;
+  const tenant = resolveTenant(config, options.tenantKey);
   if (config.mode === 'mock') {
     const fixedJson = readFileSync(
       resolve(getRootDir(), 'mock-data/fenbeitong-reimbursement-valid.json'),
@@ -13,6 +21,7 @@ export async function pullFenbeitongReimbursements() {
     const baseDocument = JSON.parse(fixedJson);
     return {
       mode: 'mock',
+      tenantKey: tenant.key,
       mockReplacement: true,
       mockReason: 'Fenbeitong access token is not available yet',
       documents: buildMockReimbursements(baseDocument, 100)
@@ -20,7 +29,7 @@ export async function pullFenbeitongReimbursements() {
   }
 
   validateFenbeitongConfig();
-  const accessToken = await resolveAccessToken(config);
+  const accessToken = await resolveAccessToken(config, tenant);
   const listBody = await postFenbeitongApi(config, config.pullPath, accessToken, config.listPayload);
   const summaries = extractReimbursementSummaries(listBody);
   const documents = [];
@@ -31,15 +40,33 @@ export async function pullFenbeitongReimbursements() {
   }
   return {
     mode: 'real',
+    tenantKey: tenant.key,
     mockReplacement: false,
     mockReason: '',
     documents
   };
 }
 
-async function resolveAccessToken(config) {
+function resolveTenant(config, tenantKey) {
+  const key = tenantKey || config.defaultTenantKey || 'puhui';
+  const tenant = config.tenants.find((item) => item.key === key);
+  if (!tenant) {
+    throw dependencyError('FENBEITONG_TENANT_UNKNOWN', `Fenbeitong tenant is not configured: ${key}`);
+  }
+  if (tenant.status === 'waiting_development') {
+    throw dependencyError('FENBEITONG_TENANT_WAITING_DEVELOPMENT', `${tenant.name}接口等待开发中`);
+  }
+  return tenant;
+}
+
+async function resolveAccessToken(config, tenant) {
   if (config.authMode === 'access-token') {
     return config.accessToken;
+  }
+  const cacheKey = buildAccessTokenCacheKey(config, tenant);
+  const cached = accessTokenCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.token;
   }
   const url = new URL(config.authPath, config.baseUrl);
   const response = await fetch(url, {
@@ -68,7 +95,20 @@ async function resolveAccessToken(config) {
   if (!token) {
     throw dependencyError('FENBEITONG_AUTH_TOKEN_MISSING', 'Fenbeitong auth response did not include data token string');
   }
+  accessTokenCache.set(cacheKey, {
+    token,
+    expiresAt: Date.now() + accessTokenTtlMs
+  });
   return token;
+}
+
+function buildAccessTokenCacheKey(config, tenant) {
+  return [
+    tenant.key,
+    config.baseUrl,
+    config.authPath,
+    config.appId
+  ].join('|');
 }
 
 async function postFenbeitongApi(config, path, accessToken, payload) {

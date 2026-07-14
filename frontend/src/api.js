@@ -29,9 +29,9 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(data)
   }),
-  syncFenbeitong: () => request('/api/fenbeitong-voucher/sync', {
+  syncFenbeitong: (data = {}) => request('/api/fenbeitong-voucher/sync', {
     method: 'POST',
-    body: JSON.stringify({})
+    body: JSON.stringify(data)
   }),
   listSyncedDocuments: () => request('/api/fenbeitong-voucher/synced-documents'),
   preview: (data) => request('/api/fenbeitong-voucher/preview', {

@@ -19,7 +19,12 @@ export function buildMockTemplate() {
     currencyNumbers: { CNY: 'PRE001' },
     categoryAccountNumbers: {
       TRAVEL: '1001.01',
-      OFFICE: '1001.01'
+      OFFICE: '1001.01',
+      CI007: '6601.10',
+      CI00802: '6601.09',
+      CI010: '6601.07',
+      CI012: '6601.15',
+      CI013: '6601.07'
     },
     departmentDetailField: '',
     employeeDetailField: '',

@@ -71,7 +71,7 @@ Creates a local prepared process record. This does not call real Kingdee.
 
 ## POST `/api/fenbeitong-voucher/sync`
 
-Runs the Fenbeitong adapter. In `FENBEITONG_MODE=mock`, it loads the fixed JSON fixture. In `real` mode, `FENBEITONG_AUTH_MODE=access-token` uses the configured access-token directly, and `FENBEITONG_AUTH_MODE=app-key` first posts `app_id/app_key` as JSON to `/openapi/auth/getToken` or the configured `FENBEITONG_AUTH_PATH` to obtain the token string returned in `data`. The adapter then calls the reimbursement list endpoint with configured pagination/status filters and calls the reimbursement detail endpoint for each returned item before queue persistence; missing real interface configuration or missing detail expense lines fails fast.
+Runs the Fenbeitong adapter. Request body accepts optional `{ "tenantKey": "puhui" | "yingtai" }`; missing `tenantKey` defaults to `puhui`. `yingtai` fails fast with `瑛泰接口等待开发中` and never falls back to Puhui credentials. In `FENBEITONG_MODE=mock`, it loads the fixed JSON fixture. In `real` mode, `FENBEITONG_AUTH_MODE=access-token` uses the configured access-token directly, and `FENBEITONG_AUTH_MODE=app-key` first posts `app_id/app_key` as JSON to `/openapi/auth/getToken` or the configured `FENBEITONG_AUTH_PATH` to obtain the token string returned in `data`; the app-key token is reused for 7200 seconds before refresh. The adapter then calls the reimbursement list endpoint with configured pagination/status filters and calls the reimbursement detail endpoint for each returned item before queue persistence; missing real interface configuration or missing detail expense lines fails fast.
 
 ## GET `/api/fenbeitong-voucher/synced-documents`
 

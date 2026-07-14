@@ -20,11 +20,12 @@ export function getConfig() {
   return state.config ? structuredClone(state.config) : null;
 }
 
-export function createSyncBatch({ sourceMode, mockReplacement = false, mockReason = '' }) {
+export function createSyncBatch({ sourceMode, mockReplacement = false, mockReason = '', tenantKey = 'puhui' }) {
   const state = loadState();
   const batch = {
     batchId: nextId('BATCH'),
     sourceSystem: 'FENBEITONG',
+    tenantKey,
     sourceMode,
     mockReplacement,
     mockReason,
@@ -38,7 +39,7 @@ export function createSyncBatch({ sourceMode, mockReplacement = false, mockReaso
   };
   state.syncBatches[batch.batchId] = batch;
   persistState(state);
-  recordOperation('SYNC_START', 'SUCCESS', { batchId: batch.batchId, sourceMode, mockReplacement, mockReason });
+  recordOperation('SYNC_START', 'SUCCESS', { batchId: batch.batchId, tenantKey, sourceMode, mockReplacement, mockReason });
   return structuredClone(batch);
 }
 
@@ -104,6 +105,7 @@ export function saveSyncedDocument(document, batchId = '', options = {}) {
     sourceId,
     sourceCode: document.data.reimb_code,
     batchId,
+    tenantKey: options.tenantKey || 'puhui',
     sourceMode: options.sourceMode || 'mock',
     mockReplacement: Boolean(options.mockReplacement),
     mockReason: options.mockReason || '',

@@ -12,20 +12,25 @@ import {
   markPushedToErp
 } from '../repository.js';
 
-export async function syncFenbeitongDocuments() {
-  const batch = createSyncBatch({ sourceMode: getAppConfig().fenbeitong.mode });
+export async function syncFenbeitongDocuments(options = {}) {
+  const batch = createSyncBatch({
+    sourceMode: getAppConfig().fenbeitong.mode,
+    tenantKey: options.tenantKey || getAppConfig().fenbeitong.defaultTenantKey
+  });
   try {
-    const result = await pullFenbeitongReimbursements();
+    const result = await pullFenbeitongReimbursements({ tenantKey: options.tenantKey });
     const records = result.documents.map((document) => saveSyncedDocument(document, batch.batchId, {
       sourceMode: result.mode,
       mockReplacement: result.mockReplacement,
-      mockReason: result.mockReason
+      mockReason: result.mockReason,
+      tenantKey: result.tenantKey
     }));
     const finishedBatch = finishSyncBatch(batch.batchId, {
       status: 'SUCCESS',
       sourceMode: result.mode,
       mockReplacement: result.mockReplacement,
       mockReason: result.mockReason,
+      tenantKey: result.tenantKey,
       totalCount: result.documents.length,
       successCount: records.length,
       failCount: 0,

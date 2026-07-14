@@ -52,7 +52,7 @@ export async function handleApi(request, response) {
       return sendJson(response, 200, { success: true, data: current });
     }
     if (request.method === 'POST' && url.pathname === '/api/fenbeitong-voucher/sync') {
-      return sendJson(response, 200, { success: true, data: await syncFenbeitongDocuments() });
+      return sendJson(response, 200, { success: true, data: await syncFenbeitongDocuments(await readJson(request)) });
     }
     if (request.method === 'GET' && url.pathname === '/api/fenbeitong-voucher/synced-documents') {
       return sendJson(response, 200, { success: true, data: listSyncedDocuments() });
