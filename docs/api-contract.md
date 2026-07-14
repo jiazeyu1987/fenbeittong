@@ -16,7 +16,7 @@ Returns product mode, dependency readiness, local state path, latest sync batch,
 
 ## GET `/api/system/config-summary`
 
-Returns sanitized configuration booleans only, including Fenbeitong auth mode and whether base URL, access-token, app_id, app_key, auth path, and pull path are configured. It never returns tokens, app keys, passwords, or authorization header values.
+Returns sanitized configuration booleans only, including Fenbeitong auth mode, whether base URL, access-token, app_id, app_key, auth path, pull path, and detail path are configured, and which list payload keys are active. It never returns tokens, app keys, passwords, or authorization header values.
 
 ## GET `/api/scheduler/status`
 
@@ -71,7 +71,7 @@ Creates a local prepared process record. This does not call real Kingdee.
 
 ## POST `/api/fenbeitong-voucher/sync`
 
-Runs the Fenbeitong adapter. In `FENBEITONG_MODE=mock`, it loads the fixed JSON fixture. In `real` mode, `FENBEITONG_AUTH_MODE=access-token` uses the configured access-token directly, and `FENBEITONG_AUTH_MODE=app-key` first posts `app_id/app_key` as JSON to `/openapi/auth/getToken` or the configured `FENBEITONG_AUTH_PATH` to obtain the token string returned in `data`; missing real interface configuration fails fast.
+Runs the Fenbeitong adapter. In `FENBEITONG_MODE=mock`, it loads the fixed JSON fixture. In `real` mode, `FENBEITONG_AUTH_MODE=access-token` uses the configured access-token directly, and `FENBEITONG_AUTH_MODE=app-key` first posts `app_id/app_key` as JSON to `/openapi/auth/getToken` or the configured `FENBEITONG_AUTH_PATH` to obtain the token string returned in `data`. The adapter then calls the reimbursement list endpoint with configured pagination/status filters and calls the reimbursement detail endpoint for each returned item before queue persistence; missing real interface configuration or missing detail expense lines fails fast.
 
 ## GET `/api/fenbeitong-voucher/synced-documents`
 

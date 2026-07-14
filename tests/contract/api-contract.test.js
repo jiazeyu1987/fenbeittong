@@ -164,6 +164,11 @@ test('real Fenbeitong app-key mode obtains token from official getToken endpoint
   process.env.FENBEITONG_APP_KEY = 'app-key-for-test';
   process.env.FENBEITONG_AUTH_PATH = '';
   process.env.FENBEITONG_PULL_PATH = '/openapi/reimbursement/v1/list';
+  process.env.FENBEITONG_DETAIL_PATH = '/openapi/reimbursement/v2/detail';
+  process.env.FENBEITONG_REIMBURSEMENT_APPLY_STATE = '';
+  process.env.FENBEITONG_REIMBURSEMENT_PAYMENT_STATE = '';
+  process.env.FENBEITONG_REIMBURSEMENT_PAGE_INDEX = '';
+  process.env.FENBEITONG_REIMBURSEMENT_PAGE_SIZE = '';
 
   globalThis.fetch = async (url, options) => {
     calls.push({ url: String(url), options });
@@ -177,15 +182,39 @@ test('real Fenbeitong app-key mode obtains token from official getToken endpoint
       return jsonResponse({ code: 0, data: 'issued-access-token' });
     }
     assert.equal(options.headers['access-token'], 'issued-access-token');
+    if (String(url).endsWith('/openapi/reimbursement/v1/list')) {
+      assert.deepEqual(JSON.parse(options.body), { page_index: 1, page_size: 20 });
+      return jsonResponse({
+        code: 0,
+        msg: 'success',
+        data: {
+          reimbursements: [
+            {
+              id: 'REAL-REIMB-001',
+              proposer_name: 'Real User',
+              total_amount: '100.00'
+            }
+          ]
+        }
+      });
+    }
+    assert.deepEqual(JSON.parse(options.body), { reimb_code: 'REAL-REIMB-001' });
     return jsonResponse({
       code: 0,
       msg: 'success',
       data: {
-        reimbursements: [
+        reimb_id: 'REAL-REIMB-001',
+        reimb_code: 'REAL-REIMB-001',
+        currency_code: 'CNY',
+        total_amount: '100.00',
+        payment_amount: '100.00',
+        proposer_name: 'Real User',
+        expenses: [
           {
-            id: 'REAL-REIMB-001',
-            proposer_name: 'Real User',
-            total_amount: '100.00'
+            id: 'EXP-001',
+            cost_category: { code: 'TRAVEL', name: 'Travel' },
+            total_amount: '100.00',
+            invoices: []
           }
         ]
       }
@@ -200,7 +229,133 @@ test('real Fenbeitong app-key mode obtains token from official getToken endpoint
   assert.equal(result.documents[0].data.reimb_id, 'REAL-REIMB-001');
   assert.equal(result.documents[0].data.reimb_code, 'REAL-REIMB-001');
   assert.equal(result.documents[0].data.proposer_name, 'Real User');
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
+
+  globalThis.fetch = previousFetch;
+  restoreFenbeitongEnv(previousEnv);
+});
+
+test('real Fenbeitong app-key mode pulls reimbursement detail after list summary', async () => {
+  const previousEnv = snapshotFenbeitongEnv();
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  process.env.FENBEITONG_MODE = 'real';
+  process.env.FENBEITONG_AUTH_MODE = 'app-key';
+  process.env.FENBEITONG_BASE_URL = 'https://openapi.example.test';
+  process.env.FENBEITONG_APP_ID = 'app-id-for-test';
+  process.env.FENBEITONG_APP_KEY = 'app-key-for-test';
+  process.env.FENBEITONG_AUTH_PATH = '';
+  process.env.FENBEITONG_PULL_PATH = '/openapi/reimbursement/v1/list';
+  process.env.FENBEITONG_DETAIL_PATH = '/openapi/reimbursement/v2/detail';
+  process.env.FENBEITONG_REIMBURSEMENT_APPLY_STATE = '';
+  process.env.FENBEITONG_REIMBURSEMENT_PAYMENT_STATE = '1';
+  process.env.FENBEITONG_REIMBURSEMENT_PAGE_INDEX = '1';
+  process.env.FENBEITONG_REIMBURSEMENT_PAGE_SIZE = '5';
+
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), options });
+    if (String(url).endsWith('/openapi/auth/getToken')) {
+      return jsonResponse({ code: 0, data: 'issued-access-token' });
+    }
+    if (String(url).endsWith('/openapi/reimbursement/v1/list')) {
+      assert.deepEqual(JSON.parse(options.body), {
+        page_index: 1,
+        page_size: 5,
+        payment_state: 1
+      });
+      return jsonResponse({
+        code: 0,
+        msg: 'success',
+        data: {
+          reimbursements: [
+            {
+              id: 'REAL-CODE-001',
+              proposer_name: 'List User',
+              total_amount: '100.00'
+            }
+          ]
+        }
+      });
+    }
+    assert.equal(options.headers['access-token'], 'issued-access-token');
+    assert.deepEqual(JSON.parse(options.body), { reimb_code: 'REAL-CODE-001' });
+    return jsonResponse({
+      code: 0,
+      msg: 'success',
+      data: {
+        reimb_id: 'REAL-ID-001',
+        reimb_code: 'REAL-CODE-001',
+        currency_code: 'CNY',
+        total_amount: '100.00',
+        payment_amount: '100.00',
+        apply_reason: 'Real reimbursement',
+        user: {
+          code: 'PL0189',
+          name: 'Real User',
+          department_code: 'BM000330',
+          department_name: 'East'
+        },
+        expenses: [
+          {
+            id: 'EXP-001',
+            cost_category: { code: 'TRAVEL', name: 'Travel' },
+            total_amount: '100.00',
+            reason: 'Travel expense',
+            invoices: []
+          }
+        ]
+      }
+    });
+  };
+
+  const result = await pullFenbeitongReimbursements();
+
+  assert.equal(result.mode, 'real');
+  assert.equal(result.mockReplacement, false);
+  assert.equal(result.documents.length, 1);
+  assert.equal(result.documents[0].data.reimb_id, 'REAL-ID-001');
+  assert.equal(result.documents[0].data.reimb_code, 'REAL-CODE-001');
+  assert.equal(result.documents[0].data.expenses[0].cost_category.code, 'TRAVEL');
+  assert.equal(calls.length, 3);
+
+  globalThis.fetch = previousFetch;
+  restoreFenbeitongEnv(previousEnv);
+});
+
+test('real Fenbeitong detail failure does not return mock reimbursement data', async () => {
+  const previousEnv = snapshotFenbeitongEnv();
+  const previousFetch = globalThis.fetch;
+  process.env.FENBEITONG_MODE = 'real';
+  process.env.FENBEITONG_AUTH_MODE = 'app-key';
+  process.env.FENBEITONG_BASE_URL = 'https://openapi.example.test';
+  process.env.FENBEITONG_APP_ID = 'app-id-for-test';
+  process.env.FENBEITONG_APP_KEY = 'app-key-for-test';
+  process.env.FENBEITONG_AUTH_PATH = '';
+  process.env.FENBEITONG_PULL_PATH = '/openapi/reimbursement/v1/list';
+  process.env.FENBEITONG_DETAIL_PATH = '/openapi/reimbursement/v2/detail';
+  process.env.FENBEITONG_REIMBURSEMENT_APPLY_STATE = '';
+  process.env.FENBEITONG_REIMBURSEMENT_PAYMENT_STATE = '';
+  process.env.FENBEITONG_REIMBURSEMENT_PAGE_INDEX = '';
+  process.env.FENBEITONG_REIMBURSEMENT_PAGE_SIZE = '';
+
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith('/openapi/auth/getToken')) {
+      return jsonResponse({ code: 0, data: 'issued-access-token' });
+    }
+    if (String(url).endsWith('/openapi/reimbursement/v1/list')) {
+      return jsonResponse({
+        code: 0,
+        msg: 'success',
+        data: { reimbursements: [{ id: 'REAL-CODE-FAIL' }] }
+      });
+    }
+    return jsonResponse({ code: -9999, msg: 'detail rejected' });
+  };
+
+  await assert.rejects(
+    () => pullFenbeitongReimbursements(),
+    /Fenbeitong response failed: code=-9999, msg=detail rejected/
+  );
 
   globalThis.fetch = previousFetch;
   restoreFenbeitongEnv(previousEnv);
@@ -223,7 +378,12 @@ function snapshotFenbeitongEnv() {
     FENBEITONG_APP_ID: process.env.FENBEITONG_APP_ID,
     FENBEITONG_APP_KEY: process.env.FENBEITONG_APP_KEY,
     FENBEITONG_AUTH_PATH: process.env.FENBEITONG_AUTH_PATH,
-    FENBEITONG_PULL_PATH: process.env.FENBEITONG_PULL_PATH
+    FENBEITONG_PULL_PATH: process.env.FENBEITONG_PULL_PATH,
+    FENBEITONG_DETAIL_PATH: process.env.FENBEITONG_DETAIL_PATH,
+    FENBEITONG_REIMBURSEMENT_APPLY_STATE: process.env.FENBEITONG_REIMBURSEMENT_APPLY_STATE,
+    FENBEITONG_REIMBURSEMENT_PAYMENT_STATE: process.env.FENBEITONG_REIMBURSEMENT_PAYMENT_STATE,
+    FENBEITONG_REIMBURSEMENT_PAGE_INDEX: process.env.FENBEITONG_REIMBURSEMENT_PAGE_INDEX,
+    FENBEITONG_REIMBURSEMENT_PAGE_SIZE: process.env.FENBEITONG_REIMBURSEMENT_PAGE_SIZE
   };
 }
 

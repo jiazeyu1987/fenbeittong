@@ -46,7 +46,9 @@ export function getAppConfig() {
       appId: process.env.FENBEITONG_APP_ID || '',
       appKey: process.env.FENBEITONG_APP_KEY || '',
       authPath: process.env.FENBEITONG_AUTH_PATH || '/openapi/auth/getToken',
-      pullPath: process.env.FENBEITONG_PULL_PATH || '/reimbursements/pull'
+      pullPath: process.env.FENBEITONG_PULL_PATH || '/openapi/reimbursement/v1/list',
+      detailPath: process.env.FENBEITONG_DETAIL_PATH || '/openapi/reimbursement/v2/detail',
+      listPayload: buildFenbeitongListPayload()
     },
     kingdee: {
       mode: readMode('KINGDEE_MODE'),
@@ -77,6 +79,7 @@ export function validateFenbeitongConfig() {
     if (!config.appKey) missing.push('FENBEITONG_APP_KEY');
   }
   if (!config.pullPath) missing.push('FENBEITONG_PULL_PATH');
+  if (!config.detailPath) missing.push('FENBEITONG_DETAIL_PATH');
   if (missing.length > 0) {
     throw missingConfigError('Fenbeitong', missing);
   }
@@ -106,7 +109,9 @@ export function getSanitizedConfigSummary() {
       appIdConfigured: Boolean(config.fenbeitong.appId),
       appKeyConfigured: Boolean(config.fenbeitong.appKey),
       authPathConfigured: Boolean(config.fenbeitong.authPath),
-      pullPathConfigured: Boolean(config.fenbeitong.pullPath)
+      pullPathConfigured: Boolean(config.fenbeitong.pullPath),
+      detailPathConfigured: Boolean(config.fenbeitong.detailPath),
+      listPayloadKeys: Object.keys(config.fenbeitong.listPayload).sort()
     },
     kingdee: {
       mode: config.kingdee.mode,
@@ -123,6 +128,35 @@ export function getSanitizedConfigSummary() {
 
 export function getRootDir() {
   return root;
+}
+
+
+function buildFenbeitongListPayload() {
+  const payload = {
+    page_index: readPositiveInteger('FENBEITONG_REIMBURSEMENT_PAGE_INDEX', 1),
+    page_size: readPositiveInteger('FENBEITONG_REIMBURSEMENT_PAGE_SIZE', 20)
+  };
+  const applyState = readOptionalInteger('FENBEITONG_REIMBURSEMENT_APPLY_STATE');
+  if (applyState !== undefined) {
+    payload.apply_state = applyState;
+  }
+  const paymentState = readOptionalInteger('FENBEITONG_REIMBURSEMENT_PAYMENT_STATE');
+  if (paymentState !== undefined) {
+    payload.payment_state = paymentState;
+  }
+  return payload;
+}
+
+function readOptionalInteger(name) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') {
+    return undefined;
+  }
+  const value = Number(raw);
+  if (!Number.isInteger(value)) {
+    throw new Error(`${name} must be an integer`);
+  }
+  return value;
 }
 
 function readMode(name) {

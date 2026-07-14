@@ -21,56 +21,20 @@ export async function pullFenbeitongReimbursements() {
 
   validateFenbeitongConfig();
   const accessToken = await resolveAccessToken(config);
-  const url = new URL(config.pullPath, config.baseUrl);
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'access-token': accessToken
-    },
-    body: JSON.stringify({})
-  });
-  const body = await response.json();
-  if (!response.ok) {
-    throw dependencyError('FENBEITONG_HTTP_FAILED', `Fenbeitong request failed: HTTP ${response.status}`, {
-      status: response.status
-    });
+  const listBody = await postFenbeitongApi(config, config.pullPath, accessToken, config.listPayload);
+  const summaries = extractReimbursementSummaries(listBody);
+  const documents = [];
+  for (const summary of summaries) {
+    const detailPayload = buildDetailRequestPayload(summary);
+    const detailBody = await postFenbeitongApi(config, config.detailPath, accessToken, detailPayload);
+    documents.push(validateDetailDocument(detailBody));
   }
-  if (String(body.code) !== '0') {
-    throw dependencyError('FENBEITONG_RESPONSE_FAILED', `Fenbeitong response failed: code=${body.code}, msg=${body.msg || ''}`, {
-      code: body.code,
-      msg: body.msg || ''
-    });
-  }
-  if (Array.isArray(body.data)) {
-    return {
-      mode: 'real',
-      mockReplacement: false,
-      mockReason: '',
-      documents: body.data.map((item) => ({ code: '0', msg: body.msg || '', data: normalizeReimbursementSummary(item) }))
-    };
-  }
-  if (Array.isArray(body.data?.reimbursements)) {
-    return {
-      mode: 'real',
-      mockReplacement: false,
-      mockReason: '',
-      documents: body.data.reimbursements.map((item) => ({
-        code: '0',
-        msg: body.msg || '',
-        data: normalizeReimbursementSummary(item)
-      }))
-    };
-  }
-  if (body.data && typeof body.data === 'object') {
-    return {
-      mode: 'real',
-      mockReplacement: false,
-      mockReason: '',
-      documents: [body]
-    };
-  }
-  throw dependencyError('FENBEITONG_INVALID_RESPONSE', 'Fenbeitong response data must be an object or array');
+  return {
+    mode: 'real',
+    mockReplacement: false,
+    mockReason: '',
+    documents
+  };
 }
 
 async function resolveAccessToken(config) {
@@ -107,15 +71,75 @@ async function resolveAccessToken(config) {
   return token;
 }
 
-function normalizeReimbursementSummary(item) {
-  const sourceId = item?.reimb_id || item?.id;
-  if (!sourceId) {
-    throw dependencyError('FENBEITONG_INVALID_RESPONSE', 'Fenbeitong reimbursement item is missing id');
+async function postFenbeitongApi(config, path, accessToken, payload) {
+  const url = new URL(path, config.baseUrl);
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'access-token': accessToken
+    },
+    body: JSON.stringify(payload)
+  });
+  const body = await response.json();
+  if (!response.ok) {
+    throw dependencyError('FENBEITONG_HTTP_FAILED', `Fenbeitong request failed: HTTP ${response.status}`, {
+      status: response.status
+    });
+  }
+  if (String(body.code) !== '0') {
+    throw dependencyError('FENBEITONG_RESPONSE_FAILED', `Fenbeitong response failed: code=${body.code}, msg=${body.msg || ''}`, {
+      code: body.code,
+      msg: body.msg || ''
+    });
+  }
+  return body;
+}
+
+function extractReimbursementSummaries(body) {
+  if (Array.isArray(body.data)) {
+    return body.data.flatMap((item) => (
+      Array.isArray(item?.reimbursements) ? item.reimbursements : [item]
+    ));
+  }
+  if (Array.isArray(body.data?.reimbursements)) {
+    return body.data.reimbursements;
+  }
+  throw dependencyError('FENBEITONG_INVALID_RESPONSE', 'Fenbeitong reimbursement list response must include data.reimbursements');
+}
+
+function buildDetailRequestPayload(summary) {
+  if (summary?.reimb_id) {
+    return { reimb_id: summary.reimb_id };
+  }
+  if (summary?.reimb_code) {
+    return { reimb_code: summary.reimb_code };
+  }
+  if (summary?.reimburse_code) {
+    return { reimb_code: summary.reimburse_code };
+  }
+  if (summary?.id) {
+    return { reimb_code: summary.id };
+  }
+  throw dependencyError('FENBEITONG_INVALID_RESPONSE', 'Fenbeitong reimbursement list item is missing reimb_id or reimb_code');
+}
+
+function validateDetailDocument(body) {
+  if (!body.data || typeof body.data !== 'object' || Array.isArray(body.data)) {
+    throw dependencyError('FENBEITONG_INVALID_RESPONSE', 'Fenbeitong reimbursement detail response data must be an object');
+  }
+  if (!body.data.reimb_id) {
+    throw dependencyError('FENBEITONG_INVALID_RESPONSE', 'Fenbeitong reimbursement detail is missing data.reimb_id');
+  }
+  if (!body.data.reimb_code) {
+    throw dependencyError('FENBEITONG_INVALID_RESPONSE', 'Fenbeitong reimbursement detail is missing data.reimb_code');
+  }
+  if (!Array.isArray(body.data.expenses) || body.data.expenses.length === 0) {
+    throw dependencyError('FENBEITONG_INVALID_RESPONSE', 'Fenbeitong reimbursement detail is missing data.expenses');
   }
   return {
-    ...item,
-    reimb_id: sourceId,
-    reimb_code: item.reimb_code || item.reimburse_code || sourceId
+    ...body,
+    data: body.data
   };
 }
 
