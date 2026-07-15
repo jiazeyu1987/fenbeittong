@@ -38,6 +38,7 @@ function startFrontendServer() {
 
 test('finance toolbar controls each produce observable E2E effects', async () => {
   const restoreEnv = forceMockExternalEnv();
+  const restoreFetch = stubKingdeeFetch();
   resetRepository();
   await stopKnownDevServers();
   const apiServer = await startApiServer();
@@ -129,11 +130,11 @@ test('finance toolbar controls each produce observable E2E effects', async () =>
     await waitForApiCondition(
       'http://127.0.0.1:3001/api/fenbeitong-voucher/process',
       (body) => selectedSourceIds.every((sourceId) =>
-        body.data.some((record) => record.sourceId === sourceId && record.processStage === 'PREPARED')
+        body.data.some((record) => record.sourceId === sourceId && record.processStage === 'ERP_PUSHED')
       )
     );
-    assert.equal(await page.locator('#saveErpButton').isEnabled(), true);
-    await page.click('#saveErpButton');
+    await page.waitForSelector('#operationFeedback:not([hidden])');
+    assert.equal(await page.locator('#operationFeedback').innerText(), '保存成功');
     await waitForApiCondition(
       'http://127.0.0.1:3001/api/fenbeitong-voucher/process',
       (body) => body.data.filter((record) => record.processStage === 'ERP_PUSHED').length === 3
@@ -155,6 +156,7 @@ test('finance toolbar controls each produce observable E2E effects', async () =>
     await browser.close();
     await new Promise((resolve) => apiServer.close(resolve));
     await new Promise((resolve) => frontendServer.close(resolve));
+    restoreFetch();
     restoreEnv();
   }
 });
@@ -245,11 +247,19 @@ function forceMockExternalEnv() {
   const previous = {
     APP_DATA_DIR: process.env.APP_DATA_DIR,
     FENBEITONG_MODE: process.env.FENBEITONG_MODE,
-    KINGDEE_MODE: process.env.KINGDEE_MODE
+    KINGDEE_MODE: process.env.KINGDEE_MODE,
+    KINGDEE_BASE_URL: process.env.KINGDEE_BASE_URL,
+    KINGDEE_ACCT_ID: process.env.KINGDEE_ACCT_ID,
+    KINGDEE_USERNAME: process.env.KINGDEE_USERNAME,
+    KINGDEE_PASSWORD: process.env.KINGDEE_PASSWORD
   };
   process.env.APP_DATA_DIR = 'runtime-data/e2e-ui-toolbar';
   process.env.FENBEITONG_MODE = 'mock';
-  process.env.KINGDEE_MODE = 'mock';
+  process.env.KINGDEE_MODE = 'real';
+  process.env.KINGDEE_BASE_URL = 'http://172.30.30.8';
+  process.env.KINGDEE_ACCT_ID = 'test-acct';
+  process.env.KINGDEE_USERNAME = 'test-user';
+  process.env.KINGDEE_PASSWORD = 'test-password';
   return () => {
     for (const [name, value] of Object.entries(previous)) {
       if (value === undefined) {
@@ -258,6 +268,49 @@ function forceMockExternalEnv() {
         process.env[name] = value;
       }
     }
+  };
+}
+
+function stubKingdeeFetch() {
+  const previousFetch = globalThis.fetch;
+  let nextId = 100033;
+  globalThis.fetch = async (url, options = {}) => {
+    const text = String(url);
+    if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.AuthService.ValidateUser.common.kdsvc')) {
+      return new Response(JSON.stringify({ LoginResultType: 1 }), {
+        status: 200,
+        headers: { 'Set-Cookie': 'kdservice-sessionid=e2eui123; Path=/K3Cloud' }
+      });
+    }
+    if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.Save.common.kdsvc')) {
+      assert.equal(options.headers.Cookie, 'kdservice-sessionid=e2eui123');
+      const body = JSON.parse(String(options.body));
+      assert.equal(body.formid, 'GL_VOUCHER');
+      assert.ok(JSON.parse(body.data).Model.FEntity.length >= 2);
+      const currentId = String(nextId++);
+      return new Response(JSON.stringify({
+        Result: {
+          Id: currentId,
+          Number: currentId,
+          ResponseStatus: { IsSuccess: true, Errors: [] }
+        }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.View.common.kdsvc')) {
+      const body = JSON.parse(String(options.body));
+      assert.equal(body.formid, 'GL_VOUCHER');
+      const id = JSON.parse(body.data).Id;
+      return new Response(JSON.stringify({
+        Result: {
+          ResponseStatus: { IsSuccess: true, Errors: [] },
+          Result: { FID: id, FBillNo: id, FDocumentStatus: 'Z' }
+        }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return previousFetch(url, options);
+  };
+  return () => {
+    globalThis.fetch = previousFetch;
   };
 }
 

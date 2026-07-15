@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+﻿import { createHash } from 'node:crypto';
 import { loadMockKingdeeTemplateModel } from './mock-template.js';
 
 function money(value, field) {
@@ -31,6 +31,7 @@ export function parseFenbeitongDetail(fixedJson) {
     throw new Error('data is required');
   }
 
+  const person = sourcePerson(data);
   const document = {
     reimbursementId: requireText(data.reimb_id, 'data.reimb_id'),
     reimbursementCode: requireText(data.reimb_code, 'data.reimb_code'),
@@ -39,10 +40,10 @@ export function parseFenbeitongDetail(fixedJson) {
     totalAmount: money(data.total_amount, 'data.total_amount'),
     paymentAmount: money(data.payment_amount, 'data.payment_amount'),
     reason: data.apply_reason || data.reimb_code,
-    userCode: data.user?.code || '',
-    userName: data.user?.name || data.user?.code || '',
-    departmentCode: data.user?.department_code || '',
-    departmentName: data.user?.department_name || data.user?.department_code || '',
+    userCode: person.code || '',
+    userName: person.name || person.code || '',
+    departmentCode: person.department_code || '',
+    departmentName: person.department_name || person.department_code || '',
     expenses: Array.isArray(data.expenses) ? data.expenses : []
   };
 
@@ -103,6 +104,16 @@ export function parseFenbeitongDetail(fixedJson) {
   document.totalAmount = expenseTotal;
 
   return document;
+}
+
+function sourcePerson(data) {
+  if (data.user && typeof data.user === 'object' && Object.keys(data.user).length > 0) {
+    return data.user;
+  }
+  if (data.proposer && typeof data.proposer === 'object') {
+    return data.proposer;
+  }
+  return {};
 }
 
 export function buildVoucherPreview(input) {
@@ -404,19 +415,70 @@ function voucherLine({
 
 function buildDetail(config, document) {
   const detail = {};
+  let departmentNumber = '';
+  let employeeNumber = '';
   if (config.departmentDetailField && !document.departmentCode) {
     throw new Error('department detail dimension is required');
   }
   if (config.departmentDetailField && document.departmentCode) {
-    detail[config.departmentDetailField] = { FNumber: document.departmentCode };
+    departmentNumber = resolveDetailNumber(
+      config.departmentDetailNumberMappings,
+      document.departmentCode,
+      document.departmentName
+    );
+    detail[config.departmentDetailField] = detailReference(departmentNumber);
   }
   if (config.employeeDetailField && !document.userCode) {
     throw new Error('employee detail dimension is required');
   }
   if (config.employeeDetailField && document.userCode) {
-    detail[config.employeeDetailField] = { FNumber: document.userCode };
+    employeeNumber = resolveDetailNumber(
+      config.employeeDetailNumberMappings,
+      document.userCode,
+      document.userName
+    );
+    detail[config.employeeDetailField] = detailReference(employeeNumber);
+  }
+  const detailId = resolveDetailId(config, departmentNumber, employeeNumber);
+  if (detailId) {
+    return { FId: detailId };
   }
   return detail;
+}
+
+function detailReference(number) {
+  return { FNumber: number, Number: number };
+}
+
+function resolveDetailNumber(mappings, code, name) {
+  if (!mappings || typeof mappings !== 'object') {
+    return code;
+  }
+  return mappings[code] || mappings[name] || code;
+}
+
+function resolveDetailId(config, departmentNumber, employeeNumber) {
+  const mappings = config.detailIdMappings;
+  if (!mappings || typeof mappings !== 'object' || Array.isArray(mappings)) {
+    return null;
+  }
+  const keys = [
+    `${departmentNumber}|${employeeNumber}`,
+    `${departmentNumber}|`,
+    `|${employeeNumber}`
+  ];
+  for (const key of keys) {
+    if (!Object.hasOwn(mappings, key)) {
+      continue;
+    }
+    const raw = mappings[key];
+    if (raw === undefined || raw === null || String(raw).trim() === '') {
+      continue;
+    }
+    const numeric = Number(raw);
+    return Number.isInteger(numeric) ? numeric : String(raw).trim();
+  }
+  return null;
 }
 
 function assertVoucherDateMatchesPeriod(voucherDate, year, period) {
@@ -452,3 +514,6 @@ function formatDetail(detail) {
     .map(([key, value]) => `${key}:${value?.FNumber || value}`)
     .join('; ');
 }
+
+
+

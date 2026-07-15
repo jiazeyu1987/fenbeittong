@@ -21,9 +21,11 @@ test('mock template contains required fields and no real token', () => {
   assert.equal(template.accountBookNumber, '908');
   assert.equal(template.voucherGroupNumber, 'PZZ9');
   assert.equal(template.templateErpFid, '780047');
-  assert.equal(template.categoryAccountNumbers.TRAVEL, '1001.01');
-  assert.equal(template.categoryAccountNumbers.CI007, '6601.10');
-  assert.equal(template.creditAccountNumber, '6111');
+  assert.equal(template.categoryAccountNumbers.TRAVEL, '6111');
+  assert.equal(template.categoryAccountNumbers.CI007, '6111');
+  assert.equal(template.departmentDetailField, '');
+  assert.equal(template.employeeDetailField, '');
+  assert.equal(template.creditAccountNumber, '1001.01');
   assert.equal(template.splitDeductibleTax, false);
   assert.equal(template.erpTemplateModel.AccountBookID.Number, '908');
   assert.equal(template.erpTemplateModel.VOUCHERGROUPID.Number, 'PZZ9');
@@ -75,8 +77,9 @@ test('voucher payload writes only Kingdee GL_VOUCHER fields', () => {
   assert.equal(preview.payload.Model.FEntity[0].FEXCHANGERATETYPE.FNumber, 'HLTX01_SYS');
   assert.equal(preview.payload.Model.FEntity[0].FAMOUNTFOR, 108);
   assert.equal(preview.payload.Model.FEntity[0].FDC, '1');
-  assert.equal(preview.payload.Model.FEntity[0].FACCOUNTID.FNumber, '1001.01');
-  assert.equal(preview.payload.Model.FEntity.at(-1).FACCOUNTID.FNumber, '6111');
+  assert.equal(preview.payload.Model.FEntity[0].FACCOUNTID.FNumber, '6111');
+  assert.deepEqual(preview.payload.Model.FEntity[0].FDetailID, {});
+  assert.equal(preview.payload.Model.FEntity.at(-1).FACCOUNTID.FNumber, '1001.01');
   assert.equal(Object.hasOwn(preview.payload.Model, 'reimb_id'), false);
   assert.equal(Object.hasOwn(preview.payload.Model.FEntity[0], 'cost_category'), false);
 });
@@ -89,7 +92,8 @@ test('system status exposes mode and readiness for formal workflow', () => {
     assert.equal(status.mode.fenbeitong, 'mock');
     assert.equal(status.mode.kingdee, 'mock');
     assert.equal(status.readiness.fenbeitong.ready, true);
-    assert.equal(status.readiness.kingdee.ready, true);
+    assert.equal(status.readiness.kingdee.ready, false);
+    assert.deepEqual(status.readiness.kingdee.missing, ['KINGDEE_MODE=real']);
     assert.equal(status.scheduler.enabled, false);
     assert.equal(status.scheduler.autoPushErp, false);
     assert.ok(Object.hasOwn(status.summary.counts, 'syncedDocuments'));

@@ -7,7 +7,7 @@ The application runs the production workflow even when external dependencies are
 - Fenbeitong sync uses an explicit adapter mode.
 - Kingdee voucher save uses an explicit adapter mode.
 - Timed synchronization uses an explicit scheduler mode and does not start unless `SCHEDULER_ENABLED=true`.
-- Mock data is allowed only when `FENBEITONG_MODE=mock` or `KINGDEE_MODE=mock`.
+- Fenbeitong mock data is allowed only when `FENBEITONG_MODE=mock`; Kingdee mock mode is not allowed to produce ERP save success.
 - Real mode fails fast when required configuration is missing.
 
 ## Mock Replacement Policy
@@ -37,4 +37,4 @@ Local state is stored in `runtime-data/state.json`. Fenbeitong company credentia
 ## Current External Blockers
 
 - Additional Fenbeitong companies remain blocked until their SQLite tenant credentials are configured.
-- Kingdee `GL_VOUCHER` real save sample is not confirmed yet.
+- Current test-account smoke mapping saves debit lines to `6111` and credit lines to `1001.01`, verified by real Save plus View. Final finance-grade `6601.*` expense mapping remains blocked until the ERP auxiliary-dimension OpenAPI shape is confirmed.

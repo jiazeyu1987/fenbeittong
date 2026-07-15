@@ -12,8 +12,8 @@ Finance toolbar browser E2E validation for the Fenbeitong reimbursement to Kingd
 - Sortable source number and amount headers -> verifies first visible row changes after sorting.
 - Display fields button -> verifies requester column can be hidden and shown.
 - Row checkbox and select-all checkbox -> verifies multiple rows and all rows can be selected.
-- Generate voucher button -> verifies two selected rows produce two process records.
-- Save to ERP button -> verifies two selected rows become `ERP_PUSHED`.
+- Generate voucher button -> verifies selected rows push to ERP and become `ERP_PUSHED`.
+- Save to ERP button -> verifies selected rows become `ERP_PUSHED`.
 - View voucher button -> verifies the selected process record is displayed.
 - Export button -> verifies a CSV download is produced.
 
@@ -27,47 +27,39 @@ Finance toolbar browser E2E validation for the Fenbeitong reimbursement to Kingd
 
 - Mock Fenbeitong mode generates 100 reimbursement records.
 - Local repository state is reset at the start of the browser E2E test.
-- Kingdee save remains mock ERP draft save by explicit project constraint.
+- Kingdee save requires real mode; mock ERP save is rejected and cannot be counted as success.
+- Current Kingdee test-account smoke mapping uses debit `6111` and credit `1001.01`.
 
 ## RED Evidence
 
 - `npm run test:frontend` previously failed when toolbar controls lacked executable IDs and behavior.
-- New browser E2E coverage was added to prevent button-only UI regressions.
+- `npm run test:e2e:ui` previously failed when toolbar and row actions stopped at local prepared records.
+- Live Kingdee Save failed for `6601.*` expense accounts until the default smoke mapping was changed to the account pair accepted by the current test account set.
 
 ## GREEN Evidence
 
+- `npm run test:backend` -> PASS, 26/26 backend tests passed.
+- `npm run test:frontend` -> PASS, 10/10 frontend tests passed.
+- `npm run test:contract` -> PASS, 13/13 contract tests passed.
 - `npm run test:e2e:ui` -> PASS, 1/1 browser E2E test passed.
 - `npm run test:e2e` -> PASS, 1/1 API E2E test passed.
-- `npm run test:frontend` -> PASS, 9/9 frontend tests passed.
-- `npm run test:contract` -> PASS, 11/11 contract tests passed.
-- `npm run test:backend` -> PASS, 17/17 backend tests passed.
+- `npm run lint` -> PASS, 49 files checked.
+- `npm run format` -> PASS, 49 files checked.
 - `npm run build` -> PASS, `dist` created.
-- `npm run verify` -> PASS, full local verification chain passed with browser toolbar E2E included.
 
 ## Real Data E2E Evidence
 
-- Scope: browser-driven real Fenbeitong sync plus row-level voucher generation/save through the configured ERP adapter.
-- RED: backend test failed until real detail payloads where expenses match `payment_amount` were accepted.
-- RED: contract test failed until real category `CI007` was mapped to Kingdee account `6601.10`.
-- GREEN: Playwright clicked visible `同步分贝通`, loaded 5 real rows marked `正式接口`, clicked row `B1IELSHBX26061600002` `生成凭证`, and received `保存成功`.
-- GREEN: final API query confirmed target source `B1IELSHBX26061600002` reached `ERP_PUSHED`.
-- Evidence: `E:\ProjectPackage\fenbeitong\doc\tasks\20260714-real-data-e2e-validation\runtime\real-data-e2e-api-verification-1784017369173.json`.
-
-## Verification
-
-- `npm run verify` -> PASS with `FENBEITONG_MODE=mock` and `KINGDEE_MODE=mock` for isolated local suite verification.
-- Real browser E2E evidence -> PASS for Fenbeitong production data sync and configured ERP adapter save/query.
+- Scope: browser-driven real Fenbeitong sync plus row-level voucher generation/save through the configured Kingdee adapter.
+- GREEN: Playwright clicked row `Generate Voucher` for real source `B1IELSHBX26061600003`.
+- GREEN: Kingdee Save returned real FID `780438` and voucher number `627296`; follow-up View/query reached `ERP_PUSHED`.
+- Evidence: `E:\ProjectPackage\fenbeitong\doc\tasks\20260715-kingdee-real-save\runtime\live-real-after-fix-20260715072042.json`.
 
 ## Blockers
 
-- Full real Kingdee write remains blocked until `KINGDEE_MODE=real`, `KINGDEE_SAVE_URL`, and required authentication/session configuration are available.
-
-## Failed, Skipped, Flaky, Or Blocked Tests
-
-- No skipped tests are planned.
-- Additional Fenbeitong companies require SQLite tenant credentials before real sync; real Kingdee GL_VOUCHER save examples remain external blockers and are not production-readiness evidence.
+- Finance-grade `6601.*` expense account mapping remains blocked until Kingdee auxiliary-dimension Save shape is confirmed for the current test account set.
+- Additional Fenbeitong companies require SQLite tenant credentials before real sync.
 
 ## CI Impact And Release Recommendation
 
-- Add `npm run test:e2e:ui` to local verification for finance toolbar changes.
-- Release recommendation is conditional on passing browser E2E, existing E2E, contract, frontend, backend, and build checks.
+- Keep `npm run test:e2e:ui` in local verification for finance toolbar changes.
+- Release recommendation is conditional on passing browser E2E, API E2E, contract, frontend, backend, lint, format, and build checks.

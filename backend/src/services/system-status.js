@@ -17,9 +17,7 @@ export function getSystemStatus() {
     },
     readiness: {
       fenbeitong: fenbeitongReadiness(config.fenbeitong.mode, defaultTenant),
-      kingdee: readiness(config.kingdee.mode, [
-        ['KINGDEE_SAVE_URL', config.kingdee.saveUrl]
-      ])
+      kingdee: kingdeeReadiness(config.kingdee)
     },
     summary: getDashboardSummary(),
     config: sanitizedConfig,
@@ -59,6 +57,25 @@ function fenbeitongReadiness(mode, tenant) {
     fields.push(['tenant.authPath', tenant?.authPath]);
   }
   return readiness(mode, fields);
+}
+
+function kingdeeReadiness(config) {
+  if (config.mode !== 'real') {
+    return {
+      ready: false,
+      message: 'real Kingdee save required',
+      missing: ['KINGDEE_MODE=real']
+    };
+  }
+  return readiness(config.mode, [
+    ['KINGDEE_BASE_URL', config.baseUrl],
+    ['KINGDEE_ACCT_ID', config.acctId],
+    ['KINGDEE_USERNAME', config.username],
+    ['KINGDEE_PASSWORD', config.password],
+    ['KINGDEE_AUTH_PATH', config.authPath],
+    ['KINGDEE_SAVE_PATH', config.savePath],
+    ['KINGDEE_VIEW_PATH', config.viewPath]
+  ]);
 }
 
 function readiness(mode, fields) {

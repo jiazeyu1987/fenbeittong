@@ -14,6 +14,7 @@ function startServer() {
 }
 test('mock user path can template, sync Fenbeitong, push ERP, and query', async () => {
   const restoreEnv = forceMockExternalEnv();
+  const restoreFetch = stubKingdeeFetch();
   resetRepository();
   const { server, baseUrl } = await startServer();
   try {
@@ -79,8 +80,8 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
       config: template
     });
     assert.equal(pushBody.data.processStage, 'ERP_PUSHED');
-    assert.equal(pushBody.data.erpFid, 'MOCK-KINGDEE-FID');
-    assert.equal(pushBody.data.erpMockReplacement, true);
+    assert.equal(pushBody.data.erpFid, '100033');
+    assert.equal(pushBody.data.erpMockReplacement, false);
 
     const duplicatePushBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/push-erp`, {
       sourceId,
@@ -105,6 +106,7 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
     assert.ok(logsBody.data.some((log) => log.action === 'ERP_PUSH'));
   } finally {
     await new Promise((resolve) => server.close(resolve));
+    restoreFetch();
     restoreEnv();
   }
 });
@@ -122,11 +124,19 @@ function forceMockExternalEnv() {
   const previous = {
     APP_DATA_DIR: process.env.APP_DATA_DIR,
     FENBEITONG_MODE: process.env.FENBEITONG_MODE,
-    KINGDEE_MODE: process.env.KINGDEE_MODE
+    KINGDEE_MODE: process.env.KINGDEE_MODE,
+    KINGDEE_BASE_URL: process.env.KINGDEE_BASE_URL,
+    KINGDEE_ACCT_ID: process.env.KINGDEE_ACCT_ID,
+    KINGDEE_USERNAME: process.env.KINGDEE_USERNAME,
+    KINGDEE_PASSWORD: process.env.KINGDEE_PASSWORD
   };
   process.env.APP_DATA_DIR = 'runtime-data/e2e-flow';
   process.env.FENBEITONG_MODE = 'mock';
-  process.env.KINGDEE_MODE = 'mock';
+  process.env.KINGDEE_MODE = 'real';
+  process.env.KINGDEE_BASE_URL = 'http://172.30.30.8';
+  process.env.KINGDEE_ACCT_ID = 'test-acct';
+  process.env.KINGDEE_USERNAME = 'test-user';
+  process.env.KINGDEE_PASSWORD = 'test-password';
   return () => {
     for (const [name, value] of Object.entries(previous)) {
       if (value === undefined) {
@@ -135,5 +145,46 @@ function forceMockExternalEnv() {
         process.env[name] = value;
       }
     }
+  };
+}
+
+function stubKingdeeFetch() {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    const text = String(url);
+    if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.AuthService.ValidateUser.common.kdsvc')) {
+      return new Response(JSON.stringify({ LoginResultType: 1 }), {
+        status: 200,
+        headers: { 'Set-Cookie': 'kdservice-sessionid=e2e123; Path=/K3Cloud' }
+      });
+    }
+    if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.Save.common.kdsvc')) {
+      assert.equal(options.headers.Cookie, 'kdservice-sessionid=e2e123');
+      const body = JSON.parse(String(options.body));
+      assert.equal(body.formid, 'GL_VOUCHER');
+      assert.ok(JSON.parse(body.data).Model.FEntity.length >= 2);
+      return new Response(JSON.stringify({
+        Result: {
+          Id: '100033',
+          Number: '23',
+          ResponseStatus: { IsSuccess: true, Errors: [] }
+        }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.View.common.kdsvc')) {
+      const body = JSON.parse(String(options.body));
+      assert.equal(body.formid, 'GL_VOUCHER');
+      assert.equal(JSON.parse(body.data).Id, '100033');
+      return new Response(JSON.stringify({
+        Result: {
+          ResponseStatus: { IsSuccess: true, Errors: [] },
+          Result: { FID: 100033, FBillNo: '23', FDocumentStatus: 'Z' }
+        }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return previousFetch(url, options);
+  };
+  return () => {
+    globalThis.fetch = previousFetch;
   };
 }

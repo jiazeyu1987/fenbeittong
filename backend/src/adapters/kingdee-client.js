@@ -1,33 +1,23 @@
 import { getAppConfig, validateKingdeeConfig } from '../config.js';
-import { dependencyError } from '../errors.js';
+import { AppError, dependencyError } from '../errors.js';
 
 export async function saveKingdeeVoucher(payload) {
   const config = getAppConfig().kingdee;
-  if (config.mode === 'mock') {
-    return {
-      simulated: true,
-      mode: 'mock',
-      mockReplacement: true,
-      mockReason: 'Kingdee GL_VOUCHER save example is not confirmed yet',
-      erpFid: 'MOCK-KINGDEE-FID',
-      erpNumber: 'MOCK-KINGDEE-NUMBER',
-      documentStatus: 'Z'
-    };
+  if (config.mode !== 'real') {
+    throw new AppError(
+      'KINGDEE_REAL_MODE_REQUIRED',
+      'Kingdee voucher save requires KINGDEE_MODE=real; mock save is disabled',
+      422,
+      { missing: ['KINGDEE_MODE=real'] }
+    );
   }
 
   validateKingdeeConfig();
-  const headers = { 'Content-Type': 'application/json' };
-  if (config.authHeaderName && config.authHeaderValue) {
-    headers[config.authHeaderName] = config.authHeaderValue;
-  }
-  const response = await fetch(config.saveUrl, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      formid: 'GL_VOUCHER',
-      data: JSON.stringify(payload)
-    })
-  });
+  const authSession = await loginKingdee(config);
+  const response = await postKingdeeJsonWrapper(config, config.savePath, {
+    formid: 'GL_VOUCHER',
+    data: JSON.stringify(payload)
+  }, authSession);
   const body = await response.json();
   if (!response.ok) {
     throw dependencyError('KINGDEE_HTTP_FAILED', `Kingdee voucher save failed: HTTP ${response.status}`, {
@@ -39,14 +29,130 @@ export async function saveKingdeeVoucher(payload) {
     const message = status?.Errors?.map((error) => error.Message || error.FieldName).filter(Boolean).join('; ');
     throw dependencyError('KINGDEE_SAVE_FAILED', `Kingdee voucher save failed: ${message || 'unknown error'}`);
   }
+  const identifiers = saveIdentifiers(body);
+  if (!identifiers.erpFid || !identifiers.erpNumber) {
+    throw dependencyError('KINGDEE_SAVE_RESPONSE_INVALID', 'Kingdee voucher save response missing Id or Number');
+  }
+  const viewBody = await viewSavedVoucher(config, authSession, identifiers.erpFid);
   return {
     simulated: false,
     mode: 'real',
     mockReplacement: false,
     mockReason: '',
-    erpFid: body.Result.Id || '',
-    erpNumber: body.Result.Number || '',
-    documentStatus: 'Z',
-    rawResponse: body
+    erpFid: identifiers.erpFid,
+    erpNumber: identifiers.erpNumber,
+    documentStatus: viewBody?.Result?.Result?.FDocumentStatus || 'Z',
+    rawResponse: { save: body, view: viewBody }
   };
+}
+
+async function loginKingdee(config) {
+  const response = await postKingdeeForm(config, config.authPath, {
+    acctID: config.acctId,
+    username: config.username,
+    password: config.password,
+    lcid: config.lcid
+  });
+  const body = await response.json();
+  if (!response.ok) {
+    throw dependencyError('KINGDEE_LOGIN_HTTP_FAILED', `Kingdee login failed: HTTP ${response.status}`, {
+      status: response.status
+    });
+  }
+  if (!isLoginSuccess(body)) {
+    throw dependencyError('KINGDEE_LOGIN_FAILED', 'Kingdee login failed');
+  }
+  const cookie = extractCookieHeader(response.headers);
+  if (!cookie) {
+    throw dependencyError('KINGDEE_LOGIN_COOKIE_MISSING', 'Kingdee login response missing Set-Cookie');
+  }
+  return {
+    cookie,
+    sessionId: body?.Context?.SessionId || '',
+    kdsvcSessionId: body?.KDSVCSessionId || ''
+  };
+}
+
+async function postKingdeeForm(config, servicePath, form, cookieHeader = '') {
+  const headers = { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' };
+  if (cookieHeader) {
+    headers.Cookie = cookieHeader;
+  }
+  return fetch(buildServiceUrl(config.baseUrl, servicePath), {
+    method: 'POST',
+    headers,
+    body: new URLSearchParams(form).toString()
+  });
+}
+
+async function viewSavedVoucher(config, authSession, erpFid) {
+  const response = await postKingdeeJsonWrapper(config, config.viewPath, {
+    formid: 'GL_VOUCHER',
+    data: JSON.stringify({
+      Number: '',
+      Id: String(erpFid),
+      CreateOrgId: 0
+    })
+  }, authSession);
+  const body = await response.json();
+  if (!response.ok) {
+    throw dependencyError('KINGDEE_VIEW_HTTP_FAILED', `Kingdee voucher view failed: HTTP ${response.status}`, {
+      status: response.status
+    });
+  }
+  const status = body?.Result?.ResponseStatus;
+  if (!status?.IsSuccess) {
+    const message = status?.Errors?.map((error) => error.Message || error.FieldName).filter(Boolean).join('; ');
+    throw dependencyError('KINGDEE_VIEW_FAILED', `Kingdee voucher view failed: ${message || 'unknown error'}`);
+  }
+  if (!body?.Result?.Result || typeof body.Result.Result !== 'object') {
+    throw dependencyError('KINGDEE_VIEW_RESPONSE_INVALID', 'Kingdee voucher view response missing Result.Result');
+  }
+  return body;
+}
+
+async function postKingdeeJsonWrapper(config, servicePath, body, authSession) {
+  const headers = { 'Content-Type': 'application/json;charset=UTF-8' };
+  if (authSession?.cookie) {
+    headers.Cookie = authSession.cookie;
+  }
+  if (authSession?.sessionId) {
+    headers.SessionId = authSession.sessionId;
+  }
+  if (authSession?.kdsvcSessionId) {
+    headers.KDSVCSessionId = authSession.kdsvcSessionId;
+  }
+  return fetch(buildServiceUrl(config.baseUrl, servicePath), {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body)
+  });
+}
+
+function saveIdentifiers(body) {
+  const successEntity = body?.Result?.ResponseStatus?.SuccessEntitys?.[0];
+  return {
+    erpFid: String(successEntity?.Id || body?.Result?.Id || ''),
+    erpNumber: String(successEntity?.Number || body?.Result?.Number || '')
+  };
+}
+
+function buildServiceUrl(baseUrl, servicePath) {
+  const normalizedBase = baseUrl.trim().replace(/\/+$/, '');
+  const k3cloudBase = /\/k3cloud$/i.test(normalizedBase) ? normalizedBase : `${normalizedBase}/K3Cloud`;
+  return `${k3cloudBase}/${servicePath.replace(/^\/+/, '')}`;
+}
+
+function isLoginSuccess(body) {
+  return body?.LoginResultType === 1 || body?.IsSuccessByAPI === true;
+}
+
+function extractCookieHeader(headers) {
+  const setCookie = typeof headers.getSetCookie === 'function'
+    ? headers.getSetCookie()
+    : [headers.get('set-cookie')].filter(Boolean);
+  return setCookie
+    .map((cookie) => cookie.split(';')[0].trim())
+    .filter(Boolean)
+    .join('; ');
 }

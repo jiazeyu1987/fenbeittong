@@ -46,7 +46,7 @@ test('sync stores a Fenbeitong source record before ERP push', () => {
   assert.equal(findPreparedRecord('MOCK-REIMB-001'), null);
 });
 
-test('ERP push marks prepared record with simulated ERP identifiers', () => {
+test('ERP push marks prepared record with real ERP identifiers', () => {
   resetRepository();
   const template = buildMockTemplate();
   const preview = buildVoucherPreview({
@@ -59,14 +59,41 @@ test('ERP push marks prepared record with simulated ERP identifiers', () => {
   savePreparedRecord(preview);
 
   const pushed = markPushedToErp('MOCK-REIMB-001', {
-    erpFid: 'MOCK-KINGDEE-FID',
-    erpNumber: 'MOCK-KINGDEE-NUMBER',
+    simulated: false,
+    mode: 'real',
+    mockReplacement: false,
+    erpFid: '100033',
+    erpNumber: '23',
     documentStatus: 'Z'
   });
 
   assert.equal(pushed.processStatus, 30);
   assert.equal(pushed.processStage, 'ERP_PUSHED');
-  assert.equal(pushed.erpFid, 'MOCK-KINGDEE-FID');
+  assert.equal(pushed.erpFid, '100033');
+  assert.equal(pushed.simulatedErp, false);
+  assert.equal(pushed.erpMode, 'real');
+});
+
+test('ERP push rejects simulated Kingdee save results', () => {
+  resetRepository();
+  const template = buildMockTemplate();
+  const preview = buildVoucherPreview({
+    fixedJson: template.mockFixedJson,
+    voucherDate: template.mockVoucherDate,
+    year: template.mockYear,
+    period: template.mockPeriod,
+    config: template
+  });
+  savePreparedRecord(preview);
+
+  assert.throws(() => markPushedToErp('MOCK-REIMB-001', {
+    simulated: true,
+    mode: 'mock',
+    mockReplacement: true,
+    erpFid: 'MOCK-KINGDEE-FID',
+    erpNumber: 'MOCK-KINGDEE-NUMBER',
+    documentStatus: 'Z'
+  }), /real Kingdee save result is required/);
 });
 
 test('duplicate ERP push for the same source is blocked', () => {
@@ -81,14 +108,20 @@ test('duplicate ERP push for the same source is blocked', () => {
   });
   savePreparedRecord(preview);
   markPushedToErp('MOCK-REIMB-001', {
-    erpFid: 'MOCK-KINGDEE-FID',
-    erpNumber: 'MOCK-KINGDEE-NUMBER',
+    simulated: false,
+    mode: 'real',
+    mockReplacement: false,
+    erpFid: '100033',
+    erpNumber: '23',
     documentStatus: 'Z'
   });
 
   assert.throws(() => markPushedToErp('MOCK-REIMB-001', {
-    erpFid: 'MOCK-KINGDEE-FID-2',
-    erpNumber: 'MOCK-KINGDEE-NUMBER-2',
+    simulated: false,
+    mode: 'real',
+    mockReplacement: false,
+    erpFid: '100034',
+    erpNumber: '24',
     documentStatus: 'Z'
   }), /already pushed to ERP/);
 });

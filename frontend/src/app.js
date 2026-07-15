@@ -1,4 +1,4 @@
-import { api } from './api.js';
+﻿import { api } from './api.js';
 
 const fields = {
   accountBookNumber: document.querySelector('#accountBookNumber'),
@@ -49,7 +49,8 @@ const state = {
   previewInvalidReason: '',
   preparedSourceIds: new Set(),
   pushedSourceIds: new Set(),
-  erpTemplateModel: null
+  erpTemplateModel: null,
+  erpTemplateDefaults: null
 };
 
 const statusBadge = document.querySelector('#statusBadge');
@@ -127,12 +128,12 @@ sourceSearchInput.addEventListener('keydown', (event) => {
   }
 });
 sourceIdInput.addEventListener('input', () => {
-  invalidatePreview('预览已失效：来源单据已变化，请重新预览凭证。');
+  invalidatePreview('预览已失效：来源单据已变更，请重新预览凭证。');
   renderActionState();
 });
 for (const field of Object.values(fields)) {
   field.addEventListener('input', () => {
-    invalidatePreview('预览已失效：凭证关键字段已变化，请重新预览凭证。');
+    invalidatePreview('预览已失效：凭证关键字段已变更，请重新预览凭证。');
     renderActionState();
   });
 }
@@ -151,7 +152,7 @@ async function loadTemplate() {
   state.configSaved = false;
   renderConfigValidation();
   renderActionState();
-  show(template, '已载入默认凭证参数，请保存配置后开始同步。');
+  show(template, '已加载默认凭证参数，请保存配置后开始同步。');
 }
 
 async function saveConfig() {
@@ -169,7 +170,7 @@ async function syncFenbeitong() {
   }
   const result = await api.syncFenbeitong({ tenantKey: state.selectedTenantKey });
   selectFirstRecord(result.records);
-  invalidatePreview('预览已失效：同步结果已变化，请重新预览凭证。');
+  invalidatePreview('预览已失效：同步结果已变更，请重新预览凭证。');
   show(result, `同步完成，新增或更新 ${result.records.length} 张来源单据。`);
   await refreshAll();
 }
@@ -177,7 +178,7 @@ async function syncFenbeitong() {
 async function runSchedulerOnce() {
   const result = await api.runSchedulerOnce();
   selectFirstRecord(result.sync.records);
-  invalidatePreview('预览已失效：同步结果已变化，请重新预览凭证。');
+  invalidatePreview('预览已失效：同步结果已变更，请重新预览凭证。');
   show(result, `定时任务已手动运行，本次同步 ${result.sync.records.length} 张来源单据。`);
   await refreshAll();
 }
@@ -213,14 +214,14 @@ async function prepare() {
 async function generateVoucherFromLedger() {
   const records = selectedLedgerRecords();
   if (records.length === 0) {
-    await prepare();
+    await pushErp();
     return;
   }
-  const prepared = [];
+  const pushed = [];
   for (const record of records) {
-    prepared.push(await generateVoucherForRecord(record));
+    pushed.push(await saveRowVoucherToErp(record));
   }
-  show({ count: prepared.length, records: prepared }, `已生成 ${prepared.length} 张待保存凭证。`);
+  show({ count: pushed.length, records: pushed }, '保存成功');
   await refreshAll();
 }
 
@@ -268,32 +269,28 @@ async function pushSelectedToErp() {
   }
   const pushed = [];
   for (const record of records) {
-    setActiveSourceRecord(record, false);
-    const saved = await api.pushErp({
-      sourceId: record.sourceId,
-      voucherDate: fields.mockVoucherDate.value,
-      year: Number(fields.mockYear.value),
-      period: Number(fields.mockPeriod.value),
-      config: readConfig()
-    });
-    state.pushedSourceIds.add(saved.sourceId);
-    pushed.push(saved);
+    pushed.push(await saveRowVoucherToErp(record));
   }
-  show({ count: pushed.length, records: pushed }, `已保存 ${pushed.length} 张ERP草稿凭证，等待财务人工审核。`);
+  show({ count: pushed.length, records: pushed }, '保存成功');
   await refreshAll();
 }
 
 async function pushErp() {
   const sourceId = requiredSourceId();
-  const record = await api.pushErp({
+  const saved = await api.pushErp({
     sourceId,
     voucherDate: fields.mockVoucherDate.value,
     year: Number(fields.mockYear.value),
     period: Number(fields.mockPeriod.value),
     config: readConfig()
   });
+  const record = await api.getProcess(saved.sourceId);
+  if (!record || record.processStage !== 'ERP_PUSHED') {
+    throw new Error(`ERP保存后查询未确认成功：${sourceId}`);
+  }
   state.pushedSourceIds.add(record.sourceId);
-  show(record, draftOnlyWarning(record));
+  state.preparedSourceIds.delete(record.sourceId);
+  show(record, '保存成功');
   await refreshAll();
 }
 
@@ -318,7 +315,7 @@ async function refreshAll() {
 async function refreshRecords() {
   const records = await api.listProcessRecords();
   state.preparedSourceIds = new Set(records.filter((record) => record.processStage === 'PREPARED').map((record) => record.sourceId));
-  state.pushedSourceIds = new Set(records.filter((record) => record.processStage === 'ERP_PUSHED').map((record) => record.sourceId));
+  state.pushedSourceIds = new Set(records.filter(isRealPushedRecord).map((record) => record.sourceId));
   renderSourceQueue(state.syncedDocuments);
   if (records.length === 0) {
     recordsTable.innerHTML = '<tr><td colspan="5">暂无记录，请先同步分贝通数据。</td></tr>';
@@ -342,7 +339,7 @@ async function refreshLogs() {
     : logs.slice(0, 8).map((log) => `
       <div class="log-item">
         <strong>${escapeHtml(logLabel(log.action))}</strong>
-        <span>${escapeHtml(log.status)} · ${escapeHtml(log.createdAt)}</span>
+        <span>${escapeHtml(log.status)} 路 ${escapeHtml(log.createdAt)}</span>
       </div>
     `).join('');
 }
@@ -451,8 +448,8 @@ function renderNextAction(status) {
   let text = '请先保存配置，确保账簿、凭证字、期间、科目和核算维度可用。';
   if (pushed) text = '已有 ERP 暂存结果，下一步由财务在金蝶中人工审核。';
   else if (prepared && state.lastPreview?.balanced) text = '已生成待保存凭证，可保存为 ERP 草稿。';
-  else if (state.lastPreview?.balanced) text = '凭证已预览且借贷平衡，下一步生成待保存凭证。';
-  else if (sourceId) text = '已选择来源单据，下一步生成凭证。';
+  else if (state.lastPreview?.balanced) text = '凭证已预览且借贷平衡，下一步可直接保存至 ERP。';
+  else if (sourceId) text = '已选择来源单据，下一步生成凭证并保存至 ERP。';
   else if (status.summary.counts.syncedDocuments > 0) text = '已有待处理单据，请先在列表中选择单据。';
   else if (state.configSaved) text = '配置已保存，下一步同步分贝通数据。';
   document.querySelector('#nextActionText').textContent = text;
@@ -472,8 +469,8 @@ function renderActionState() {
   controls.preview.disabled = !hasSource;
   controls.prepare.disabled = !hasSource;
   controls.pushErp.disabled = !hasSource || pushed;
-  controls.primaryAction.dataset.action = !state.configSaved ? 'save-config' : state.syncedDocuments.length === 0 ? 'sync' : 'prepare';
-  controls.primaryAction.textContent = !state.configSaved ? '保存配置' : state.syncedDocuments.length === 0 ? '立即同步分贝通数据' : '生成待保存凭证';
+  controls.primaryAction.dataset.action = !state.configSaved ? 'save-config' : state.syncedDocuments.length === 0 ? 'sync' : 'push';
+  controls.primaryAction.textContent = !state.configSaved ? '保存配置' : state.syncedDocuments.length === 0 ? '立即同步分贝通数据' : '保存至ERP';
   controls.primaryAction.disabled = tenantWaiting && controls.primaryAction.dataset.action === 'sync';
   actionBlockReason.textContent = getActionBlockReason({ sourceId, pushed });
 }
@@ -484,7 +481,7 @@ function getActionBlockReason({ sourceId, pushed }) {
   if (state.syncedDocuments.length === 0) return '未满足原因：请先同步分贝通单据。';
   if (!sourceId && state.selectedSourceIds.size === 0) return '未满足原因：请先选择待处理单据。';
   if (pushed) return '该单据已保存，下一步由财务人工审核。';
-  return '当前可生成凭证或保存 ERP 草稿。';
+  return '当前可生成凭证并保存 ERP 草稿。';
 }
 
 function renderTenantOptions(tenants) {
@@ -521,7 +518,7 @@ function renderConfigValidation() {
     ['贷方核算维度', isJsonObject(fields.creditDetailNumbers.value), '对方科目核算维度']
   ];
   document.querySelector('#configValidationList').innerHTML = checks.map(([label, ok, detail]) =>
-    `<li class="${ok ? 'ok' : 'pending'}">${escapeHtml(label)}：${ok ? '通过' : '待补齐'}：${escapeHtml(detail)}</li>`
+    `<li class="${ok ? 'ok' : 'pending'}">${escapeHtml(label)}：${ok ? '通过' : '待补齐'}，${escapeHtml(detail)}</li>`
   ).join('');
 }
 
@@ -614,7 +611,7 @@ function setLedgerSort(field) {
 }
 
 function visibleLedgerColumns() {
-  return ['选择', ...ledgerColumnDefinitions().filter((column) => state.visibleColumnKeys.has(column.key)).map((column) => column.label)];
+  return ['閫夋嫨', ...ledgerColumnDefinitions().filter((column) => state.visibleColumnKeys.has(column.key)).map((column) => column.label)];
 }
 
 function ledgerTableColumnCount() {
@@ -765,7 +762,7 @@ function renderVoucherValidation(preview) {
     ['凭证预览', false, '请先选择单据并生成凭证']
   ];
   voucherValidationList.innerHTML = checks.map(([label, ok, detail]) =>
-    `<li class="${ok ? 'ok' : 'pending'}">${escapeHtml(label)}：${ok ? '通过' : '待验证'}：${escapeHtml(detail)}</li>`
+    `<li class="${ok ? 'ok' : 'pending'}">${escapeHtml(label)}：${ok ? '通过' : '待验证'}，${escapeHtml(detail)}</li>`
   ).join('');
 }
 
@@ -821,7 +818,7 @@ function displayExpenseCategories(record, categories) {
 }
 
 function environmentWarning(status) {
-  if (status.mode.kingdee === 'mock') return '当前外部ERP接口未启用，保存动作仅记录处理结果，不写入正式ERP。';
+  if (status.mode.kingdee === 'mock') return '当前外部ERP接口未启用，保存动作不会写入正式ERP。';
   return '当前外部接口已启用，保存动作会写入配置的ERP账套，请先确认凭证预览。';
 }
 
@@ -831,6 +828,7 @@ function readinessText(readiness) {
 }
 
 function applyTemplate(template) {
+  state.erpTemplateDefaults = structuredClone(template);
   state.erpTemplateModel = template.erpTemplateModel || null;
   fields.accountBookNumber.value = template.accountBookNumber;
   fields.voucherGroupNumber.value = template.voucherGroupNumber;
@@ -892,23 +890,51 @@ function queueStatus(record) {
   return stageName(record.processStage);
 }
 
+function isRealPushedRecord(record) {
+  return Boolean(
+    record.processStage === 'ERP_PUSHED'
+    && record.erpMode === 'real'
+    && record.simulatedErp === false
+    && record.erpFid
+    && record.erpNumber
+  );
+}
+
 function readConfig() {
+  const defaults = requiredTemplateDefaults();
   return {
     accountBookNumber: fields.accountBookNumber.value,
     voucherGroupNumber: fields.voucherGroupNumber.value,
     templateErpFid: fields.templateErpFid.value,
     currencyNumbers: parseJson(fields.currencyNumbers.value, '币别映射'),
     categoryAccountNumbers: parseJson(fields.categoryAccountNumbers.value, '费用科目映射'),
-    departmentDetailField: '',
-    employeeDetailField: '',
-    creditAccountNumber: '6111',
+    departmentDetailField: defaults.departmentDetailField,
+    employeeDetailField: defaults.employeeDetailField,
+    departmentDetailNumberMappings: cloneObject(defaults.departmentDetailNumberMappings),
+    employeeDetailNumberMappings: cloneObject(defaults.employeeDetailNumberMappings),
+    detailIdMappings: cloneObject(defaults.detailIdMappings),
+    creditAccountNumber: defaults.creditAccountNumber,
     creditDetailNumbers: parseJson(fields.creditDetailNumbers.value, '贷方核算维度'),
-    exchangeRateTypeNumber: 'HLTX01_SYS',
-    exchangeRate: 1,
-    splitDeductibleTax: false,
-    taxAccountNumber: '',
+    exchangeRateTypeNumber: defaults.exchangeRateTypeNumber,
+    exchangeRate: defaults.exchangeRate,
+    splitDeductibleTax: defaults.splitDeductibleTax,
+    taxAccountNumber: defaults.taxAccountNumber,
     erpTemplateModel: state.erpTemplateModel
   };
+}
+
+function requiredTemplateDefaults() {
+  if (!state.erpTemplateDefaults) {
+    throw new Error('请先加载默认凭证参数。');
+  }
+  return state.erpTemplateDefaults;
+}
+
+function cloneObject(value) {
+  if (!value || Array.isArray(value) || typeof value !== 'object') {
+    throw new Error('默认凭证参数缺少核算维度映射。');
+  }
+  return structuredClone(value);
 }
 
 function buildVoucherRequest() {
@@ -975,7 +1001,7 @@ function buildPreviewSummary(preview) {
 
 function draftOnlyWarning(record) {
   if (record.erpMockReplacement) return '处理结果已保存。外部ERP接口启用前，不写入正式ERP凭证。';
-  return '已保存为 ERP 暂存凭证，未审核 / 未过账 / 需人工审核。';
+  return '已保存为 ERP 暂存凭证，未审核、未过账，需人工审核。';
 }
 
 function stageName(stage) {
@@ -1027,7 +1053,7 @@ function run(fn) {
     try {
       await fn(event);
     } catch (error) {
-      showError(fn.name || '操作', error);
+      showError(fn.name || '鎿嶄綔', error);
     } finally {
       renderActionState();
     }
@@ -1046,3 +1072,4 @@ function escapeHtml(value) {
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;');
 }
+

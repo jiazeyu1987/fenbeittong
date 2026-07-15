@@ -18,17 +18,20 @@ export function buildMockTemplate() {
     templateErpFid: '780047',
     currencyNumbers: { CNY: 'PRE001' },
     categoryAccountNumbers: {
-      TRAVEL: '1001.01',
-      OFFICE: '1001.01',
-      CI007: '6601.10',
-      CI00802: '6601.09',
-      CI010: '6601.07',
-      CI012: '6601.15',
-      CI013: '6601.07'
+      TRAVEL: '6111',
+      OFFICE: '6111',
+      CI007: '6111',
+      CI00802: '6111',
+      CI010: '6111',
+      CI012: '6111',
+      CI013: '6111'
     },
     departmentDetailField: '',
     employeeDetailField: '',
-    creditAccountNumber: '6111',
+    departmentDetailNumberMappings: {},
+    employeeDetailNumberMappings: {},
+    detailIdMappings: {},
+    creditAccountNumber: '1001.01',
     creditDetailNumbers: {},
     exchangeRateTypeNumber: 'HLTX01_SYS',
     exchangeRate: 1,
@@ -52,3 +55,4 @@ export function loadMockKingdeeTemplateModel() {
     'utf8'
   ));
 }
+

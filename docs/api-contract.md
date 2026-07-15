@@ -103,7 +103,9 @@ Returns the local queue of synced Fenbeitong source documents. Records include s
 
 ## POST `/api/fenbeitong-voucher/push-erp`
 
-Runs the Kingdee adapter. In `KINGDEE_MODE=mock`, it simulates a saved draft voucher. In `real` mode, missing real interface configuration fails fast.
+Runs the Kingdee adapter. In `KINGDEE_MODE=mock`, ERP save fails fast and does not simulate a saved voucher. In `real` mode, missing real interface configuration fails fast.
+
+Real Kingdee mode uses K3Cloud WebAPI session login. The backend posts `acctID`, `username`, `password`, and `lcid` to `KINGDEE_AUTH_PATH`, extracts the returned `Set-Cookie`, and then posts a JSON wrapper `{ "formid": "GL_VOUCHER", "data": "<payload-json>" }` to `KINGDEE_SAVE_PATH`. After Save succeeds, the backend calls `KINGDEE_VIEW_PATH` for the returned id before marking the local process as `ERP_PUSHED`.
 
 ## GET `/api/fenbeitong-voucher/process`
 

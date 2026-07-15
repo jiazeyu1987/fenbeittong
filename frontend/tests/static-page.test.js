@@ -98,6 +98,8 @@ test('frontend is centered on a finance source document list', () => {
   assert.match(app, /row-generate-voucher/);
   assert.match(app, /showOperationFeedback/);
   assert.match(app, /saveRowVoucherToErp/);
+  assert.match(app, /async function generateVoucherFromLedger\(\)[\s\S]*saveRowVoucherToErp\(record\)/);
+  assert.match(app, /controls\.primaryAction\.dataset\.action[\s\S]*'push'/);
   assert.match(app, /api\.pushErp/);
   assert.match(app, /api\.getProcess/);
   assert.match(app, /保存成功/);

@@ -159,6 +159,9 @@ export function markPushedToErp(sourceId, erpResult) {
   if (!record) {
     throw new Error(`prepared record is missing for ${sourceId}`);
   }
+  if (!isRealKingdeeSaveResult(erpResult)) {
+    throw new Error('real Kingdee save result is required before marking ERP push success');
+  }
   if (record.processStage === 'ERP_PUSHED' || record.erpFid || record.erpNumber) {
     throw new Error(`voucher for ${sourceId} already pushed to ERP`);
   }
@@ -217,13 +220,14 @@ export function listOperationLogs(limit = 50) {
 export function getDashboardSummary() {
   const state = loadState();
   const vouchers = Object.values(state.voucherRecords);
+  const realPushedVouchers = vouchers.filter(isRealPushedRecord);
   const synced = Object.values(state.syncedDocuments);
   const batches = Object.values(state.syncBatches).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   return {
     counts: {
       syncedDocuments: synced.length,
       preparedVouchers: vouchers.filter((item) => item.processStage === 'PREPARED').length,
-      pushedVouchers: vouchers.filter((item) => item.processStage === 'ERP_PUSHED').length,
+      pushedVouchers: realPushedVouchers.length,
       failedBatches: batches.filter((item) => item.status === 'FAILED').length,
       operationLogs: state.operationLogs.length
     },
@@ -278,6 +282,27 @@ function defaultState() {
     syncBatches: {},
     operationLogs: []
   };
+}
+
+function isRealKingdeeSaveResult(erpResult) {
+  return Boolean(
+    erpResult
+    && erpResult.mode === 'real'
+    && erpResult.simulated === false
+    && erpResult.mockReplacement === false
+    && erpResult.erpFid
+    && erpResult.erpNumber
+  );
+}
+
+function isRealPushedRecord(record) {
+  return Boolean(
+    record.processStage === 'ERP_PUSHED'
+    && record.erpMode === 'real'
+    && record.simulatedErp === false
+    && record.erpFid
+    && record.erpNumber
+  );
 }
 
 function nextId(prefix) {

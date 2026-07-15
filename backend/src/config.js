@@ -28,7 +28,7 @@ export function loadLocalEnv() {
     }
     const key = trimmed.slice(0, index).trim();
     const value = trimmed.slice(index + 1).trim();
-    if (!process.env[key]) {
+    if (!Object.hasOwn(process.env, key)) {
       process.env[key] = value;
     }
   }
@@ -46,9 +46,17 @@ export function getAppConfig() {
     },
     kingdee: {
       mode: readMode('KINGDEE_MODE'),
-      saveUrl: process.env.KINGDEE_SAVE_URL || '',
-      authHeaderName: process.env.KINGDEE_AUTH_HEADER_NAME || '',
-      authHeaderValue: process.env.KINGDEE_AUTH_HEADER_VALUE || ''
+      baseUrl: process.env.KINGDEE_BASE_URL || '',
+      acctId: process.env.KINGDEE_ACCT_ID || '',
+      username: process.env.KINGDEE_USERNAME || '',
+      password: process.env.KINGDEE_PASSWORD || '',
+      lcid: process.env.KINGDEE_LCID || '2052',
+      authPath: process.env.KINGDEE_AUTH_PATH
+        || 'Kingdee.BOS.WebApi.ServicesStub.AuthService.ValidateUser.common.kdsvc',
+      savePath: process.env.KINGDEE_SAVE_PATH
+        || 'Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.Save.common.kdsvc',
+      viewPath: process.env.KINGDEE_VIEW_PATH
+        || 'Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.View.common.kdsvc'
     },
     scheduler: {
       enabled: readBoolean('SCHEDULER_ENABLED', false),
@@ -87,7 +95,13 @@ export function validateKingdeeConfig() {
     return;
   }
   const missing = [];
-  if (!config.saveUrl) missing.push('KINGDEE_SAVE_URL');
+  if (!config.baseUrl) missing.push('KINGDEE_BASE_URL');
+  if (!config.acctId) missing.push('KINGDEE_ACCT_ID');
+  if (!config.username) missing.push('KINGDEE_USERNAME');
+  if (!config.password) missing.push('KINGDEE_PASSWORD');
+  if (!config.authPath) missing.push('KINGDEE_AUTH_PATH');
+  if (!config.savePath) missing.push('KINGDEE_SAVE_PATH');
+  if (!config.viewPath) missing.push('KINGDEE_VIEW_PATH');
   if (missing.length > 0) {
     throw missingConfigError('Kingdee', missing);
   }
@@ -105,8 +119,13 @@ export function getSanitizedConfigSummary() {
     },
     kingdee: {
       mode: config.kingdee.mode,
-      saveUrlConfigured: Boolean(config.kingdee.saveUrl),
-      authHeaderConfigured: Boolean(config.kingdee.authHeaderName && config.kingdee.authHeaderValue)
+      baseUrlConfigured: Boolean(config.kingdee.baseUrl),
+      acctIdConfigured: Boolean(config.kingdee.acctId),
+      usernameConfigured: Boolean(config.kingdee.username),
+      passwordConfigured: Boolean(config.kingdee.password),
+      authPathConfigured: Boolean(config.kingdee.authPath),
+      savePathConfigured: Boolean(config.kingdee.savePath),
+      viewPathConfigured: Boolean(config.kingdee.viewPath)
     },
     scheduler: {
       enabled: config.scheduler.enabled,

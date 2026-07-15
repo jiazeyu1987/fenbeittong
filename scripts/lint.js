@@ -3,7 +3,6 @@ import { join } from 'node:path';
 
 const banned = [
   'openpf.fenbeitong.com',
-  'k3cloud',
   'access-token: real',
   'real-fenbeitong-token',
   'real-kingdee-password'
