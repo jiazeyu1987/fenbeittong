@@ -41,7 +41,9 @@ export async function saveKingdeeVoucher(payload) {
     mockReason: '',
     erpFid: identifiers.erpFid,
     erpNumber: identifiers.erpNumber,
-    documentStatus: viewBody?.Result?.Result?.FDocumentStatus || 'Z',
+    documentStatus: viewBody?.Result?.Result?.FDocumentStatus
+      || viewBody?.Result?.Result?.DocumentStatus
+      || 'Z',
     rawResponse: { save: body, view: viewBody }
   };
 }

@@ -95,7 +95,7 @@ test('real Kingdee save logs in, posts GL_VOUCHER Save as JSON wrapper, and veri
           Result: {
             FID: 100033,
             FBillNo: '23',
-            FDocumentStatus: 'Z'
+            DocumentStatus: 'A'
           }
         }
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -109,7 +109,7 @@ test('real Kingdee save logs in, posts GL_VOUCHER Save as JSON wrapper, and veri
     assert.equal(result.mockReplacement, false);
     assert.equal(result.erpFid, '100033');
     assert.equal(result.erpNumber, '23');
-    assert.equal(result.documentStatus, 'Z');
+    assert.equal(result.documentStatus, 'A');
     assert.equal(calls.length, 3);
     assert.match(calls[0].url, /http:\/\/172\.30\.30\.8\/K3Cloud\/Kingdee\.BOS/);
     assert.match(calls[1].url, /http:\/\/172\.30\.30\.8\/K3Cloud\/Kingdee\.BOS/);

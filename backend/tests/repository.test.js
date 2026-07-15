@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildMockTemplate } from '../src/mock-template.js';
 import { buildVoucherPreview } from '../src/voucher-mapper.js';
@@ -15,6 +15,22 @@ import {
   savePreparedRecord,
   saveSyncedDocument
 } from '../src/repository.js';
+
+const previousAppDataDir = process.env.APP_DATA_DIR;
+
+before(() => {
+  process.env.APP_DATA_DIR = 'runtime-data/backend-repository-test';
+  resetRepository();
+});
+
+after(() => {
+  resetRepository();
+  if (previousAppDataDir === undefined) {
+    delete process.env.APP_DATA_DIR;
+  } else {
+    process.env.APP_DATA_DIR = previousAppDataDir;
+  }
+});
 
 test('prepare stores a local prepared record without ERP identifiers', () => {
   resetRepository();
