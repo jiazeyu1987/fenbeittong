@@ -19,6 +19,16 @@ export const api = {
   health: () => request('/api/health'),
   ready: () => request('/api/ready'),
   systemStatus: () => request('/api/system/status'),
+  integrationSettings: () => request('/api/integration-settings'),
+  saveIntegrationSettings: (data) => request('/api/integration-settings', {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  }),
+  listKingdeeAccounts: () => request('/api/kingdee/accounts'),
+  selectKingdeeAccount: (data) => request('/api/kingdee/account-selection', {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  }),
   schedulerStatus: () => request('/api/scheduler/status'),
   runSchedulerOnce: () => request('/api/scheduler/run-once', {
     method: 'POST',

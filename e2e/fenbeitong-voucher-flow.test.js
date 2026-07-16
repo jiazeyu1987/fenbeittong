@@ -27,6 +27,35 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
     assert.equal(statusBody.data.mode.fenbeitong, 'mock');
     assert.equal(statusBody.data.config.fenbeitong.credentialStore, 'sqlite');
     assert.equal(Object.hasOwn(statusBody.data.config.fenbeitong.tenants[0], 'appKey'), false);
+    assert.equal(statusBody.data.config.kingdee.accounts.some((account) => account.key === 'jia-zeyu'), true);
+    assert.equal(statusBody.data.config.kingdee.acctIds.some((acctId) => acctId.key === 'puhui-6977227150362f'), true);
+    assert.equal(statusBody.data.config.integrationSelection.tenantKey, 'puhui');
+
+    const settingsResponse = await fetch(`${baseUrl}/api/integration-settings`);
+    const settingsBody = await settingsResponse.json();
+    assert.equal(settingsBody.success, true);
+    assert.equal(settingsBody.data.selection.tenantKey, 'puhui');
+    assert.equal(settingsBody.data.selection.kingdeeAccountKey, 'current');
+    assert.equal(settingsBody.data.selection.kingdeeAcctIdKey, 'puhui-6977227150362f');
+    assert.equal(settingsBody.data.kingdeeAccounts.some((account) => account.key === 'jia-zeyu'), true);
+    assert.equal(settingsBody.data.kingdeeAcctIds.some((acctId) => acctId.key === 'puhui-6977227150362f'), true);
+    assert.equal(JSON.stringify(settingsBody.data).includes('test-password'), false);
+
+    const savedSettingsBody = await postJson(`${baseUrl}/api/integration-settings`, {
+      tenantKey: 'yingtai',
+      kingdeeAccountKey: 'jia-zeyu',
+      kingdeeAcctIdKey: 'puhui-6977227150362f'
+    }, 'PUT');
+    assert.equal(savedSettingsBody.success, true);
+    assert.equal(savedSettingsBody.data.selection.tenantKey, 'yingtai');
+    assert.equal(savedSettingsBody.data.selection.kingdeeAccountKey, 'jia-zeyu');
+    assert.equal(savedSettingsBody.data.selection.kingdeeAcctIdKey, 'puhui-6977227150362f');
+    const restoredSettingsBody = await postJson(`${baseUrl}/api/integration-settings`, {
+      tenantKey: 'puhui',
+      kingdeeAccountKey: 'current',
+      kingdeeAcctIdKey: 'puhui-6977227150362f'
+    }, 'PUT');
+    assert.equal(restoredSettingsBody.data.selection.tenantKey, 'puhui');
 
     const readyResponse = await fetch(`${baseUrl}/api/ready`);
     const readyBody = await readyResponse.json();
@@ -77,7 +106,9 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
       voucherDate: template.mockVoucherDate,
       year: template.mockYear,
       period: template.mockPeriod,
-      config: template
+      config: template,
+      kingdeeAccountKey: 'jia-zeyu',
+      kingdeeAcctIdKey: 'puhui-6977227150362f'
     });
     assert.equal(pushBody.data.processStage, 'ERP_PUSHED');
     assert.equal(pushBody.data.erpFid, '100033');
@@ -111,9 +142,9 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
   }
 });
 
-async function postJson(url, body) {
+async function postJson(url, body, method = 'POST') {
   const response = await fetch(url, {
-    method: 'POST',
+    method,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   });
@@ -127,16 +158,28 @@ function forceMockExternalEnv() {
     KINGDEE_MODE: process.env.KINGDEE_MODE,
     KINGDEE_BASE_URL: process.env.KINGDEE_BASE_URL,
     KINGDEE_ACCT_ID: process.env.KINGDEE_ACCT_ID,
+    KINGDEE_ACCT_ID_KEY: process.env.KINGDEE_ACCT_ID_KEY,
+    KINGDEE_ACCT_ID_LABEL: process.env.KINGDEE_ACCT_ID_LABEL,
     KINGDEE_USERNAME: process.env.KINGDEE_USERNAME,
-    KINGDEE_PASSWORD: process.env.KINGDEE_PASSWORD
+    KINGDEE_PASSWORD: process.env.KINGDEE_PASSWORD,
+    KINGDEE_ACCOUNT_JIAZEYU_ENABLED: process.env.KINGDEE_ACCOUNT_JIAZEYU_ENABLED,
+    KINGDEE_ACCOUNT_JIAZEYU_ACCT_ID: process.env.KINGDEE_ACCOUNT_JIAZEYU_ACCT_ID,
+    KINGDEE_ACCOUNT_JIAZEYU_USERNAME: process.env.KINGDEE_ACCOUNT_JIAZEYU_USERNAME,
+    KINGDEE_ACCOUNT_JIAZEYU_PASSWORD: process.env.KINGDEE_ACCOUNT_JIAZEYU_PASSWORD
   };
   process.env.APP_DATA_DIR = 'runtime-data/e2e-flow';
   process.env.FENBEITONG_MODE = 'mock';
   process.env.KINGDEE_MODE = 'real';
   process.env.KINGDEE_BASE_URL = 'http://172.30.30.8';
-  process.env.KINGDEE_ACCT_ID = 'test-acct';
+  process.env.KINGDEE_ACCT_ID = '6977227150362f';
+  process.env.KINGDEE_ACCT_ID_KEY = 'puhui-6977227150362f';
+  process.env.KINGDEE_ACCT_ID_LABEL = 'Puhui verified acctID';
   process.env.KINGDEE_USERNAME = 'test-user';
   process.env.KINGDEE_PASSWORD = 'test-password';
+  process.env.KINGDEE_ACCOUNT_JIAZEYU_ENABLED = 'true';
+  process.env.KINGDEE_ACCOUNT_JIAZEYU_ACCT_ID = '6977227150362f';
+  process.env.KINGDEE_ACCOUNT_JIAZEYU_USERNAME = 'jia-user';
+  process.env.KINGDEE_ACCOUNT_JIAZEYU_PASSWORD = 'jia-password';
   return () => {
     for (const [name, value] of Object.entries(previous)) {
       if (value === undefined) {
@@ -153,6 +196,8 @@ function stubKingdeeFetch() {
   globalThis.fetch = async (url, options = {}) => {
     const text = String(url);
     if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.AuthService.ValidateUser.common.kdsvc')) {
+      assert.match(String(options.body), /acctID=6977227150362f/);
+      assert.match(String(options.body), /username=jia-user/);
       return new Response(JSON.stringify({ LoginResultType: 1 }), {
         status: 200,
         headers: { 'Set-Cookie': 'kdservice-sessionid=e2e123; Path=/K3Cloud' }
@@ -162,7 +207,9 @@ function stubKingdeeFetch() {
       assert.equal(options.headers.Cookie, 'kdservice-sessionid=e2e123');
       const body = JSON.parse(String(options.body));
       assert.equal(body.formid, 'GL_VOUCHER');
-      assert.ok(JSON.parse(body.data).Model.FEntity.length >= 2);
+      const payload = JSON.parse(body.data);
+      assert.equal(payload.Model.ACCBOOKORGID.Number, '886');
+      assert.ok(payload.Model.FEntity.length >= 2);
       return new Response(JSON.stringify({
         Result: {
           Id: '100033',
@@ -178,7 +225,14 @@ function stubKingdeeFetch() {
       return new Response(JSON.stringify({
         Result: {
           ResponseStatus: { IsSuccess: true, Errors: [] },
-          Result: { FID: 100033, FBillNo: '23', FDocumentStatus: 'Z' }
+          Result: {
+            FID: 100033,
+            FBillNo: '23',
+            AccountBookID: { Number: '007' },
+            ACCBOOKORGID: { Number: '886' },
+            VOUCHERGROUPID: { Number: 'PZZ9' },
+            FDocumentStatus: 'Z'
+          }
         }
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }

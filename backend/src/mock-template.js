@@ -12,10 +12,10 @@ export function buildMockTemplate() {
   );
 
   return {
-    accountBookNumber: '908',
+    accountBookNumber: '007',
     voucherGroupNumber: 'PZZ9',
     voucherGroupNo: '',
-    templateErpFid: '780047',
+    templateErpFid: '111814',
     currencyNumbers: { CNY: 'PRE001' },
     categoryAccountNumbers: {
       TRAVEL: '6111',
@@ -51,7 +51,7 @@ export function buildMockTemplate() {
 
 export function loadMockKingdeeTemplateModel() {
   return JSON.parse(readFileSync(
-    resolve(root, 'mock-data/kingdee-voucher-template-908-pzz9.json'),
+    resolve(root, 'mock-data/kingdee-voucher-template-007-pzz9.json'),
     'utf8'
   ));
 }

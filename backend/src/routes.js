@@ -7,11 +7,16 @@ import { listFenbeitongTenants, saveFenbeitongTenantCredentials } from './tenant
 import {
   findPreparedRecord,
   getConfig,
+  getKingdeeAccountSelection,
+  getIntegrationSettings,
   listOperationLogs,
   listProcessRecords,
   listSyncedDocuments,
-  saveConfig
+  saveConfig,
+  saveIntegrationSelection,
+  saveKingdeeAccountSelection
 } from './repository.js';
+import { getAppConfig, resolveKingdeeAccount, sanitizeKingdeeAccount } from './config.js';
 
 export async function handleApi(request, response) {
   if (request.method === 'OPTIONS') {
@@ -32,6 +37,33 @@ export async function handleApi(request, response) {
     }
     if (request.method === 'GET' && url.pathname === '/api/system/config-summary') {
       return sendJson(response, 200, { success: true, data: getSystemStatus().config });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/kingdee/accounts') {
+      const config = getAppConfig().kingdee;
+      const selectedAccount = resolveKingdeeAccount(config, getKingdeeAccountSelection());
+      return sendJson(response, 200, {
+        success: true,
+        data: {
+          selectedAccountKey: selectedAccount.key,
+          selectedAccount: sanitizeKingdeeAccount(selectedAccount),
+          accounts: config.accounts.map(sanitizeKingdeeAccount)
+        }
+      });
+    }
+    if (request.method === 'PUT' && url.pathname === '/api/kingdee/account-selection') {
+      return sendJson(response, 200, {
+        success: true,
+        data: saveKingdeeAccountSelection((await readJson(request)).accountKey)
+      });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/integration-settings') {
+      return sendJson(response, 200, { success: true, data: getIntegrationSettings() });
+    }
+    if (request.method === 'PUT' && url.pathname === '/api/integration-settings') {
+      return sendJson(response, 200, {
+        success: true,
+        data: saveIntegrationSelection(await readJson(request))
+      });
     }
     if (request.method === 'GET' && url.pathname === '/api/scheduler/status') {
       return sendJson(response, 200, { success: true, data: getSchedulerStatus() });

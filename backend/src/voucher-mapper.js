@@ -353,8 +353,8 @@ function resolveKingdeeTemplateModel(config) {
     return structuredClone(config.erpTemplateModel);
   }
   if (
-    config.templateErpFid === '780047'
-    && config.accountBookNumber === '908'
+    config.templateErpFid === '111814'
+    && config.accountBookNumber === '007'
     && config.voucherGroupNumber === 'PZZ9'
   ) {
     return loadMockKingdeeTemplateModel();

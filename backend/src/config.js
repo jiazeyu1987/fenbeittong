@@ -5,6 +5,8 @@ import { missingConfigError } from './errors.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
+const DEFAULT_KINGDEE_ACCOUNT_KEY = 'current';
+export const DEFAULT_KINGDEE_ACCT_ID_KEY = 'puhui-6977227150362f';
 let envLoaded = false;
 
 export function loadLocalEnv() {
@@ -36,6 +38,7 @@ export function loadLocalEnv() {
 
 export function getAppConfig() {
   loadLocalEnv();
+  const kingdee = buildKingdeeConfig();
   return {
     appDataDir: process.env.APP_DATA_DIR || process.env.DATA_DIR || 'runtime-data',
     fenbeitong: {
@@ -44,20 +47,7 @@ export function getAppConfig() {
       credentialStore: 'sqlite',
       listPayloadOverrides: buildFenbeitongListPayload()
     },
-    kingdee: {
-      mode: readMode('KINGDEE_MODE'),
-      baseUrl: process.env.KINGDEE_BASE_URL || '',
-      acctId: process.env.KINGDEE_ACCT_ID || '',
-      username: process.env.KINGDEE_USERNAME || '',
-      password: process.env.KINGDEE_PASSWORD || '',
-      lcid: process.env.KINGDEE_LCID || '2052',
-      authPath: process.env.KINGDEE_AUTH_PATH
-        || 'Kingdee.BOS.WebApi.ServicesStub.AuthService.ValidateUser.common.kdsvc',
-      savePath: process.env.KINGDEE_SAVE_PATH
-        || 'Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.Save.common.kdsvc',
-      viewPath: process.env.KINGDEE_VIEW_PATH
-        || 'Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.View.common.kdsvc'
-    },
+    kingdee,
     scheduler: {
       enabled: readBoolean('SCHEDULER_ENABLED', false),
       intervalSeconds: readPositiveInteger('SCHEDULER_INTERVAL_SECONDS', 3600),
@@ -89,22 +79,78 @@ export function validateFenbeitongConfig(tenant) {
   }
 }
 
-export function validateKingdeeConfig() {
-  const config = getAppConfig().kingdee;
+export function validateKingdeeConfig(accountKey, acctIdKey) {
+  const config = getEffectiveKingdeeConfig(accountKey, acctIdKey);
   if (config.mode === 'mock') {
     return;
   }
   const missing = [];
   if (!config.baseUrl) missing.push('KINGDEE_BASE_URL');
-  if (!config.acctId) missing.push('KINGDEE_ACCT_ID');
-  if (!config.username) missing.push('KINGDEE_USERNAME');
-  if (!config.password) missing.push('KINGDEE_PASSWORD');
+  if (!config.acctId) missing.push('KINGDEE_ACCOUNT.acctId');
+  if (!config.username) missing.push('KINGDEE_ACCOUNT.username');
+  if (!config.password) missing.push('KINGDEE_ACCOUNT.password');
   if (!config.authPath) missing.push('KINGDEE_AUTH_PATH');
   if (!config.savePath) missing.push('KINGDEE_SAVE_PATH');
   if (!config.viewPath) missing.push('KINGDEE_VIEW_PATH');
   if (missing.length > 0) {
     throw missingConfigError('Kingdee', missing);
   }
+}
+
+export function getEffectiveKingdeeConfig(accountKey, acctIdKey) {
+  const config = getAppConfig().kingdee;
+  if (config.mode === 'mock') {
+    return config;
+  }
+  const selectedAccount = resolveKingdeeAccount(config, accountKey || config.selectedAccountKey);
+  const selectedAcctId = resolveKingdeeAcctId(config, acctIdKey || config.selectedAcctIdKey);
+  return {
+    ...config,
+    accountKey: selectedAccount.key,
+    accountLabel: selectedAccount.label,
+    acctIdKey: selectedAcctId.key,
+    acctIdLabel: selectedAcctId.label,
+    acctId: selectedAcctId.acctId,
+    username: selectedAccount.username,
+    password: selectedAccount.password
+  };
+}
+
+export function resolveKingdeeAccount(config, accountKey) {
+  const key = (accountKey || config.selectedAccountKey || DEFAULT_KINGDEE_ACCOUNT_KEY).trim();
+  const account = config.accounts.find((item) => item.key === key);
+  if (!account) {
+    throw new Error(`Kingdee ERP account ${key} is not configured`);
+  }
+  return account;
+}
+
+export function resolveKingdeeAcctId(config, acctIdKey) {
+  const key = (acctIdKey || config.selectedAcctIdKey || DEFAULT_KINGDEE_ACCT_ID_KEY).trim();
+  const acctId = config.acctIds.find((item) => item.key === key);
+  if (!acctId) {
+    throw new Error(`Kingdee acctID ${key} is not configured`);
+  }
+  return acctId;
+}
+
+export function sanitizeKingdeeAccount(account) {
+  return {
+    key: account.key,
+    label: account.label,
+    usernameConfigured: Boolean(account.username),
+    passwordConfigured: Boolean(account.password),
+    configured: Boolean(account.username && account.password)
+  };
+}
+
+export function sanitizeKingdeeAcctId(acctId) {
+  return {
+    key: acctId.key,
+    label: acctId.label,
+    acctIdConfigured: Boolean(acctId.acctId),
+    configured: Boolean(acctId.acctId)
+  };
 }
 
 export function getSanitizedConfigSummary() {
@@ -119,6 +165,10 @@ export function getSanitizedConfigSummary() {
     },
     kingdee: {
       mode: config.kingdee.mode,
+      selectedAccountKey: config.kingdee.selectedAccountKey,
+      selectedAcctIdKey: config.kingdee.selectedAcctIdKey,
+      accounts: config.kingdee.accounts.map(sanitizeKingdeeAccount),
+      acctIds: config.kingdee.acctIds.map(sanitizeKingdeeAcctId),
       baseUrlConfigured: Boolean(config.kingdee.baseUrl),
       acctIdConfigured: Boolean(config.kingdee.acctId),
       usernameConfigured: Boolean(config.kingdee.username),
@@ -137,6 +187,28 @@ export function getSanitizedConfigSummary() {
 
 export function getRootDir() {
   return root;
+}
+
+function buildKingdeeConfig() {
+  const kingdee = {
+    mode: readMode('KINGDEE_MODE'),
+    baseUrl: process.env.KINGDEE_BASE_URL || '',
+    acctId: process.env.KINGDEE_ACCT_ID || '',
+    username: process.env.KINGDEE_USERNAME || '',
+    password: process.env.KINGDEE_PASSWORD || '',
+    lcid: process.env.KINGDEE_LCID || '2052',
+    authPath: process.env.KINGDEE_AUTH_PATH
+      || 'Kingdee.BOS.WebApi.ServicesStub.AuthService.ValidateUser.common.kdsvc',
+    savePath: process.env.KINGDEE_SAVE_PATH
+      || 'Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.Save.common.kdsvc',
+    viewPath: process.env.KINGDEE_VIEW_PATH
+      || 'Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.View.common.kdsvc'
+  };
+  kingdee.selectedAccountKey = process.env.KINGDEE_ACCOUNT_KEY || DEFAULT_KINGDEE_ACCOUNT_KEY;
+  kingdee.selectedAcctIdKey = process.env.KINGDEE_ACCT_ID_KEY || DEFAULT_KINGDEE_ACCT_ID_KEY;
+  kingdee.accounts = buildKingdeeAccounts(kingdee);
+  kingdee.acctIds = buildKingdeeAcctIds(kingdee);
+  return kingdee;
 }
 
 function buildFenbeitongListPayload() {
@@ -158,6 +230,62 @@ function buildFenbeitongListPayload() {
     payload.payment_state = paymentState;
   }
   return payload;
+}
+
+function buildKingdeeAccounts(kingdee) {
+  const accounts = [
+    {
+      key: DEFAULT_KINGDEE_ACCOUNT_KEY,
+      label: process.env.KINGDEE_ACCOUNT_CURRENT_LABEL || 'int',
+      username: kingdee.username,
+      password: kingdee.password
+    }
+  ];
+  const jiaZeyuEnabled = readOptionalBoolean('KINGDEE_ACCOUNT_JIAZEYU_ENABLED')
+    || Boolean(
+      process.env.KINGDEE_ACCOUNT_JIAZEYU_ACCT_ID
+      || process.env.KINGDEE_ACCOUNT_JIAZEYU_USERNAME
+      || process.env.KINGDEE_ACCOUNT_JIAZEYU_PASSWORD
+    );
+  if (jiaZeyuEnabled) {
+    accounts.push({
+      key: 'jia-zeyu',
+      label: process.env.KINGDEE_ACCOUNT_JIAZEYU_LABEL || '\u8d3e\u6cfd\u5b87',
+      username: process.env.KINGDEE_ACCOUNT_JIAZEYU_USERNAME || '',
+      password: process.env.KINGDEE_ACCOUNT_JIAZEYU_PASSWORD || ''
+    });
+  }
+  return accounts;
+}
+
+function buildKingdeeAcctIds(kingdee) {
+  const acctIds = [
+    {
+      key: process.env.KINGDEE_ACCT_ID_KEY || DEFAULT_KINGDEE_ACCT_ID_KEY,
+      label: process.env.KINGDEE_ACCT_ID_LABEL || DEFAULT_KINGDEE_ACCT_ID_KEY,
+      acctId: kingdee.acctId
+    }
+  ];
+  const legacyJiaAcctId = process.env.KINGDEE_ACCOUNT_JIAZEYU_ACCT_ID || '';
+  if (legacyJiaAcctId && legacyJiaAcctId !== kingdee.acctId) {
+    acctIds.push({
+      key: process.env.KINGDEE_ACCOUNT_JIAZEYU_ACCT_ID_KEY || `jia-zeyu-${legacyJiaAcctId}`,
+      label: process.env.KINGDEE_ACCOUNT_JIAZEYU_ACCT_ID_LABEL || `Jia Zeyu ${legacyJiaAcctId}`,
+      acctId: legacyJiaAcctId
+    });
+  }
+  return uniqueByKey(acctIds);
+}
+
+function uniqueByKey(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    if (seen.has(item.key)) {
+      return false;
+    }
+    seen.add(item.key);
+    return true;
+  });
 }
 
 function readOptionalInteger(name) {
@@ -195,6 +323,17 @@ function readBoolean(name, defaultValue) {
   const raw = process.env[name];
   if (raw === undefined || raw === '') {
     return defaultValue;
+  }
+  const value = raw.trim().toLowerCase();
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new Error(`${name} must be true or false`);
+}
+
+function readOptionalBoolean(name) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') {
+    return false;
   }
   const value = raw.trim().toLowerCase();
   if (value === 'true') return true;

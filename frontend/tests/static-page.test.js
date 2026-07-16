@@ -8,6 +8,10 @@ test('frontend page exposes expected workflow controls', () => {
     'financeWorkbenchHeader',
     'ledgerToolbar',
     'companySelect',
+    'kingdeeAccountSelect',
+    'kingdeeAcctIdSelect',
+    'kingdeeAccountStatusText',
+    'kingdeeAcctIdStatusText',
     'tenantStatusText',
     'searchFieldSelect',
     'matchModeSelect',
@@ -76,7 +80,14 @@ test('frontend is centered on a finance source document list', () => {
   assert.match(html, /&#x540C;&#x6B65;&#x5206;&#x8D1D;&#x901A;/);
   assert.match(html, /璞慧/);
   assert.match(html, /瑛泰/);
+  assert.match(html, /ERP账号/);
+  assert.match(html, /acctID/);
   assert.match(app, /selectedTenantKey/);
+  assert.match(app, /selectedKingdeeAccountKey/);
+  assert.match(app, /selectedKingdeeAcctIdKey/);
+  assert.match(app, /kingdeeAccountKey: state\.selectedKingdeeAccountKey/);
+  assert.match(app, /kingdeeAcctIdKey: state\.selectedKingdeeAcctIdKey/);
+  assert.match(app, /api\.saveIntegrationSettings/);
   assert.match(app, /接口等待开发中/);
   assert.match(app, /syncFenbeitong\(\{ tenantKey: state\.selectedTenantKey \}\)/);
   assert.match(html, /&#x751F;&#x6210;&#x51ED;&#x8BC1;/);
@@ -204,6 +215,7 @@ test('frontend api exposes formal product workflow endpoints', () => {
   const api = readFileSync('frontend/src/api.js', 'utf8');
   const contract = readFileSync('docs/api-contract.md', 'utf8');
   assert.match(api, /system\/status/);
+  assert.match(api, /integration-settings/);
   assert.match(api, /api\/ready/);
   assert.match(api, /scheduler\/status/);
   assert.match(api, /scheduler\/run-once/);

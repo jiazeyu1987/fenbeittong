@@ -18,16 +18,17 @@ import {
 
 test('mock template contains required fields and no real token', () => {
   const template = buildMockTemplate();
-  assert.equal(template.accountBookNumber, '908');
+  assert.equal(template.accountBookNumber, '007');
   assert.equal(template.voucherGroupNumber, 'PZZ9');
-  assert.equal(template.templateErpFid, '780047');
+  assert.equal(template.templateErpFid, '111814');
   assert.equal(template.categoryAccountNumbers.TRAVEL, '6111');
   assert.equal(template.categoryAccountNumbers.CI007, '6111');
   assert.equal(template.departmentDetailField, '');
   assert.equal(template.employeeDetailField, '');
   assert.equal(template.creditAccountNumber, '1001.01');
   assert.equal(template.splitDeductibleTax, false);
-  assert.equal(template.erpTemplateModel.AccountBookID.Number, '908');
+  assert.equal(template.erpTemplateModel.AccountBookID.Number, '007');
+  assert.equal(template.erpTemplateModel.ACCBOOKORGID.Number, '886');
   assert.equal(template.erpTemplateModel.VOUCHERGROUPID.Number, 'PZZ9');
   assert.equal(template.fenbeitongAccessToken, '');
   assert.match(template.mockFixedJson, /MOCK-REIMB-001/);
@@ -72,7 +73,8 @@ test('voucher payload writes only Kingdee GL_VOUCHER fields', () => {
   assert.ok(Object.hasOwn(preview.payload.Model, 'FEntity'));
   assert.equal(Object.hasOwn(preview.payload.Model, 'FAccountBookID'), false);
   assert.equal(Object.hasOwn(preview.payload.Model, 'FVOUCHERGROUPID'), false);
-  assert.equal(preview.payload.Model.AccountBookID.Number, '908');
+  assert.equal(preview.payload.Model.AccountBookID.Number, '007');
+  assert.equal(preview.payload.Model.ACCBOOKORGID.Number, '886');
   assert.equal(preview.payload.Model.VOUCHERGROUPID.Number, 'PZZ9');
   assert.equal(preview.payload.Model.FEntity[0].FEXCHANGERATETYPE.FNumber, 'HLTX01_SYS');
   assert.equal(preview.payload.Model.FEntity[0].FAMOUNTFOR, 108);
@@ -104,6 +106,15 @@ test('system status exposes mode and readiness for formal workflow', () => {
     assert.equal(status.config.fenbeitong.tenants.find((tenant) => tenant.key === 'yingtai').status, 'waiting_development');
     assert.equal(Object.hasOwn(status.config.fenbeitong.tenants[0], 'appKey'), false);
     assert.equal(Object.hasOwn(status.config.fenbeitong.tenants[0], 'accessToken'), false);
+    assert.ok(Array.isArray(status.config.kingdee.accounts));
+    assert.equal(status.config.kingdee.selectedAccountKey, 'current');
+    assert.equal(status.config.integrationSelection.tenantKey, 'puhui');
+    assert.equal(status.config.integrationSelection.kingdeeAccountKey, 'current');
+    assert.equal(status.config.integrationSelection.kingdeeAcctIdKey, 'puhui-6977227150362f');
+    assert.equal(status.config.kingdee.accounts.some((account) => account.key === 'current'), true);
+    assert.equal(status.config.kingdee.acctIds.some((acctId) => acctId.key === 'puhui-6977227150362f'), true);
+    assert.equal(status.config.kingdee.accounts.some((account) => Object.hasOwn(account, 'password')), false);
+    assert.equal(status.config.kingdee.acctIds.some((acctId) => Object.hasOwn(acctId, 'acctId')), false);
   } finally {
     restore();
   }

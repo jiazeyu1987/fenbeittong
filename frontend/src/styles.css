@@ -56,8 +56,18 @@ body {
   min-width: 86px;
 }
 
+.kingdee-account-selector {
+  width: 132px !important;
+  min-width: 132px;
+}
+
+.kingdee-acct-id-selector {
+  width: 150px !important;
+  min-width: 150px;
+}
+
 .tenant-status {
-  min-width: 104px;
+  min-width: 88px;
   color: #667085;
   font-size: 13px;
 }
@@ -116,6 +126,11 @@ body {
 }
 
 .ledger-toolbar #columnSettingsButton {
+  width: 74px;
+  min-width: 74px;
+}
+
+.ledger-toolbar #saveConfigButton {
   width: 74px;
   min-width: 74px;
 }

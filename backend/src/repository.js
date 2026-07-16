@@ -1,11 +1,26 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getAppConfig, getRootDir } from './config.js';
+import {
+  DEFAULT_KINGDEE_ACCT_ID_KEY,
+  getAppConfig,
+  getRootDir,
+  resolveKingdeeAccount,
+  resolveKingdeeAcctId,
+  sanitizeKingdeeAccount,
+  sanitizeKingdeeAcctId
+} from './config.js';
+import { listFenbeitongTenants } from './tenant-store.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
 let stateCache = null;
+const DEFAULT_INTEGRATION_SELECTION = {
+  tenantKey: 'puhui',
+  kingdeeAccountKey: 'current',
+  kingdeeAcctIdKey: DEFAULT_KINGDEE_ACCT_ID_KEY,
+  updatedAt: ''
+};
 
 export function saveConfig(nextConfig) {
   const state = loadState();
@@ -18,6 +33,75 @@ export function saveConfig(nextConfig) {
 export function getConfig() {
   const state = loadState();
   return state.config ? structuredClone(state.config) : null;
+}
+
+export function getKingdeeAccountSelection() {
+  return getIntegrationSelection().kingdeeAccountKey;
+}
+
+export function saveKingdeeAccountSelection(accountKey) {
+  const config = getAppConfig().kingdee;
+  const account = resolveKingdeeAccount(config, requiredText(accountKey, 'accountKey'));
+  const current = getIntegrationSelection();
+  saveIntegrationSelection({
+    tenantKey: current.tenantKey,
+    kingdeeAccountKey: account.key,
+    kingdeeAcctIdKey: current.kingdeeAcctIdKey
+  });
+  recordOperation('KINGDEE_ACCOUNT_SELECT', 'SUCCESS', {
+    accountKey: account.key,
+    accountLabel: account.label
+  });
+  return {
+    selectedAccountKey: account.key,
+    selectedAccount: sanitizeKingdeeAccount(account),
+    accounts: config.accounts.map(sanitizeKingdeeAccount)
+  };
+}
+
+export function getKingdeeAcctIdSelection() {
+  return getIntegrationSelection().kingdeeAcctIdKey;
+}
+
+export function getIntegrationSelection() {
+  const state = loadState();
+  return structuredClone(state.integrationSelection);
+}
+
+export function getIntegrationSettings() {
+  const config = getAppConfig().kingdee;
+  const selection = getIntegrationSelection();
+  return {
+    selection,
+    tenants: listFenbeitongTenants(),
+    kingdeeAccounts: config.accounts.map(sanitizeKingdeeAccount),
+    kingdeeAcctIds: config.acctIds.map(sanitizeKingdeeAcctId)
+  };
+}
+
+export function saveIntegrationSelection(input) {
+  const nextSelection = validateIntegrationSelection(input);
+  const state = loadState();
+  const saved = {
+    ...nextSelection,
+    updatedAt: now()
+  };
+  state.integrationSelection = saved;
+  state.kingdee = {
+    ...state.kingdee,
+    selectedAccountKey: saved.kingdeeAccountKey,
+    selectedAcctIdKey: saved.kingdeeAcctIdKey
+  };
+  persistState(state);
+  recordOperation('INTEGRATION_SELECTION_SAVE', 'SUCCESS', {
+    tenantKey: saved.tenantKey,
+    kingdeeAccountKey: saved.kingdeeAccountKey,
+    kingdeeAcctIdKey: saved.kingdeeAcctIdKey
+  });
+  return {
+    ...getIntegrationSettings(),
+    ...saved
+  };
 }
 
 export function createSyncBatch({ sourceMode, mockReplacement = false, mockReason = '', tenantKey = 'puhui' }) {
@@ -256,7 +340,7 @@ function loadState() {
     return stateCache;
   }
   try {
-    stateCache = { ...defaultState(), ...JSON.parse(readFileSync(file, 'utf8')) };
+    stateCache = normalizeState(JSON.parse(readFileSync(file, 'utf8')));
     return stateCache;
   } catch (error) {
     throw new Error(`failed to load local state: ${error.message}`);
@@ -277,11 +361,65 @@ function getStateFile() {
 function defaultState() {
   return {
     config: null,
+    integrationSelection: structuredClone(DEFAULT_INTEGRATION_SELECTION),
+    kingdee: {
+      selectedAccountKey: '',
+      selectedAcctIdKey: ''
+    },
     syncedDocuments: {},
     voucherRecords: {},
     syncBatches: {},
     operationLogs: []
   };
+}
+
+function normalizeState(rawState = {}) {
+  const state = {
+    ...defaultState(),
+    ...rawState
+  };
+  const previousKingdee = rawState.kingdee || {};
+  state.kingdee = {
+    ...defaultState().kingdee,
+    ...previousKingdee
+  };
+  state.integrationSelection = {
+    ...DEFAULT_INTEGRATION_SELECTION,
+    ...(rawState.integrationSelection || {}),
+    kingdeeAccountKey: rawState.integrationSelection?.kingdeeAccountKey
+      || previousKingdee.selectedAccountKey
+      || DEFAULT_INTEGRATION_SELECTION.kingdeeAccountKey,
+    kingdeeAcctIdKey: rawState.integrationSelection?.kingdeeAcctIdKey
+      || previousKingdee.selectedAcctIdKey
+      || DEFAULT_INTEGRATION_SELECTION.kingdeeAcctIdKey
+  };
+  state.kingdee.selectedAccountKey = state.integrationSelection.kingdeeAccountKey;
+  state.kingdee.selectedAcctIdKey = state.integrationSelection.kingdeeAcctIdKey;
+  return state;
+}
+
+function validateIntegrationSelection(input = {}) {
+  const tenantKey = requiredText(input.tenantKey, 'tenantKey');
+  const kingdeeAccountKey = requiredText(input.kingdeeAccountKey, 'kingdeeAccountKey');
+  const kingdeeAcctIdKey = requiredText(input.kingdeeAcctIdKey, 'kingdeeAcctIdKey');
+  if (!listFenbeitongTenants().some((tenant) => tenant.key === tenantKey)) {
+    throw new Error(`Fenbeitong tenant ${tenantKey} is not configured`);
+  }
+  const kingdeeConfig = getAppConfig().kingdee;
+  resolveKingdeeAccount(kingdeeConfig, kingdeeAccountKey);
+  resolveKingdeeAcctId(kingdeeConfig, kingdeeAcctIdKey);
+  return {
+    tenantKey,
+    kingdeeAccountKey,
+    kingdeeAcctIdKey
+  };
+}
+
+function requiredText(value, field) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`${field} is required`);
+  }
+  return value.trim();
 }
 
 function isRealKingdeeSaveResult(erpResult) {

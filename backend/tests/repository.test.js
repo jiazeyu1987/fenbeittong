@@ -6,6 +6,10 @@ import {
   findPreparedRecord,
   findSyncedDocument,
   clearStateCacheForTest,
+  getIntegrationSelection,
+  getIntegrationSettings,
+  getKingdeeAccountSelection,
+  getKingdeeAcctIdSelection,
   getDashboardSummary,
   listOperationLogs,
   listProcessRecords,
@@ -13,13 +17,36 @@ import {
   recordOperation,
   resetRepository,
   savePreparedRecord,
+  saveIntegrationSelection,
   saveSyncedDocument
 } from '../src/repository.js';
 
 const previousAppDataDir = process.env.APP_DATA_DIR;
+const previousKingdeeEnv = {
+  KINGDEE_ACCT_ID: process.env.KINGDEE_ACCT_ID,
+  KINGDEE_ACCT_ID_KEY: process.env.KINGDEE_ACCT_ID_KEY,
+  KINGDEE_ACCT_ID_LABEL: process.env.KINGDEE_ACCT_ID_LABEL,
+  KINGDEE_USERNAME: process.env.KINGDEE_USERNAME,
+  KINGDEE_PASSWORD: process.env.KINGDEE_PASSWORD,
+  KINGDEE_ACCOUNT_CURRENT_LABEL: process.env.KINGDEE_ACCOUNT_CURRENT_LABEL,
+  KINGDEE_ACCOUNT_JIAZEYU_ENABLED: process.env.KINGDEE_ACCOUNT_JIAZEYU_ENABLED,
+  KINGDEE_ACCOUNT_JIAZEYU_LABEL: process.env.KINGDEE_ACCOUNT_JIAZEYU_LABEL,
+  KINGDEE_ACCOUNT_JIAZEYU_USERNAME: process.env.KINGDEE_ACCOUNT_JIAZEYU_USERNAME,
+  KINGDEE_ACCOUNT_JIAZEYU_PASSWORD: process.env.KINGDEE_ACCOUNT_JIAZEYU_PASSWORD
+};
 
 before(() => {
   process.env.APP_DATA_DIR = 'runtime-data/backend-repository-test';
+  process.env.KINGDEE_ACCT_ID = '6977227150362f';
+  process.env.KINGDEE_ACCT_ID_KEY = 'puhui-6977227150362f';
+  process.env.KINGDEE_ACCT_ID_LABEL = 'Puhui 6977227150362f';
+  process.env.KINGDEE_USERNAME = 'int-user';
+  process.env.KINGDEE_PASSWORD = 'test-password';
+  process.env.KINGDEE_ACCOUNT_CURRENT_LABEL = 'int';
+  process.env.KINGDEE_ACCOUNT_JIAZEYU_ENABLED = 'true';
+  process.env.KINGDEE_ACCOUNT_JIAZEYU_LABEL = 'Jia Zeyu';
+  process.env.KINGDEE_ACCOUNT_JIAZEYU_USERNAME = 'jia-user';
+  process.env.KINGDEE_ACCOUNT_JIAZEYU_PASSWORD = 'test-password';
   resetRepository();
 });
 
@@ -29,6 +56,13 @@ after(() => {
     delete process.env.APP_DATA_DIR;
   } else {
     process.env.APP_DATA_DIR = previousAppDataDir;
+  }
+  for (const [name, value] of Object.entries(previousKingdeeEnv)) {
+    if (value === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = value;
+    }
   }
 });
 
@@ -189,4 +223,68 @@ test('operation logs redact secret-like detail fields', () => {
   assert.equal(log.detail.accessToken, '[REDACTED]');
   assert.equal(log.detail.nested.password, '[REDACTED]');
   assert.equal(log.detail.safeField, 'visible');
+});
+
+test('integration selections persist tenant, ERP account, and acctID independently', () => {
+  resetRepository();
+
+  const saved = saveIntegrationSelection({
+    tenantKey: 'yingtai',
+    kingdeeAccountKey: 'jia-zeyu',
+    kingdeeAcctIdKey: 'puhui-6977227150362f'
+  });
+  clearStateCacheForTest();
+
+  assert.deepEqual(getIntegrationSelection(), {
+    tenantKey: 'yingtai',
+    kingdeeAccountKey: 'jia-zeyu',
+    kingdeeAcctIdKey: 'puhui-6977227150362f',
+    updatedAt: saved.updatedAt
+  });
+  assert.equal(getKingdeeAccountSelection(), 'jia-zeyu');
+  assert.equal(getKingdeeAcctIdSelection(), 'puhui-6977227150362f');
+
+  const settings = getIntegrationSettings();
+  assert.equal(settings.selection.tenantKey, 'yingtai');
+  assert.equal(settings.selection.kingdeeAccountKey, 'jia-zeyu');
+  assert.equal(settings.selection.kingdeeAcctIdKey, 'puhui-6977227150362f');
+  assert.equal(settings.tenants.some((tenant) => tenant.key === 'puhui'), true);
+  assert.equal(settings.kingdeeAccounts.some((account) => account.key === 'jia-zeyu'), true);
+  assert.equal(settings.kingdeeAcctIds.some((acctId) => acctId.key === 'puhui-6977227150362f'), true);
+  assert.equal(JSON.stringify(settings).includes('test-password'), false);
+});
+
+test('invalid integration selection is rejected without modifying previous settings', () => {
+  resetRepository();
+  const before = getIntegrationSelection();
+
+  assert.throws(
+    () => saveIntegrationSelection({
+      tenantKey: 'missing-tenant',
+      kingdeeAccountKey: 'current',
+      kingdeeAcctIdKey: 'puhui-6977227150362f'
+    }),
+    /Fenbeitong tenant missing-tenant is not configured/
+  );
+  assert.deepEqual(getIntegrationSelection(), before);
+
+  assert.throws(
+    () => saveIntegrationSelection({
+      tenantKey: 'puhui',
+      kingdeeAccountKey: 'missing-account',
+      kingdeeAcctIdKey: 'puhui-6977227150362f'
+    }),
+    /Kingdee ERP account missing-account is not configured/
+  );
+  assert.deepEqual(getIntegrationSelection(), before);
+
+  assert.throws(
+    () => saveIntegrationSelection({
+      tenantKey: 'puhui',
+      kingdeeAccountKey: 'current',
+      kingdeeAcctIdKey: 'missing-acct-id'
+    }),
+    /Kingdee acctID missing-acct-id is not configured/
+  );
+  assert.deepEqual(getIntegrationSelection(), before);
 });

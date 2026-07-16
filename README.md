@@ -42,7 +42,8 @@ Copy `.env.example` to `.env` when local mode, default tenant, scheduler, or Kin
 - `FENBEITONG_TENANT_KEY=puhui`: defaults the Fenbeitong tenant to Puhui. The frontend also shows `璞慧` and `瑛泰`; `瑛泰` is intentionally blocked with `接口等待开发中` until credentials and interface rules are supplied.
 - Optional list filter overrides remain available through `FENBEITONG_REIMBURSEMENT_APPLY_STATE`, `FENBEITONG_REIMBURSEMENT_PAYMENT_STATE`, `FENBEITONG_REIMBURSEMENT_PAGE_INDEX`, and `FENBEITONG_REIMBURSEMENT_PAGE_SIZE`.
 - `KINGDEE_MODE=mock`: blocks ERP save; it is not allowed to return a fake saved voucher.
-- `KINGDEE_MODE=real`: logs in to K3Cloud with `KINGDEE_BASE_URL`, `KINGDEE_ACCT_ID`, `KINGDEE_USERNAME`, `KINGDEE_PASSWORD`, and `KINGDEE_LCID`, then posts `formid=GL_VOUCHER` and `data=<payload>` to the configured Save service with the returned session cookie. Secrets stay in local `.env` and must not be committed.
+- `KINGDEE_MODE=real`: logs in to K3Cloud with `KINGDEE_BASE_URL`, `KINGDEE_ACCT_ID`, `KINGDEE_USERNAME`, `KINGDEE_PASSWORD`, and `KINGDEE_LCID`, then posts `formid=GL_VOUCHER` and `data=<payload>` to the configured Save service with the returned session cookie. The verified working target account set is `KINGDEE_ACCT_ID=6977227150362f`; the voucher template targets accounting organization `886` and voucher group `PZZ9`. Secrets stay in local `.env` and must not be committed.
+- Optional ERP login accounts are configured with `KINGDEE_ACCOUNT_*` variables. The frontend ERP account dropdown switches between the current account and the Jia Zeyu account; the backend saves only the selected account key and never returns passwords.
 
 Fenbeitong tenant credentials are written through `PUT /api/fenbeitong-voucher/tenants/:tenantKey`. Example payload:
 

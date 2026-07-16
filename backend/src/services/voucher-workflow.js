@@ -4,8 +4,10 @@ import { getAppConfig } from '../config.js';
 import { buildVoucherPreview } from '../voucher-mapper.js';
 import {
   createSyncBatch,
+  findPreparedRecord,
   findSyncedDocument,
   finishSyncBatch,
+  getIntegrationSelection,
   recordOperation,
   savePreparedRecord,
   saveSyncedDocument,
@@ -13,12 +15,13 @@ import {
 } from '../repository.js';
 
 export async function syncFenbeitongDocuments(options = {}) {
+  const tenantKey = options.tenantKey || getIntegrationSelection().tenantKey;
   const batch = createSyncBatch({
     sourceMode: getAppConfig().fenbeitong.mode,
-    tenantKey: options.tenantKey || getAppConfig().fenbeitong.defaultTenantKey
+    tenantKey
   });
   try {
-    const result = await pullFenbeitongReimbursements({ tenantKey: options.tenantKey });
+    const result = await pullFenbeitongReimbursements({ tenantKey });
     const records = result.documents.map((document) => saveSyncedDocument(document, batch.batchId, {
       sourceMode: result.mode,
       mockReplacement: result.mockReplacement,
@@ -61,9 +64,16 @@ export function prepareVoucher(input) {
 
 export async function pushVoucherToErp(input) {
   const sourceId = requiredText(input.sourceId, 'sourceId');
+  const existingRecord = findPreparedRecord(sourceId);
+  if (existingRecord?.processStage === 'ERP_PUSHED' || existingRecord?.erpFid || existingRecord?.erpNumber) {
+    throw new Error(`voucher for ${sourceId} already pushed to ERP`);
+  }
   const preview = previewVoucher(input);
   savePreparedRecord(preview);
-  const erpResult = await saveKingdeeVoucher(preview.payload);
+  const erpResult = await saveKingdeeVoucher(preview.payload, {
+    accountKey: input.kingdeeAccountKey,
+    acctIdKey: input.kingdeeAcctIdKey
+  });
   return markPushedToErp(sourceId, erpResult);
 }
 

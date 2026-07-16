@@ -49,6 +49,9 @@ test('finance toolbar controls each produce observable E2E effects', async () =>
   try {
     await page.goto('http://127.0.0.1:5173');
     await page.waitForSelector('#syncFenbeitongButton');
+    await page.waitForSelector('#kingdeeAccountSelect');
+    assert.equal(await page.locator('#kingdeeAccountSelect option').count(), 2);
+    await page.selectOption('#kingdeeAccountSelect', 'jia-zeyu');
 
     await page.click('#syncFenbeitongButton');
     await expectTotal(page, 'Total 100');
@@ -251,15 +254,23 @@ function forceMockExternalEnv() {
     KINGDEE_BASE_URL: process.env.KINGDEE_BASE_URL,
     KINGDEE_ACCT_ID: process.env.KINGDEE_ACCT_ID,
     KINGDEE_USERNAME: process.env.KINGDEE_USERNAME,
-    KINGDEE_PASSWORD: process.env.KINGDEE_PASSWORD
+    KINGDEE_PASSWORD: process.env.KINGDEE_PASSWORD,
+    KINGDEE_ACCOUNT_JIAZEYU_ENABLED: process.env.KINGDEE_ACCOUNT_JIAZEYU_ENABLED,
+    KINGDEE_ACCOUNT_JIAZEYU_ACCT_ID: process.env.KINGDEE_ACCOUNT_JIAZEYU_ACCT_ID,
+    KINGDEE_ACCOUNT_JIAZEYU_USERNAME: process.env.KINGDEE_ACCOUNT_JIAZEYU_USERNAME,
+    KINGDEE_ACCOUNT_JIAZEYU_PASSWORD: process.env.KINGDEE_ACCOUNT_JIAZEYU_PASSWORD
   };
   process.env.APP_DATA_DIR = 'runtime-data/e2e-ui-toolbar';
   process.env.FENBEITONG_MODE = 'mock';
   process.env.KINGDEE_MODE = 'real';
   process.env.KINGDEE_BASE_URL = 'http://172.30.30.8';
-  process.env.KINGDEE_ACCT_ID = 'test-acct';
+  process.env.KINGDEE_ACCT_ID = '6977227150362f';
   process.env.KINGDEE_USERNAME = 'test-user';
   process.env.KINGDEE_PASSWORD = 'test-password';
+  process.env.KINGDEE_ACCOUNT_JIAZEYU_ENABLED = 'true';
+  process.env.KINGDEE_ACCOUNT_JIAZEYU_ACCT_ID = '6977227150362f';
+  process.env.KINGDEE_ACCOUNT_JIAZEYU_USERNAME = 'jia-user';
+  process.env.KINGDEE_ACCOUNT_JIAZEYU_PASSWORD = 'jia-password';
   return () => {
     for (const [name, value] of Object.entries(previous)) {
       if (value === undefined) {
@@ -277,6 +288,8 @@ function stubKingdeeFetch() {
   globalThis.fetch = async (url, options = {}) => {
     const text = String(url);
     if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.AuthService.ValidateUser.common.kdsvc')) {
+      assert.match(String(options.body), /acctID=6977227150362f/);
+      assert.match(String(options.body), /username=jia-user/);
       return new Response(JSON.stringify({ LoginResultType: 1 }), {
         status: 200,
         headers: { 'Set-Cookie': 'kdservice-sessionid=e2eui123; Path=/K3Cloud' }
@@ -286,7 +299,9 @@ function stubKingdeeFetch() {
       assert.equal(options.headers.Cookie, 'kdservice-sessionid=e2eui123');
       const body = JSON.parse(String(options.body));
       assert.equal(body.formid, 'GL_VOUCHER');
-      assert.ok(JSON.parse(body.data).Model.FEntity.length >= 2);
+      const payload = JSON.parse(body.data);
+      assert.equal(payload.Model.ACCBOOKORGID.Number, '886');
+      assert.ok(payload.Model.FEntity.length >= 2);
       const currentId = String(nextId++);
       return new Response(JSON.stringify({
         Result: {
@@ -303,7 +318,14 @@ function stubKingdeeFetch() {
       return new Response(JSON.stringify({
         Result: {
           ResponseStatus: { IsSuccess: true, Errors: [] },
-          Result: { FID: id, FBillNo: id, FDocumentStatus: 'Z' }
+          Result: {
+            FID: id,
+            FBillNo: id,
+            AccountBookID: { Number: '007' },
+            ACCBOOKORGID: { Number: '886' },
+            VOUCHERGROUPID: { Number: 'PZZ9' },
+            FDocumentStatus: 'Z'
+          }
         }
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }

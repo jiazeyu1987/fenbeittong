@@ -38,7 +38,11 @@ const controls = {
 const state = {
   configSaved: false,
   currentStatus: null,
+  currentIntegrationSettings: null,
   selectedTenantKey: 'puhui',
+  selectedKingdeeAccountKey: 'current',
+  selectedKingdeeAcctIdKey: 'puhui-6977227150362f',
+  selectionDirty: false,
   syncedDocuments: [],
   selectedSourceIds: new Set(),
   visibleColumnKeys: new Set(['status', 'sourceCode', 'requester', 'department', 'expenseCategories', 'amount', 'interfaceSource', 'time']),
@@ -63,6 +67,10 @@ const sourceSearchInput = document.querySelector('#sourceSearchInput');
 const paginationSummary = document.querySelector('#paginationSummary');
 const companySelect = document.querySelector('#companySelect');
 const tenantStatusText = document.querySelector('#tenantStatusText');
+const kingdeeAccountSelect = document.querySelector('#kingdeeAccountSelect');
+const kingdeeAccountStatusText = document.querySelector('#kingdeeAccountStatusText');
+const kingdeeAcctIdSelect = document.querySelector('#kingdeeAcctIdSelect');
+const kingdeeAcctIdStatusText = document.querySelector('#kingdeeAcctIdStatusText');
 const recordsTable = document.querySelector('#recordsTable');
 const logsList = document.querySelector('#logsList');
 const voucherPreviewBody = document.querySelector('#voucherPreviewBody');
@@ -105,11 +113,24 @@ controls.listRecords.addEventListener('click', run(refreshRecords));
 controls.primaryAction.addEventListener('click', run(runPrimaryAction));
 companySelect.addEventListener('change', () => {
   state.selectedTenantKey = companySelect.value;
+  markIntegrationSelectionDirty();
   renderTenantState();
   renderActionState();
   if (isSelectedTenantWaiting()) {
     show({ tenantKey: state.selectedTenantKey, status: 'waiting_development' }, '接口等待开发中');
   }
+});
+kingdeeAccountSelect.addEventListener('change', () => {
+  state.selectedKingdeeAccountKey = kingdeeAccountSelect.value;
+  markIntegrationSelectionDirty();
+  renderKingdeeAccountState();
+  renderActionState();
+});
+kingdeeAcctIdSelect.addEventListener('change', () => {
+  state.selectedKingdeeAcctIdKey = kingdeeAcctIdSelect.value;
+  markIntegrationSelectionDirty();
+  renderKingdeeAcctIdState();
+  renderActionState();
 });
 sourceQueueBody.addEventListener('change', run(toggleQueuedDocument));
 sourceQueueBody.addEventListener('click', run(generateVoucherFromRow));
@@ -156,8 +177,15 @@ async function loadTemplate() {
 }
 
 async function saveConfig() {
+  const savedSettings = await api.saveIntegrationSettings({
+    tenantKey: state.selectedTenantKey,
+    kingdeeAccountKey: state.selectedKingdeeAccountKey,
+    kingdeeAcctIdKey: state.selectedKingdeeAcctIdKey
+  });
   const saved = await api.saveConfig(readConfig());
   state.configSaved = true;
+  state.selectionDirty = false;
+  state.currentIntegrationSettings = savedSettings;
   renderConfigValidation();
   show(saved, '配置已保存，可以立即同步分贝通数据。');
   await refreshAll();
@@ -282,6 +310,8 @@ async function pushErp() {
     voucherDate: fields.mockVoucherDate.value,
     year: Number(fields.mockYear.value),
     period: Number(fields.mockPeriod.value),
+    kingdeeAccountKey: state.selectedKingdeeAccountKey,
+    kingdeeAcctIdKey: state.selectedKingdeeAcctIdKey,
     config: readConfig()
   });
   const record = await api.getProcess(saved.sourceId);
@@ -299,17 +329,26 @@ async function queryProcess() {
 }
 
 async function refreshAll() {
-  const [status, documents] = await Promise.all([
+  const [settings, status, documents] = await Promise.all([
+    api.integrationSettings(),
     api.systemStatus(),
     api.listSyncedDocuments()
   ]);
+  state.currentIntegrationSettings = settings;
   state.currentStatus = status;
   state.syncedDocuments = documents;
-  renderStatus(status);
+  renderStatus(status, settings);
   renderSourceQueue(documents);
   await refreshRecords();
   await refreshLogs();
   renderActionState();
+}
+
+async function updateKingdeeAccountSelection() {
+  state.selectedKingdeeAccountKey = kingdeeAccountSelect.value;
+  markIntegrationSelectionDirty();
+  renderKingdeeAccountState();
+  show({ kingdeeAccountKey: state.selectedKingdeeAccountKey }, '配置未保存');
 }
 
 async function refreshRecords() {
@@ -418,9 +457,23 @@ function renderSelectAllState(visibleRecords) {
   selectAllRowsCheckbox.indeterminate = selectedCount > 0 && selectedCount < visibleRecords.length;
 }
 
-function renderStatus(status) {
-  renderTenantOptions(status.config?.fenbeitong?.tenants || []);
+function renderStatus(status, settings = null) {
+  if (!state.selectionDirty) {
+    applyIntegrationSelection(settings?.selection || status.config?.integrationSelection || {});
+  }
+  renderTenantOptions(settings?.tenants || status.config?.fenbeitong?.tenants || []);
+  renderKingdeeAccountOptions({
+    ...(status.config?.kingdee || {}),
+    accounts: settings?.kingdeeAccounts || status.config?.kingdee?.accounts || [],
+    acctIds: settings?.kingdeeAcctIds || status.config?.kingdee?.acctIds || []
+  });
+  renderKingdeeAcctIdOptions({
+    ...(status.config?.kingdee || {}),
+    acctIds: settings?.kingdeeAcctIds || status.config?.kingdee?.acctIds || []
+  });
   renderTenantState();
+  renderKingdeeAccountState();
+  renderKingdeeAcctIdState();
   document.querySelector('#fenbeitongMode').textContent = status.mode.fenbeitong === 'real' ? '已启用' : '待启用';
   document.querySelector('#kingdeeMode').textContent = status.mode.kingdee === 'real' ? '已启用' : '待启用';
   document.querySelector('#fenbeitongReady').textContent = readinessText(status.readiness.fenbeitong);
@@ -490,10 +543,46 @@ function renderTenantOptions(tenants) {
   }
   const currentKey = state.selectedTenantKey;
   companySelect.innerHTML = tenants.map((tenant) =>
-    `<option value="${escapeHtml(tenant.key)}">${escapeHtml(tenant.name)}</option>`
+    `<option value="${escapeHtml(tenant.key)}">${escapeHtml(tenantDisplayName(tenant))}</option>`
   ).join('');
   state.selectedTenantKey = tenants.some((tenant) => tenant.key === currentKey) ? currentKey : 'puhui';
   companySelect.value = state.selectedTenantKey;
+}
+
+function renderKingdeeAccountOptions(kingdeeConfig) {
+  const accounts = Array.isArray(kingdeeConfig.accounts) ? kingdeeConfig.accounts : [];
+  if (accounts.length === 0) {
+    return;
+  }
+  const currentKey = state.selectedKingdeeAccountKey || kingdeeConfig.selectedAccountKey || 'current';
+  state.selectedKingdeeAccountKey = accounts.some((account) => account.key === currentKey)
+    ? currentKey
+    : accounts.some((account) => account.key === kingdeeConfig.selectedAccountKey)
+      ? kingdeeConfig.selectedAccountKey
+      : accounts[0].key;
+  kingdeeAccountSelect.innerHTML = accounts.map((account) => {
+    const suffix = account.configured ? '' : '（未配置）';
+    return `<option value="${escapeHtml(account.key)}" ${account.configured ? '' : 'disabled'}>${escapeHtml(account.label)}${suffix}</option>`;
+  }).join('');
+  kingdeeAccountSelect.value = state.selectedKingdeeAccountKey;
+}
+
+function renderKingdeeAcctIdOptions(kingdeeConfig) {
+  const acctIds = Array.isArray(kingdeeConfig.acctIds) ? kingdeeConfig.acctIds : [];
+  if (acctIds.length === 0) {
+    return;
+  }
+  const currentKey = state.selectedKingdeeAcctIdKey || kingdeeConfig.selectedAcctIdKey || 'puhui-6977227150362f';
+  state.selectedKingdeeAcctIdKey = acctIds.some((acctId) => acctId.key === currentKey)
+    ? currentKey
+    : acctIds.some((acctId) => acctId.key === kingdeeConfig.selectedAcctIdKey)
+      ? kingdeeConfig.selectedAcctIdKey
+      : acctIds[0].key;
+  kingdeeAcctIdSelect.innerHTML = acctIds.map((acctId) => {
+    const suffix = acctId.configured ? '' : '（未配置）';
+    return `<option value="${escapeHtml(acctId.key)}" ${acctId.configured ? '' : 'disabled'}>${escapeHtml(acctId.label)}${suffix}</option>`;
+  }).join('');
+  kingdeeAcctIdSelect.value = state.selectedKingdeeAcctIdKey;
 }
 
 function renderTenantState() {
@@ -502,6 +591,42 @@ function renderTenantState() {
   const name = companySelect.options[companySelect.selectedIndex]?.textContent || state.selectedTenantKey;
   tenantStatusText.textContent = waiting ? '接口等待开发中' : `${name}接口已启用`;
   tenantStatusText.classList.toggle('waiting', waiting);
+}
+
+function renderKingdeeAccountState() {
+  kingdeeAccountSelect.value = state.selectedKingdeeAccountKey;
+  const accounts = state.currentStatus?.config?.kingdee?.accounts || [];
+  const account = accounts.find((item) => item.key === state.selectedKingdeeAccountKey);
+  const configured = Boolean(account?.configured);
+  kingdeeAccountStatusText.textContent = configured ? 'ERP账号已配置' : 'ERP账号缺少登录信息';
+  kingdeeAccountStatusText.classList.toggle('waiting', !configured);
+}
+
+function renderKingdeeAcctIdState() {
+  kingdeeAcctIdSelect.value = state.selectedKingdeeAcctIdKey;
+  const acctIds = state.currentStatus?.config?.kingdee?.acctIds || [];
+  const acctId = acctIds.find((item) => item.key === state.selectedKingdeeAcctIdKey);
+  const configured = Boolean(acctId?.configured);
+  kingdeeAcctIdStatusText.textContent = configured ? 'acctID已配置' : 'acctID缺少配置';
+  kingdeeAcctIdStatusText.classList.toggle('waiting', !configured);
+}
+
+function applyIntegrationSelection(selection) {
+  if (selection.tenantKey) state.selectedTenantKey = selection.tenantKey;
+  if (selection.kingdeeAccountKey) state.selectedKingdeeAccountKey = selection.kingdeeAccountKey;
+  if (selection.kingdeeAcctIdKey) state.selectedKingdeeAcctIdKey = selection.kingdeeAcctIdKey;
+}
+
+function markIntegrationSelectionDirty() {
+  state.selectionDirty = true;
+  state.configSaved = false;
+  showOperationFeedback('配置未保存');
+}
+
+function tenantDisplayName(tenant) {
+  if (tenant.key === 'puhui') return '璞慧';
+  if (tenant.key === 'yingtai') return '瑛泰';
+  return tenant.name || tenant.key;
 }
 
 function isSelectedTenantWaiting() {
@@ -947,6 +1072,8 @@ function buildVoucherRequest() {
     voucherDate: fields.mockVoucherDate.value,
     year: Number(fields.mockYear.value),
     period: Number(fields.mockPeriod.value),
+    kingdeeAccountKey: state.selectedKingdeeAccountKey,
+    kingdeeAcctIdKey: state.selectedKingdeeAcctIdKey,
     config: readConfig()
   };
 }
@@ -958,6 +1085,8 @@ function buildVoucherRequestForRecord(record) {
     voucherDate: fields.mockVoucherDate.value,
     year: Number(fields.mockYear.value),
     period: Number(fields.mockPeriod.value),
+    kingdeeAccountKey: state.selectedKingdeeAccountKey,
+    kingdeeAcctIdKey: state.selectedKingdeeAcctIdKey,
     config: readConfig()
   };
 }

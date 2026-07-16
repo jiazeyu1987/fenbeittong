@@ -1,14 +1,29 @@
-import { getAppConfig, getSanitizedConfigSummary } from '../config.js';
-import { getDashboardSummary } from '../repository.js';
+import {
+  getAppConfig,
+  getSanitizedConfigSummary,
+  resolveKingdeeAccount,
+  resolveKingdeeAcctId,
+  sanitizeKingdeeAccount,
+  sanitizeKingdeeAcctId
+} from '../config.js';
+import { getDashboardSummary, getIntegrationSelection } from '../repository.js';
 import { getFenbeitongTenant, getTenantStorePath, listFenbeitongTenants } from '../tenant-store.js';
 import { getSchedulerStatus } from './scheduler.js';
 
 export function getSystemStatus() {
   const config = getAppConfig();
-  const defaultTenant = getFenbeitongTenant(config.fenbeitong.defaultTenantKey);
+  const integrationSelection = getIntegrationSelection();
+  const defaultTenant = getFenbeitongTenant(integrationSelection.tenantKey);
   const sanitizedConfig = getSanitizedConfigSummary();
+  const selectedKingdeeAccount = resolveKingdeeAccount(config.kingdee, integrationSelection.kingdeeAccountKey);
+  const selectedKingdeeAcctId = resolveKingdeeAcctId(config.kingdee, integrationSelection.kingdeeAcctIdKey);
+  sanitizedConfig.integrationSelection = integrationSelection;
   sanitizedConfig.fenbeitong.tenants = listFenbeitongTenants();
   sanitizedConfig.fenbeitong.tenantStorePath = getTenantStorePath();
+  sanitizedConfig.kingdee.selectedAccountKey = selectedKingdeeAccount.key;
+  sanitizedConfig.kingdee.selectedAccount = sanitizeKingdeeAccount(selectedKingdeeAccount);
+  sanitizedConfig.kingdee.selectedAcctIdKey = selectedKingdeeAcctId.key;
+  sanitizedConfig.kingdee.selectedAcctId = sanitizeKingdeeAcctId(selectedKingdeeAcctId);
   return {
     productName: 'Fenbeitong Kingdee Voucher Integration',
     mode: {
@@ -17,7 +32,7 @@ export function getSystemStatus() {
     },
     readiness: {
       fenbeitong: fenbeitongReadiness(config.fenbeitong.mode, defaultTenant),
-      kingdee: kingdeeReadiness(config.kingdee)
+      kingdee: kingdeeReadiness(config.kingdee, selectedKingdeeAccount, selectedKingdeeAcctId)
     },
     summary: getDashboardSummary(),
     config: sanitizedConfig,
@@ -59,7 +74,7 @@ function fenbeitongReadiness(mode, tenant) {
   return readiness(mode, fields);
 }
 
-function kingdeeReadiness(config) {
+function kingdeeReadiness(config, account, acctId) {
   if (config.mode !== 'real') {
     return {
       ready: false,
@@ -69,9 +84,9 @@ function kingdeeReadiness(config) {
   }
   return readiness(config.mode, [
     ['KINGDEE_BASE_URL', config.baseUrl],
-    ['KINGDEE_ACCT_ID', config.acctId],
-    ['KINGDEE_USERNAME', config.username],
-    ['KINGDEE_PASSWORD', config.password],
+    ['KINGDEE_ACCOUNT.acctId', acctId?.acctId],
+    ['KINGDEE_ACCOUNT.username', account?.username],
+    ['KINGDEE_ACCOUNT.password', account?.password],
     ['KINGDEE_AUTH_PATH', config.authPath],
     ['KINGDEE_SAVE_PATH', config.savePath],
     ['KINGDEE_VIEW_PATH', config.viewPath]

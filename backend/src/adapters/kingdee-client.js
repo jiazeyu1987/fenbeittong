@@ -1,8 +1,11 @@
-import { getAppConfig, validateKingdeeConfig } from '../config.js';
+import { getEffectiveKingdeeConfig, validateKingdeeConfig } from '../config.js';
 import { AppError, dependencyError } from '../errors.js';
+import { getKingdeeAccountSelection, getKingdeeAcctIdSelection } from '../repository.js';
 
-export async function saveKingdeeVoucher(payload) {
-  const config = getAppConfig().kingdee;
+export async function saveKingdeeVoucher(payload, options = {}) {
+  const accountKey = options.accountKey || getKingdeeAccountSelection();
+  const acctIdKey = options.acctIdKey || getKingdeeAcctIdSelection();
+  const config = getEffectiveKingdeeConfig(accountKey, acctIdKey);
   if (config.mode !== 'real') {
     throw new AppError(
       'KINGDEE_REAL_MODE_REQUIRED',
@@ -12,7 +15,7 @@ export async function saveKingdeeVoucher(payload) {
     );
   }
 
-  validateKingdeeConfig();
+  validateKingdeeConfig(accountKey, acctIdKey);
   const authSession = await loginKingdee(config);
   const response = await postKingdeeJsonWrapper(config, config.savePath, {
     formid: 'GL_VOUCHER',
@@ -34,6 +37,7 @@ export async function saveKingdeeVoucher(payload) {
     throw dependencyError('KINGDEE_SAVE_RESPONSE_INVALID', 'Kingdee voucher save response missing Id or Number');
   }
   const viewBody = await viewSavedVoucher(config, authSession, identifiers.erpFid);
+  validateSavedVoucherTarget(payload, viewBody);
   return {
     simulated: false,
     mode: 'real',
@@ -46,6 +50,35 @@ export async function saveKingdeeVoucher(payload) {
       || 'Z',
     rawResponse: { save: body, view: viewBody }
   };
+}
+
+function validateSavedVoucherTarget(payload, viewBody) {
+  const expected = {
+    accountBookNumber: referenceNumber(payload?.Model?.AccountBookID || payload?.Model?.FAccountBookID),
+    accountOrgNumber: referenceNumber(payload?.Model?.ACCBOOKORGID || payload?.Model?.FACCBOOKORGID),
+    voucherGroupNumber: referenceNumber(payload?.Model?.VOUCHERGROUPID || payload?.Model?.FVOUCHERGROUPID)
+  };
+  const viewModel = viewBody?.Result?.Result || {};
+  const actual = {
+    accountBookNumber: referenceNumber(viewModel.AccountBookID || viewModel.FAccountBookID),
+    accountOrgNumber: referenceNumber(
+      viewModel.ACCBOOKORGID
+      || viewModel.FACCBOOKORGID
+      || viewModel.AccountBookID?.AccountOrgID
+    ),
+    voucherGroupNumber: referenceNumber(viewModel.VOUCHERGROUPID || viewModel.FVOUCHERGROUPID)
+  };
+  const mismatches = Object.entries(expected)
+    .filter(([, expectedValue]) => Boolean(expectedValue))
+    .filter(([key, expectedValue]) => actual[key] !== expectedValue)
+    .map(([key, expectedValue]) => ({ field: key, expected: expectedValue, actual: actual[key] || '' }));
+  if (mismatches.length > 0) {
+    throw dependencyError(
+      'KINGDEE_SAVE_TARGET_MISMATCH',
+      'Kingdee voucher save target mismatch',
+      { expected, actual, mismatches }
+    );
+  }
 }
 
 async function loginKingdee(config) {
@@ -137,6 +170,13 @@ function saveIdentifiers(body) {
     erpFid: String(successEntity?.Id || body?.Result?.Id || ''),
     erpNumber: String(successEntity?.Number || body?.Result?.Number || '')
   };
+}
+
+function referenceNumber(reference) {
+  if (!reference || typeof reference !== 'object') {
+    return '';
+  }
+  return String(reference.FNumber || reference.Number || reference.number || '').trim();
 }
 
 function buildServiceUrl(baseUrl, servicePath) {

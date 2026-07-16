@@ -54,10 +54,26 @@ Finance toolbar browser E2E validation for the Fenbeitong reimbursement to Kingd
 - GREEN: Kingdee Save returned real FID `780438` and voucher number `627296`; follow-up View/query reached `ERP_PUSHED`.
 - Evidence: `E:\ProjectPackage\fenbeitong\doc\tasks\20260715-kingdee-real-save\runtime\live-real-after-fix-20260715072042.json`.
 
+## Real ERP Write E2E - 2026-07-15
+
+- Scope: frontend Playwright E2E against current local configuration after setting `KINGDEE_ACCT_ID=20260126WQCS`.
+- GREEN: Real Fenbeitong sync completed with 5 source documents and `mockReplacement=false`.
+- RED: Row-level ERP save did not complete; affected records remained `PREPARED` and no new `ERP_PUSH` success log appeared.
+- Verification: read-only Kingdee login with `acctID=20260126WQCS` returned `response_error` saying the attempted data center cannot be obtained.
+- Verification: read-only Kingdee login with prior WebAPI data center id `6977227150362f` returned `LoginResultType=1` and `IsSuccessByAPI=true`.
+
+## Real ERP Write E2E - 2026-07-16
+
+- Scope: default-config int-account Save with the verified Puhui WebAPI account id and voucher group.
+- GREEN: `node doc/tasks/20260716-int-erp-write/run-live-current-save.mjs` saved real Kingdee voucher `780594 / 627320`.
+- Verification: View read-back returned account book `007`, org `886`, voucher group `PZZ9`, document status `A`, and `simulatedErp=false`.
+- GREEN: `npm run test:e2e:ui` passed after aligning the UI E2E Kingdee View stub with `PZZ9`.
+
 ## Blockers
 
 - Finance-grade `6601.*` expense account mapping remains blocked until Kingdee auxiliary-dimension Save shape is confirmed for the current test account set.
 - Additional Fenbeitong companies require SQLite tenant credentials before real sync.
+- `KINGDEE_ACCT_ID=20260126WQCS` is not a valid WebAPI data center id for this flow. Use verified `KINGDEE_ACCT_ID=6977227150362f` with Puhui voucher group `PZZ9`.
 
 ## CI Impact And Release Recommendation
 
