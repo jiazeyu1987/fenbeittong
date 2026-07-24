@@ -25,6 +25,11 @@ export function parseFenbeitongDetail(fixedJson) {
   const expenses = sourceExpenses.flatMap((expense, index) => (
     expandExpenseByInvoiceSplits(parseExpense(expense, index, invoiceIds))
   ));
+  const latestExpenseDate = expenses
+    .map((expense) => expense.expenseDate)
+    .filter(Boolean)
+    .sort()
+    .at(-1) || '';
   const expenseTotalAmount = round(expenses.reduce((sum, expense) => sum + expense.amount, 0));
   const departmentAttributionAmount = round(expenses.reduce((sum, expense) => sum + expense.departmentAttributionAmount, 0));
   const requestDepartment = expenses.find((expense) => expense.attributionDepartmentCode || expense.attributionDepartmentName);
@@ -47,7 +52,7 @@ export function parseFenbeitongDetail(fixedJson) {
     departmentAttributionAmount,
     paymentAmount: reportedPaymentAmount,
     reason: reimbursementReason || data.apply_reason || data.apply_remark || data.reimb_code,
-    applicationDate: dateOnly(firstText(data.submit_time, data.create_time, data.apply_time)),
+    applicationDate: latestExpenseDate || dateOnly(firstText(data.submit_time, data.create_time, data.apply_time)),
     userCode: String(person.code || ''),
     userName: String(person.name || person.code || ''),
     departmentCode: String(approvalDepartment.code || person.department_code || requestDepartment?.attributionDepartmentCode || ''),

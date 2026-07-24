@@ -2,6 +2,49 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseFenbeitongDetail } from '../src/fenbeitong-detail.js';
 
+test('uses the latest expense occurrence date instead of the approval date', () => {
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      reimb_id: 'EXPENSE-DATE-ID',
+      reimb_code: 'EXPENSE-DATE-CODE',
+      currency_code: 'CNY',
+      total_amount: 3,
+      payment_amount: 3,
+      submit_time: '2026-07-20 09:52:23',
+      user: { code: 'X001', name: 'Tester' },
+      expenses: [
+        {
+          id: 'EXPENSE-DATE-1',
+          cost_category: { code: 'CI001', name: 'Expense type' },
+          total_amount: 1,
+          cost_attributions: [],
+          invoices: [],
+          cost_custom_fields: [
+            { field_code: 'date_of_expense', detail: '2026-06-03 00:00:00' }
+          ]
+        },
+        {
+          id: 'EXPENSE-DATE-2',
+          cost_category: { code: 'CI001', name: 'Expense type' },
+          total_amount: 2,
+          cost_attributions: [],
+          invoices: [],
+          cost_custom_fields: [
+            { field_code: 'date_of_expense', detail: '2026-06-18 00:00:00' }
+          ]
+        }
+      ]
+    }
+  }));
+
+  assert.equal(parsed.applicationDate, '2026-06-18');
+  assert.deepEqual(parsed.expenses.map((expense) => expense.expenseDate), [
+    '2026-06-03',
+    '2026-06-18'
+  ]);
+});
+
 test('expands Fenbeitong invoice usage into the confirmed 20 current-split rows', () => {
   const invoiceGroups = [
     [[394, 300, 0]],
