@@ -37,7 +37,9 @@ export async function pullFenbeitongReimbursements(options = {}) {
       tenantKey: tenant.key,
       mockReplacement: true,
       mockReason: 'Fenbeitong real interface is not enabled for this run',
-      documents: [...buildMockReimbursements(baseDocument, 100), onlineDocument],
+      documents: config.offlineOnly
+        ? buildMockReimbursements(baseDocument, 100)
+        : [...buildMockReimbursements(baseDocument, 100), onlineDocument],
       sourceWarnings: []
     };
   }
@@ -55,6 +57,16 @@ export async function pullFenbeitongReimbursements(options = {}) {
     return validateDetailDocument(detailBody);
   });
   const documents = offlineDocuments.filter(hasOfflineExpenseType);
+  if (config.offlineOnly) {
+    return {
+      mode: 'real',
+      tenantKey: tenant.key,
+      mockReplacement: false,
+      mockReason: '',
+      documents,
+      sourceWarnings: []
+    };
+  }
   const onlineResult = await pullSettlementBillDocuments(tenant, accessToken);
   documents.push(...onlineResult.documents);
   return {

@@ -43,6 +43,7 @@ export function getAppConfig() {
     appDataDir: process.env.APP_DATA_DIR || process.env.DATA_DIR || 'runtime-data',
     fenbeitong: {
       mode: readMode('FENBEITONG_MODE'),
+      offlineOnly: readBoolean('FENBEITONG_OFFLINE_ONLY', false),
       defaultTenantKey: process.env.FENBEITONG_TENANT_KEY || 'puhui',
       credentialStore: 'sqlite',
       listPayloadOverrides: buildFenbeitongListPayload()

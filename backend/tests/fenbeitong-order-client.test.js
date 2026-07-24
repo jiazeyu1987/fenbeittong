@@ -103,6 +103,50 @@ test('queries settlement bills even when reimbursement details have no linked or
   assert.equal(paths.filter((path) => path === '/openapi/bill/business/v1/list').length, 4);
 });
 
+test('offline-only mode does not query settlement bill APIs', async (t) => {
+  const previousMode = process.env.FENBEITONG_MODE;
+  const previousOfflineOnly = process.env.FENBEITONG_OFFLINE_ONLY;
+  const previousDataDir = process.env.APP_DATA_DIR;
+  const previousFetch = globalThis.fetch;
+  process.env.APP_DATA_DIR = 'runtime-data/test-fenbeitong-offline-only';
+  process.env.FENBEITONG_MODE = 'real';
+  process.env.FENBEITONG_OFFLINE_ONLY = 'true';
+  resetTenantStoreForTest();
+
+  t.after(() => {
+    globalThis.fetch = previousFetch;
+    resetTenantStoreForTest();
+    if (previousMode === undefined) delete process.env.FENBEITONG_MODE;
+    else process.env.FENBEITONG_MODE = previousMode;
+    if (previousOfflineOnly === undefined) delete process.env.FENBEITONG_OFFLINE_ONLY;
+    else process.env.FENBEITONG_OFFLINE_ONLY = previousOfflineOnly;
+    if (previousDataDir === undefined) delete process.env.APP_DATA_DIR;
+    else process.env.APP_DATA_DIR = previousDataDir;
+  });
+
+  saveTenant();
+  clearFenbeitongTokenCacheForTest();
+
+  const paths = [];
+  globalThis.fetch = async (url, options) => {
+    const path = new URL(String(url)).pathname;
+    paths.push(path);
+    if (path === '/openapi/auth/getToken') {
+      return jsonResponse({ code: 0, data: 'offline-only-access-token' });
+    }
+    assert.equal(options.headers['access-token'], 'offline-only-access-token');
+    if (path === '/openapi/reimbursement/v1/list') {
+      return jsonResponse({ code: 0, msg: 'success', data: { reimbursements: [] } });
+    }
+    assert.fail(`unexpected API call: ${path}`);
+  };
+
+  const result = await pullFenbeitongReimbursements({ tenantKey: 'puhui' });
+
+  assert.deepEqual(result.documents, []);
+  assert.equal(paths.includes('/openapi/bill/business/v1/list'), false);
+});
+
 test('uses one access token to pull only posted settlement bill rows', async (t) => {
   const previousMode = process.env.FENBEITONG_MODE;
   const previousDataDir = process.env.APP_DATA_DIR;
