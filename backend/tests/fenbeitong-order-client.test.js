@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildOnlineTravelOrderDocumentForTest,
   clearFenbeitongTokenCacheForTest,
+  hasOfflineExpenseTypeForTest,
   pullFenbeitongReimbursements,
   settlementSourceDetailIdsForTest
 } from '../src/adapters/fenbeitong-client.js';
@@ -26,6 +27,31 @@ test('keeps every train detail when one order and ticket number have multiple ti
     'E123456789:TICKET-ID-A',
     'E123456789:TICKET-ID-B'
   ]);
+});
+
+test('drops an offline reimbursement row when its expense type is empty', () => {
+  assert.equal(hasOfflineExpenseTypeForTest({
+    data: {
+      reimb_id: 'EMPTY-TYPE',
+      reimb_code: 'B1IELSHBX-EMPTY',
+      expenses: [{
+        total_amount: 1597,
+        cost_category: { code: ' ', name: '' },
+        expense_type: { code: '', name: null }
+      }]
+    }
+  }), false);
+
+  assert.equal(hasOfflineExpenseTypeForTest({
+    data: {
+      reimb_id: 'HAS-TYPE',
+      reimb_code: 'B1IELSHBX-VALID',
+      expenses: [{
+        total_amount: 1577,
+        cost_category: { code: 'CI011', name: '差旅费' }
+      }]
+    }
+  }), true);
 });
 
 test('queries settlement bills even when reimbursement details have no linked orders', async (t) => {

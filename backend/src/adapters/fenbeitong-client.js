@@ -49,11 +49,12 @@ export async function pullFenbeitongReimbursements(options = {}) {
     ...config.listPayloadOverrides
   };
   const summaries = await pullAllReimbursementSummaries(tenant, accessToken, listPayload);
-  const documents = await mapWithConcurrency(summaries, 16, async (summary) => {
+  const offlineDocuments = await mapWithConcurrency(summaries, 16, async (summary) => {
     const detailPayload = buildDetailRequestPayload(summary);
     const detailBody = await postFenbeitongApi(tenant, tenant.detailPath, accessToken, detailPayload);
     return validateDetailDocument(detailBody);
   });
+  const documents = offlineDocuments.filter(hasOfflineExpenseType);
   const onlineResult = await pullSettlementBillDocuments(tenant, accessToken);
   documents.push(...onlineResult.documents);
   return {
@@ -1099,6 +1100,22 @@ function validateDetailDocument(body) {
     ...body,
     data: body.data
   };
+}
+
+function hasOfflineExpenseType(document) {
+  const expenses = Array.isArray(document?.data?.expenses)
+    ? document.data.expenses
+    : [];
+  return expenses.some((expense) => [
+    expense?.cost_category?.name,
+    expense?.cost_category?.code,
+    expense?.expense_type?.name,
+    expense?.expense_type?.code
+  ].some((value) => String(value || '').trim()));
+}
+
+export function hasOfflineExpenseTypeForTest(document) {
+  return hasOfflineExpenseType(document);
 }
 
 function buildMockReimbursements(baseDocument, count) {
