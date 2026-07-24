@@ -62,7 +62,7 @@ export function parseFenbeitongDetail(fixedJson) {
     expenseOrganizationCode: organization.code,
     expenseOrganizationName: organization.name,
     requestPaymentAmount: departmentAttributionAmount,
-    sourceDocumentStatus: firstText(data.apply_state_name, data.apply_state, data.payment_state_name, data.payment_state),
+    sourceDocumentStatus: reimbursementStatusText(data),
     businessLine: '',
     reimbursementMonth: sourceMonth(data),
     expenses,
@@ -724,6 +724,13 @@ function sourceMonth(data) {
   const match = /^\d{4}[-/]([01]?\d)/.exec(String(data.create_time || data.apply_time || data.submit_time || ''));
   const month = Number(match?.[1] || 0);
   return month >= 1 && month <= 12 ? month : 0;
+}
+
+function reimbursementStatusText(data) {
+  const explicitName = firstText(data.apply_state_name);
+  if (explicitName) return explicitName;
+  if (Number(data.apply_state) === 4) return '已审核';
+  return firstText(data.apply_state, data.payment_state_name, data.payment_state);
 }
 
 function money(value, field) {

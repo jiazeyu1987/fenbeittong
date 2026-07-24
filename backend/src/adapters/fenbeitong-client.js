@@ -8,6 +8,8 @@ import {
   updateFenbeitongTenantToken
 } from '../tenant-store.js';
 
+const APPROVED_REIMBURSEMENT_STATE = 4;
+
 export function clearFenbeitongTokenCacheForTest() {
   const tenant = getFenbeitongTenant('puhui', { includeSecrets: true });
   if (!tenant) {
@@ -51,7 +53,8 @@ export async function pullFenbeitongReimbursements(options = {}) {
     ...config.listPayloadOverrides
   };
   const summaries = await pullAllReimbursementSummaries(tenant, accessToken, listPayload);
-  const offlineDocuments = await mapWithConcurrency(summaries, 16, async (summary) => {
+  const approvedSummaries = summaries.filter(hasApprovedReimbursementState);
+  const offlineDocuments = await mapWithConcurrency(approvedSummaries, 16, async (summary) => {
     const detailPayload = buildDetailRequestPayload(summary);
     const detailBody = await postFenbeitongApi(tenant, tenant.detailPath, accessToken, detailPayload);
     return validateDetailDocument(detailBody);
@@ -1124,6 +1127,10 @@ function hasOfflineExpenseType(document) {
     expense?.expense_type?.name,
     expense?.expense_type?.code
   ].some((value) => String(value || '').trim()));
+}
+
+function hasApprovedReimbursementState(summary) {
+  return Number(summary?.apply_state) === APPROVED_REIMBURSEMENT_STATE;
 }
 
 export function hasOfflineExpenseTypeForTest(document) {

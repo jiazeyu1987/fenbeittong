@@ -147,6 +147,78 @@ test('offline-only mode does not query settlement bill APIs', async (t) => {
   assert.equal(paths.includes('/openapi/bill/business/v1/list'), false);
 });
 
+test('pulls details only for approved employee reimbursements', async (t) => {
+  const previousMode = process.env.FENBEITONG_MODE;
+  const previousOfflineOnly = process.env.FENBEITONG_OFFLINE_ONLY;
+  const previousDataDir = process.env.APP_DATA_DIR;
+  const previousFetch = globalThis.fetch;
+  process.env.APP_DATA_DIR = 'runtime-data/test-fenbeitong-approved-only';
+  process.env.FENBEITONG_MODE = 'real';
+  process.env.FENBEITONG_OFFLINE_ONLY = 'true';
+  resetTenantStoreForTest();
+
+  t.after(() => {
+    globalThis.fetch = previousFetch;
+    resetTenantStoreForTest();
+    if (previousMode === undefined) delete process.env.FENBEITONG_MODE;
+    else process.env.FENBEITONG_MODE = previousMode;
+    if (previousOfflineOnly === undefined) delete process.env.FENBEITONG_OFFLINE_ONLY;
+    else process.env.FENBEITONG_OFFLINE_ONLY = previousOfflineOnly;
+    if (previousDataDir === undefined) delete process.env.APP_DATA_DIR;
+    else process.env.APP_DATA_DIR = previousDataDir;
+  });
+
+  saveTenant();
+  clearFenbeitongTokenCacheForTest();
+
+  const detailRequests = [];
+  globalThis.fetch = async (url, options) => {
+    const path = new URL(String(url)).pathname;
+    if (path === '/openapi/auth/getToken') {
+      return jsonResponse({ code: 0, data: 'approved-only-access-token' });
+    }
+    if (path === '/openapi/reimbursement/v1/list') {
+      return jsonResponse({
+        code: 0,
+        msg: 'success',
+        data: {
+          total_pages: 1,
+          reimbursements: [
+            { id: 'APPROVED-1', apply_state: 4 },
+            { id: 'PENDING-1', apply_state: 2 },
+            { id: 'REJECTED-1', apply_state: 32768 }
+          ]
+        }
+      });
+    }
+    if (path === '/openapi/reimbursement/v2/detail') {
+      const payload = JSON.parse(options.body);
+      detailRequests.push(payload);
+      return jsonResponse({
+        code: 0,
+        msg: 'success',
+        data: {
+          reimb_id: 'APPROVED-ID-1',
+          reimb_code: 'APPROVED-1',
+          apply_state: 4,
+          expenses: [{
+            id: 'EXPENSE-1',
+            total_amount: 100,
+            cost_category: { code: 'CI001', name: 'Approved expense' }
+          }]
+        }
+      });
+    }
+    assert.fail(`unexpected API call: ${path}`);
+  };
+
+  const result = await pullFenbeitongReimbursements({ tenantKey: 'puhui' });
+
+  assert.equal(result.documents.length, 1);
+  assert.equal(result.documents[0].data.reimb_code, 'APPROVED-1');
+  assert.deepEqual(detailRequests, [{ reimb_code: 'APPROVED-1' }]);
+});
+
 test('uses one access token to pull only posted settlement bill rows', async (t) => {
   const previousMode = process.env.FENBEITONG_MODE;
   const previousDataDir = process.env.APP_DATA_DIR;
@@ -184,7 +256,7 @@ test('uses one access token to pull only posted settlement bill rows', async (t)
         msg: 'success',
         data: {
           total_pages: 1,
-          reimbursements: [{ id: 'REIMB-1' }]
+          reimbursements: [{ id: 'REIMB-1', apply_state: 4 }]
         }
       });
     }

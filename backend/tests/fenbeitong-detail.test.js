@@ -11,6 +11,7 @@ test('uses the latest expense occurrence date instead of the approval date', () 
       currency_code: 'CNY',
       total_amount: 3,
       payment_amount: 3,
+      apply_state: 4,
       submit_time: '2026-07-20 09:52:23',
       user: { code: 'X001', name: 'Tester' },
       expenses: [
@@ -39,6 +40,7 @@ test('uses the latest expense occurrence date instead of the approval date', () 
   }));
 
   assert.equal(parsed.applicationDate, '2026-06-18');
+  assert.equal(parsed.sourceDocumentStatus, '已审核');
   assert.deepEqual(parsed.expenses.map((expense) => expense.expenseDate), [
     '2026-06-03',
     '2026-06-18'
