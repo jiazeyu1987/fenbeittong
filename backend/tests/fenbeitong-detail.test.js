@@ -47,6 +47,42 @@ test('uses the latest expense occurrence date instead of the approval date', () 
   ]);
 });
 
+test('keeps the source expense date and current split amounts without invoice substitution', () => {
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      reimb_id: 'SOURCE-SPLIT-ID',
+      reimb_code: 'SOURCE-SPLIT-CODE',
+      currency_code: 'CNY',
+      total_amount: 47.7,
+      payment_amount: 47.7,
+      user: { code: 'X001', name: 'Tester' },
+      expenses: [{
+        id: 'SOURCE-SPLIT-EXPENSE',
+        cost_category: { code: 'CI00801', name: 'Transport' },
+        total_amount: 47.7,
+        cost_attributions: [],
+        invoices: [{
+          id: 'SOURCE-SPLIT-INVOICE',
+          total_amount: 47.7,
+          used_amount: 47.7,
+          tax_amount: 9.99,
+          exclude_tax_amount: 37.71
+        }],
+        cost_custom_fields: [
+          { field_code: 'date_of_expense', detail: '2026-04-02 00:00:00' },
+          { field_code: 'deductible_tax', detail: '1.39' },
+          { field_code: 'untaxed_amount', detail: '47.70' }
+        ]
+      }]
+    }
+  }));
+
+  assert.equal(parsed.expenses[0].expenseDate, '2026-04-02');
+  assert.equal(parsed.expenses[0].splitTaxAmount, 1.39);
+  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 47.7);
+});
+
 test('expands Fenbeitong invoice usage into the confirmed 20 current-split rows', () => {
   const invoiceGroups = [
     [[394, 300, 0]],

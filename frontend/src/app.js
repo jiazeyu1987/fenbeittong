@@ -1075,7 +1075,7 @@ function currentLedgerPageRecords() {
 
 function filterLedgerRecords(records) {
   const keyword = sourceSearchInput.value.trim().toLowerCase();
-  return records.filter((record) => {
+  return expandLedgerRecords(records).filter((record) => {
     const summary = buildSourceSummary(record);
     if (requesterFilterSelect.value && displayRequester(record, summary.requester) !== requesterFilterSelect.value) {
       return false;
@@ -1092,6 +1092,7 @@ function filterLedgerRecords(records) {
 }
 
 function renderLedgerFilterOptions(records, requesterCatalog = []) {
+  records = expandLedgerRecords(records);
   const selectedRequester = requesterFilterSelect.value;
   const selectedSourceType = sourceTypeFilterSelect.value;
   const selectedDate = dateFilterSelect.value;
@@ -1522,6 +1523,7 @@ function buildSourceSummary(record) {
     const splitTaxAmount = Number(record.splitTaxAmount ?? splitAmounts.splitTaxAmount);
     const splitExcludingTaxAmount = Number(record.splitExcludingTaxAmount
       ?? (departmentAttributionAmount - splitTaxAmount));
+    const expense = record.ledgerExpense;
     return {
       sourceKindName: record.sourceKindName || (record.sourceType === 'ONLINE_MONTHLY_BILL' ? '线上月结' : '线下报销'),
       sourceForm: record.sourceForm || (record.sourceType === 'ONLINE_MONTHLY_BILL' ? '企业账单' : '费用明细'),
@@ -1529,27 +1531,82 @@ function buildSourceSummary(record) {
       reason: record.reason || '',
       requester: record.requesterName || record.requesterCode || data.submitter?.name || data.proposer?.name || data.user?.name || '-',
       department: record.departmentName || record.departmentCode || data.submitter?.department_name || data.proposer?.department_name || data.user?.department_name || '-',
-      expenseCategories: record.expenseTypes || expenses.map((expense) => expense.cost_category?.name || expense.cost_category?.code || '未分类').join(' / ') || '-',
-      startLocation: record.startLocation || '',
-      arrivalLocation: record.arrivalLocation || '',
+      expenseCategories: expense?.categoryName || record.expenseTypes || expenses.map((expense) => expense.cost_category?.name || expense.cost_category?.code || '未分类').join(' / ') || '-',
+      startLocation: expense?.startLocation ?? record.startLocation ?? '',
+      arrivalLocation: expense?.arrivalLocation ?? record.arrivalLocation ?? '',
       trafficType: record.sourceType === 'ONLINE_MONTHLY_BILL' ? record.trafficType || '' : '',
-      purpose: record.purpose || '',
-      expenseDepartment: record.expenseDepartment || '',
-      totalAmount: departmentAttributionAmount,
-      splitTaxAmount,
-      splitExcludingTaxAmount,
-      departmentAttributionAmount,
+      purpose: expense?.purpose ?? record.purpose ?? '',
+      expenseDepartment: expense?.expenseDepartment ?? record.expenseDepartment ?? '',
+      totalAmount: expense?.departmentAttributionAmount ?? departmentAttributionAmount,
+      splitTaxAmount: expense ? expense.splitTaxAmount : splitTaxAmount,
+      splitExcludingTaxAmount: expense ? expense.splitExcludingTaxAmount : splitExcludingTaxAmount,
+      departmentAttributionAmount: expense ? expense.departmentAttributionAmount : departmentAttributionAmount,
       requestOrganization: record.requestOrganizationName || record.requestOrganizationCode || '',
       requestPaymentAmount: record.requestPaymentAmount,
       sourceDocumentStatus: record.sourceDocumentStatus || '',
       expenseOrganization: record.expenseOrganizationName || record.expenseOrganizationCode || '',
       paymentAmount: record.paymentAmount,
       businessLine: record.businessLine || '',
-      paymentDate: record.paymentDate || dateOnly(data.payment_time || data.pay_time || data.payment_date || data.reimburse_time || '')
+      paymentDate: expense
+        ? expense.expenseDate
+        : record.paymentDate || dateOnly(data.payment_time || data.pay_time || data.payment_date || data.reimburse_time || '')
     };
   } catch {
     return { sourceKindName: '', sourceForm: '', documentType: '', reason: '', requester: '-', department: '-', expenseCategories: 'JSON解析失败', startLocation: '', arrivalLocation: '', trafficType: '', purpose: '', expenseDepartment: '', totalAmount: 0, splitTaxAmount: 0, splitExcludingTaxAmount: 0, departmentAttributionAmount: 0, requestOrganization: '', requestPaymentAmount: null, sourceDocumentStatus: '', expenseOrganization: '', paymentAmount: null, businessLine: '', paymentDate: '' };
   }
+}
+
+function expandLedgerRecords(records) {
+  return records.flatMap((record) => {
+    if (record.sourceType !== 'OFFLINE_REIMBURSEMENT' || record.ledgerExpense) return [record];
+    try {
+      const data = JSON.parse(record.fixedJson || '{}').data || {};
+      const expenses = (Array.isArray(data.expenses) ? data.expenses : [])
+        .filter((expense) => expense.cost_category?.code || expense.cost_category?.name);
+      if (expenses.length === 0) return [];
+      return expenses.map((expense, index) => ({
+        ...record,
+        ledgerRowId: `${record.sourceId}:${expense.id || index + 1}`,
+        ledgerExpense: sourceLedgerExpense(expense)
+      }));
+    } catch {
+      return [record];
+    }
+  });
+}
+
+function sourceLedgerExpense(expense) {
+  const customFields = new Map((Array.isArray(expense.cost_custom_fields) ? expense.cost_custom_fields : [])
+    .map((field) => [String(field.field_code || ''), field.detail]));
+  const splitTaxAmount = Number(customFields.get('deductible_tax'));
+  const splitExcludingTaxAmount = Number(customFields.get('untaxed_amount'));
+  return {
+    id: String(expense.id || ''),
+    categoryName: expense.cost_category?.name || expense.cost_category?.code || '',
+    categoryCode: expense.cost_category?.code || '',
+    purpose: String(customFields.get('expense_category_desc') || expense.reason || ''),
+    expenseDate: dateOnly(customFields.get('date_of_expense')),
+    splitTaxAmount: Number.isFinite(splitTaxAmount) ? splitTaxAmount : null,
+    splitExcludingTaxAmount: Number.isFinite(splitExcludingTaxAmount) ? splitExcludingTaxAmount : null,
+    departmentAttributionAmount: expenseDepartmentAttributionAmount(expense),
+    startLocation: sourceLocationName(customFields.get('start_location')),
+    arrivalLocation: sourceLocationName(customFields.get('arrival_location')),
+    expenseDepartment: sourceExpenseDepartment(expense)
+  };
+}
+
+function sourceLocationName(value) {
+  if (!Array.isArray(value)) return '';
+  return String(value.at(-1)?.name || '');
+}
+
+function sourceExpenseDepartment(expense) {
+  const names = (Array.isArray(expense?.cost_attributions) ? expense.cost_attributions : [])
+    .filter((attribution) => Number(attribution?.type) === 1)
+    .flatMap((attribution) => Array.isArray(attribution?.details) ? attribution.details : [])
+    .map((detail) => String(detail?.name || detail?.code || '').trim())
+    .filter(Boolean);
+  return [...new Set(names)].join(' / ');
 }
 
 function fenbeitongSplitAmounts(expenses) {
