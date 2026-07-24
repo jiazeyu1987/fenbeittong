@@ -1,4 +1,6 @@
-const baseUrl = 'http://127.0.0.1:3001';
+const baseUrl = globalThis.location?.port === '5273'
+  ? 'http://127.0.0.1:3101'
+  : 'http://127.0.0.1:3001';
 
 async function request(path, options = {}) {
   const response = await fetch(baseUrl + path, {

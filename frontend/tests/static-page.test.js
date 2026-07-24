@@ -338,6 +338,8 @@ test('frontend visible copy is production finance copy', () => {
 test('frontend api points only to local mock backend', () => {
   const api = readFileSync('frontend/src/api.js', 'utf8');
   assert.match(api, /127\.0\.0\.1:3001/);
+  assert.match(api, /127\.0\.0\.1:3101/);
+  assert.match(api, /location\?\.port === '5273'/);
   assert.doesNotMatch(api, /openpf\.fenbeitong\.com/);
   assert.doesNotMatch(api, new RegExp(['k3', 'cloud'].join('')));
 });
