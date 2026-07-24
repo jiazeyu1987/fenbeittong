@@ -314,6 +314,30 @@ test('real full sync removes every stale online row not returned by issued bills
   assert.equal(findSyncedDocument('OTHER-BILL'), null);
 });
 
+test('real full sync removes stale offline rows that no longer pass source filters', () => {
+  resetRepository();
+  const offlineDocument = (id, code) => {
+    const document = JSON.parse(buildMockTemplate().mockFixedJson);
+    document.data.reimb_id = id;
+    document.data.reimb_code = code;
+    document.data.apply_state = 4;
+    return document;
+  };
+  const options = { sourceMode: 'real', tenantKey: 'puhui' };
+
+  saveSyncedDocuments([
+    offlineDocument('OFFLINE-KEEP', 'OFFLINE-KEEP-CODE'),
+    offlineDocument('OFFLINE-STALE', 'OFFLINE-STALE-CODE')
+  ], 'BATCH-1', options);
+
+  saveSyncedDocuments([
+    offlineDocument('OFFLINE-KEEP', 'OFFLINE-KEEP-CODE')
+  ], 'BATCH-2', options);
+
+  assert.equal(findSyncedDocument('OFFLINE-STALE'), null);
+  assert.equal(findSyncedDocument('OFFLINE-KEEP').sourceCode, 'OFFLINE-KEEP-CODE');
+});
+
 test('sync accepts real Fenbeitong order-only reimbursement fields', () => {
   resetRepository();
   const document = JSON.parse(buildMockTemplate().mockFixedJson);

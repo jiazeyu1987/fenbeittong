@@ -217,17 +217,39 @@ export function saveSyncedDocument(document, batchId = '', options = {}) {
 export function saveSyncedDocuments(documents, batchId = '', options = {}) {
   const state = loadState();
   const records = documents.map((document) => buildSyncedRecord(state, document, batchId, options));
+  const removedStaleOfflineCount = pruneStaleOfflineDocuments(state, records, options);
   const removedStaleOnlineCount = pruneStaleOnlineDocuments(state, records, options);
   persistState(state);
   recordOperation('SOURCE_SYNC_BATCH', 'SUCCESS', {
     batchId,
     count: records.length,
+    removedStaleOfflineCount,
     removedStaleOnlineCount,
     sourceMode: options.sourceMode || 'mock',
     mockReplacement: Boolean(options.mockReplacement),
     mockReason: options.mockReason || ''
   });
   return structuredClone(records);
+}
+
+function pruneStaleOfflineDocuments(state, incomingRecords, options) {
+  if (options.sourceMode !== 'real') return 0;
+  const offlineRecords = incomingRecords.filter((record) => record.sourceType === 'OFFLINE_REIMBURSEMENT');
+  const tenantKey = options.tenantKey || 'puhui';
+  const incomingIds = new Set(offlineRecords.map((record) => record.sourceId));
+  let removedCount = 0;
+  for (const [sourceId, record] of Object.entries(state.syncedDocuments)) {
+    if (
+      record.sourceMode === 'real'
+      && record.tenantKey === tenantKey
+      && record.sourceType === 'OFFLINE_REIMBURSEMENT'
+      && !incomingIds.has(sourceId)
+    ) {
+      delete state.syncedDocuments[sourceId];
+      removedCount += 1;
+    }
+  }
+  return removedCount;
 }
 
 function pruneStaleOnlineDocuments(state, incomingRecords, options) {
