@@ -147,7 +147,7 @@ test('offline-only mode does not query settlement bill APIs', async (t) => {
   assert.equal(paths.includes('/openapi/bill/business/v1/list'), false);
 });
 
-test('pulls details only for approved employee reimbursements', async (t) => {
+test('returns only approved documents while cataloging every eligible employee', async (t) => {
   const previousMode = process.env.FENBEITONG_MODE;
   const previousOfflineOnly = process.env.FENBEITONG_OFFLINE_ONLY;
   const previousDataDir = process.env.APP_DATA_DIR;
@@ -184,9 +184,10 @@ test('pulls details only for approved employee reimbursements', async (t) => {
         data: {
           total_pages: 1,
           reimbursements: [
-            { id: 'APPROVED-1', apply_state: 4 },
-            { id: 'PENDING-1', apply_state: 2 },
-            { id: 'REJECTED-1', apply_state: 32768 }
+            { id: 'APPROVED-1', apply_state: 4, proposer_name: 'Employee A', third_proposer_id: 'A' },
+            { id: 'PENDING-1', apply_state: 2, proposer_name: 'Employee B', third_proposer_id: 'B' },
+            { id: 'REJECTED-1', apply_state: 32768, proposer_name: 'Employee C', third_proposer_id: 'C' },
+            { id: 'BLANK-TYPE-1', apply_state: 4, proposer_name: 'Employee D', third_proposer_id: 'D' }
           ]
         }
       });
@@ -198,13 +199,15 @@ test('pulls details only for approved employee reimbursements', async (t) => {
         code: 0,
         msg: 'success',
         data: {
-          reimb_id: 'APPROVED-ID-1',
-          reimb_code: 'APPROVED-1',
+          reimb_id: `${payload.reimb_code}-ID`,
+          reimb_code: payload.reimb_code,
           apply_state: 4,
           expenses: [{
             id: 'EXPENSE-1',
             total_amount: 100,
-            cost_category: { code: 'CI001', name: 'Approved expense' }
+            cost_category: payload.reimb_code === 'BLANK-TYPE-1'
+              ? { code: '', name: '' }
+              : { code: 'CI001', name: 'Approved expense' }
           }]
         }
       });
@@ -216,7 +219,17 @@ test('pulls details only for approved employee reimbursements', async (t) => {
 
   assert.equal(result.documents.length, 1);
   assert.equal(result.documents[0].data.reimb_code, 'APPROVED-1');
-  assert.deepEqual(detailRequests, [{ reimb_code: 'APPROVED-1' }]);
+  assert.deepEqual(result.requesters, [
+    { name: 'Employee A', code: 'A' },
+    { name: 'Employee B', code: 'B' },
+    { name: 'Employee C', code: 'C' }
+  ]);
+  assert.deepEqual(detailRequests, [
+    { reimb_code: 'APPROVED-1' },
+    { reimb_code: 'PENDING-1' },
+    { reimb_code: 'REJECTED-1' },
+    { reimb_code: 'BLANK-TYPE-1' }
+  ]);
 });
 
 test('uses one access token to pull only posted settlement bill rows', async (t) => {

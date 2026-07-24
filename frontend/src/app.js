@@ -48,6 +48,7 @@ const state = {
   selectedKingdeeAcctIdKey: 'puhui-6977227150362f',
   selectionDirty: false,
   syncedDocuments: [],
+  requesterCatalog: [],
   selectedSourceIds: new Set(),
   visibleColumnKeys: new Set(['status', 'sourceType', 'sourceCode', 'documentType', 'reason', 'requester', 'department', 'expenseCategories', 'startLocation', 'arrivalLocation', 'trafficType', 'purpose', 'expenseDepartment', 'splitTaxAmount', 'splitExcludingTaxAmount', 'departmentAttributionAmount', 'requestOrganization', 'requestPaymentAmount', 'sourceDocumentStatus', 'expenseOrganization', 'paymentAmount', 'businessLine', 'interfaceSource', 'time']),
   sortField: 'time',
@@ -598,15 +599,17 @@ async function queryProcess() {
 }
 
 async function refreshAll() {
-  const [settings, status, documents] = await Promise.all([
+  const [settings, status, documents, requesters] = await Promise.all([
     api.integrationSettings(),
     api.systemStatus(),
-    api.listSyncedDocuments()
+    api.listSyncedDocuments(),
+    api.listFenbeitongRequesters(state.selectedTenantKey)
   ]);
   state.currentIntegrationSettings = settings;
   state.currentStatus = status;
   state.syncedDocuments = documents;
-  renderLedgerFilterOptions(documents);
+  state.requesterCatalog = requesters;
+  renderLedgerFilterOptions(documents, requesters);
   renderStatus(status, settings);
   renderSourceQueue(documents);
   await refreshRecords();
@@ -1088,14 +1091,18 @@ function filterLedgerRecords(records) {
   });
 }
 
-function renderLedgerFilterOptions(records) {
+function renderLedgerFilterOptions(records, requesterCatalog = []) {
   const selectedRequester = requesterFilterSelect.value;
   const selectedSourceType = sourceTypeFilterSelect.value;
   const selectedDate = dateFilterSelect.value;
-  const requesters = [...new Set(records.map((record) => {
+  const catalogNames = requesterCatalog
+    .map((requester) => String(requester?.name || '').trim())
+    .filter(Boolean);
+  const requesters = [...new Set((catalogNames.length > 0 ? catalogNames : records.map((record) => {
     const summary = buildSourceSummary(record);
     return displayRequester(record, summary.requester);
-  }).filter((value) => value && value !== '-'))].sort((left, right) => left.localeCompare(right, 'zh-CN'));
+  })).filter((value) => value && value !== '-'))]
+    .sort((left, right) => left.localeCompare(right, 'zh-CN'));
   const sourceTypes = new Map();
   const dates = new Set();
   for (const record of records) {

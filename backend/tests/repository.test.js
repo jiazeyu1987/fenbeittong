@@ -17,6 +17,7 @@ import {
   getKingdeeAccountSelection,
   getKingdeeAcctIdSelection,
   getDashboardSummary,
+  listFenbeitongRequesterCatalog,
   listSyncedDocuments,
   listOperationLogs,
   listProcessRecords,
@@ -26,6 +27,7 @@ import {
   recordOperation,
   resetRepository,
   restoreErpPushAfterRetryFailure,
+  saveFenbeitongRequesterCatalog,
   savePreparedRecord,
   saveIntegrationSelection,
   saveSyncedDocument,
@@ -336,6 +338,23 @@ test('real full sync removes stale offline rows that no longer pass source filte
 
   assert.equal(findSyncedDocument('OFFLINE-STALE'), null);
   assert.equal(findSyncedDocument('OFFLINE-KEEP').sourceCode, 'OFFLINE-KEEP-CODE');
+});
+
+test('requester catalog keeps the complete employee reimbursement proposer list', () => {
+  resetRepository();
+
+  saveFenbeitongRequesterCatalog([
+    { name: 'Employee C', code: 'C' },
+    { name: 'Employee A', code: 'A' },
+    { name: 'Employee B', code: 'B' },
+    { name: 'Employee A', code: 'DUPLICATE' }
+  ], 'puhui');
+
+  assert.deepEqual(listFenbeitongRequesterCatalog('puhui'), [
+    { name: 'Employee A', code: 'A' },
+    { name: 'Employee B', code: 'B' },
+    { name: 'Employee C', code: 'C' }
+  ]);
 });
 
 test('sync accepts real Fenbeitong order-only reimbursement fields', () => {

@@ -53,13 +53,21 @@ export async function pullFenbeitongReimbursements(options = {}) {
     ...config.listPayloadOverrides
   };
   const summaries = await pullAllReimbursementSummaries(tenant, accessToken, listPayload);
-  const approvedSummaries = summaries.filter(hasApprovedReimbursementState);
-  const offlineDocuments = await mapWithConcurrency(approvedSummaries, 16, async (summary) => {
+  const detailedReimbursements = await mapWithConcurrency(summaries, 16, async (summary) => {
     const detailPayload = buildDetailRequestPayload(summary);
     const detailBody = await postFenbeitongApi(tenant, tenant.detailPath, accessToken, detailPayload);
-    return validateDetailDocument(detailBody);
+    return {
+      summary,
+      document: validateDetailDocument(detailBody)
+    };
   });
-  const documents = offlineDocuments.filter(hasOfflineExpenseType);
+  const eligibleReimbursements = detailedReimbursements.filter(({ document }) => (
+    hasOfflineExpenseType(document)
+  ));
+  const requesters = reimbursementRequesterCatalog(eligibleReimbursements.map(({ summary }) => summary));
+  const documents = eligibleReimbursements
+    .filter(({ summary }) => hasApprovedReimbursementState(summary))
+    .map(({ document }) => document);
   if (config.offlineOnly) {
     return {
       mode: 'real',
@@ -67,6 +75,7 @@ export async function pullFenbeitongReimbursements(options = {}) {
       mockReplacement: false,
       mockReason: '',
       documents,
+      requesters,
       sourceWarnings: []
     };
   }
@@ -78,6 +87,7 @@ export async function pullFenbeitongReimbursements(options = {}) {
     mockReplacement: false,
     mockReason: '',
     documents,
+    requesters,
     sourceWarnings: onlineResult.warnings
   };
 }
@@ -1131,6 +1141,29 @@ function hasOfflineExpenseType(document) {
 
 function hasApprovedReimbursementState(summary) {
   return Number(summary?.apply_state) === APPROVED_REIMBURSEMENT_STATE;
+}
+
+function reimbursementRequesterCatalog(summaries) {
+  const byName = new Map();
+  for (const summary of summaries) {
+    const name = String(
+      summary?.proposer_name
+      || summary?.user_name
+      || summary?.submitter_name
+      || ''
+    ).trim();
+    if (!name || byName.has(name)) continue;
+    byName.set(name, {
+      name,
+      code: String(
+        summary?.third_proposer_id
+        || summary?.proposer_id
+        || summary?.user_code
+        || ''
+      ).trim()
+    });
+  }
+  return [...byName.values()].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
 }
 
 export function hasOfflineExpenseTypeForTest(document) {

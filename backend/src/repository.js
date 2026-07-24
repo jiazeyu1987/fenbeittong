@@ -232,6 +232,30 @@ export function saveSyncedDocuments(documents, batchId = '', options = {}) {
   return structuredClone(records);
 }
 
+export function saveFenbeitongRequesterCatalog(requesters, tenantKey = 'puhui') {
+  const state = loadState();
+  const normalized = [];
+  const names = new Set();
+  for (const requester of Array.isArray(requesters) ? requesters : []) {
+    const name = String(requester?.name || '').trim();
+    if (!name || names.has(name)) continue;
+    names.add(name);
+    normalized.push({
+      name,
+      code: String(requester?.code || '').trim()
+    });
+  }
+  normalized.sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
+  state.fenbeitongRequesterCatalogs[tenantKey] = normalized;
+  persistState(state);
+  return structuredClone(normalized);
+}
+
+export function listFenbeitongRequesterCatalog(tenantKey = 'puhui') {
+  const state = loadState();
+  return structuredClone(state.fenbeitongRequesterCatalogs[tenantKey] || []);
+}
+
 function pruneStaleOfflineDocuments(state, incomingRecords, options) {
   if (options.sourceMode !== 'real') return 0;
   const offlineRecords = incomingRecords.filter((record) => record.sourceType === 'OFFLINE_REIMBURSEMENT');
@@ -804,6 +828,7 @@ function defaultState() {
       selectedAccountKey: '',
       selectedAcctIdKey: ''
     },
+    fenbeitongRequesterCatalogs: {},
     syncedDocuments: {},
     voucherRecords: {},
     syncBatches: {},

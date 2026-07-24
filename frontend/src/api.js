@@ -50,6 +50,7 @@ export const api = {
     body: JSON.stringify(data)
   }),
   listSyncedDocuments: () => request('/api/fenbeitong-expense-reimbursement/synced-documents'),
+  listFenbeitongRequesters: (tenantKey) => request(`/api/fenbeitong-expense-reimbursement/requesters?tenantKey=${encodeURIComponent(tenantKey)}`),
   preview: (data) => request('/api/fenbeitong-expense-reimbursement/preview', {
     method: 'POST',
     body: JSON.stringify(data)

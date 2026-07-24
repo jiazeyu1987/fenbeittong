@@ -14,6 +14,7 @@ import {
   finishSyncBatch,
   getIntegrationSelection,
   isRealPushedRecord,
+  saveFenbeitongRequesterCatalog,
   listSyncedDocuments,
   recordOperation,
   restoreErpPushAfterRetryFailure,
@@ -38,6 +39,7 @@ export async function syncFenbeitongDocuments(options = {}) {
       mockReason: result.mockReason,
       tenantKey: result.tenantKey
     });
+    const requesters = saveFenbeitongRequesterCatalog(result.requesters, result.tenantKey);
     const finishedBatch = finishSyncBatch(batch.batchId, {
       status: 'SUCCESS',
       sourceMode: result.mode,
@@ -49,7 +51,7 @@ export async function syncFenbeitongDocuments(options = {}) {
       failCount: 0,
       message: (result.sourceWarnings || []).join('；')
     });
-    return { batch: finishedBatch, records };
+    return { batch: finishedBatch, records, requesters };
   } catch (error) {
     finishSyncBatch(batch.batchId, {
       status: 'FAILED',

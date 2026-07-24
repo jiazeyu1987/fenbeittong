@@ -207,7 +207,7 @@ test('ledger supports requester/source filters and filtered amount totals', () =
   assert.match(html, /id="sourceTypeFilterSelect"[\s\S]*全部来源类型/);
   assert.match(html, /id="dateFilterSelect"[\s\S]*全部日期/);
   assert.match(html, /id="sourceQueueTotals"/);
-  assert.match(app, /function renderLedgerFilterOptions\(records\)/);
+  assert.match(app, /function renderLedgerFilterOptions\(records,\s*requesterCatalog/);
   assert.match(app, /function renderLedgerTotals\(records\)/);
   assert.match(app, /requesterFilterSelect\.value/);
   assert.match(app, /sourceTypeFilterSelect\.value/);

@@ -16,6 +16,7 @@ import {
   getConfig,
   getKingdeeAccountSelection,
   getIntegrationSettings,
+  listFenbeitongRequesterCatalog,
   listOperationLogs,
   listProcessRecords,
   listSyncedDocuments,
@@ -115,6 +116,10 @@ export async function handleApi(request, response) {
     }
     if (request.method === 'GET' && url.pathname === '/api/fenbeitong-expense-reimbursement/synced-documents') {
       return sendJson(response, 200, { success: true, data: listSyncedDocuments() });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/fenbeitong-expense-reimbursement/requesters') {
+      const tenantKey = url.searchParams.get('tenantKey') || getIntegrationSelection().tenantKey;
+      return sendJson(response, 200, { success: true, data: listFenbeitongRequesterCatalog(tenantKey) });
     }
     if (request.method === 'POST' && url.pathname === '/api/fenbeitong-expense-reimbursement/preview') {
       return sendJson(response, 200, { success: true, data: await previewExpenseReimbursement(await readJson(request)) });
