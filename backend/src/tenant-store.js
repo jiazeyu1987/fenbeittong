@@ -39,6 +39,11 @@ export function saveFenbeitongTenantCredentials(input) {
     authPath: input.authPath ?? previous.authPath ?? '/openapi/auth/getToken',
     pullPath: input.pullPath ?? previous.pullPath ?? '/openapi/reimbursement/v1/list',
     detailPath: input.detailPath ?? previous.detailPath ?? '/openapi/reimbursement/v2/detail',
+    billBaseUrl: input.billBaseUrl ?? previous.billBaseUrl ?? 'https://openapi.fenbeitong.com',
+    billNumberPath: input.billNumberPath ?? previous.billNumberPath ?? '/openapi/bill/business/v1/list',
+    billDetailPath: input.billDetailPath ?? previous.billDetailPath ?? '/openapi/bill/business/v1/detail',
+    billSignKey: input.billSignKey ?? previous.billSignKey ?? '',
+    billMonthsBack: positiveInteger(input.billMonthsBack ?? previous.billMonthsBack ?? 2, 'billMonthsBack'),
     appId: input.appId ?? previous.appId ?? '',
     appKey: input.appKey ?? previous.appKey ?? '',
     accessToken: input.accessToken ?? previous.accessToken ?? '',
@@ -52,10 +57,11 @@ export function saveFenbeitongTenantCredentials(input) {
   getDatabase().prepare(`
     INSERT INTO fenbeitong_tenants (
       tenant_key, name, status, auth_mode, base_url, auth_path, pull_path, detail_path,
+      bill_base_url, bill_number_path, bill_detail_path, bill_sign_key, bill_months_back,
       app_id, app_key, access_token, token_expires_at, refresh_interval_seconds,
       list_payload_json, display_order, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(tenant_key) DO UPDATE SET
       name = excluded.name,
       status = excluded.status,
@@ -64,6 +70,11 @@ export function saveFenbeitongTenantCredentials(input) {
       auth_path = excluded.auth_path,
       pull_path = excluded.pull_path,
       detail_path = excluded.detail_path,
+      bill_base_url = excluded.bill_base_url,
+      bill_number_path = excluded.bill_number_path,
+      bill_detail_path = excluded.bill_detail_path,
+      bill_sign_key = excluded.bill_sign_key,
+      bill_months_back = excluded.bill_months_back,
       app_id = excluded.app_id,
       app_key = excluded.app_key,
       access_token = excluded.access_token,
@@ -81,6 +92,11 @@ export function saveFenbeitongTenantCredentials(input) {
     tenant.authPath,
     tenant.pullPath,
     tenant.detailPath,
+    tenant.billBaseUrl,
+    tenant.billNumberPath,
+    tenant.billDetailPath,
+    tenant.billSignKey,
+    tenant.billMonthsBack,
     tenant.appId,
     tenant.appKey,
     tenant.accessToken,
@@ -160,6 +176,34 @@ function migrate(db) {
     CREATE INDEX IF NOT EXISTS idx_fenbeitong_tenants_status
       ON fenbeitong_tenants(status);
   `);
+  const columns = new Set(db.prepare('PRAGMA table_info(fenbeitong_tenants)').all().map((column) => column.name));
+  const additions = [
+    ['bill_base_url', "TEXT NOT NULL DEFAULT 'https://openapi.fenbeitong.com'"],
+    ['bill_number_path', "TEXT NOT NULL DEFAULT '/openapi/bill/business/v1/list'"],
+    ['bill_detail_path', "TEXT NOT NULL DEFAULT '/openapi/bill/business/v1/detail'"],
+    ['bill_sign_key', "TEXT NOT NULL DEFAULT ''"],
+    ['bill_months_back', 'INTEGER NOT NULL DEFAULT 2']
+  ];
+  for (const [name, definition] of additions) {
+    if (!columns.has(name)) db.exec(`ALTER TABLE fenbeitong_tenants ADD COLUMN ${name} ${definition}`);
+  }
+  db.prepare(`
+    UPDATE fenbeitong_tenants
+    SET bill_base_url = ?,
+        bill_number_path = ?,
+        bill_detail_path = ?,
+        updated_at = ?
+    WHERE bill_number_path = ?
+      AND bill_detail_path = ?
+      AND bill_sign_key = ''
+  `).run(
+    'https://openapi.fenbeitong.com',
+    '/openapi/bill/business/v1/list',
+    '/openapi/bill/business/v1/detail',
+    new Date().toISOString(),
+    '/openapi/func/bill/queryBillNo',
+    '/openapi/func/bill/queryOrderDetail'
+  );
 }
 
 function seedTenants(db) {
@@ -214,6 +258,11 @@ function mapTenant(row, options = {}) {
     authPath: row.auth_path,
     pullPath: row.pull_path,
     detailPath: row.detail_path,
+    billBaseUrl: row.bill_base_url,
+    billNumberPath: row.bill_number_path,
+    billDetailPath: row.bill_detail_path,
+    billMonthsBack: row.bill_months_back,
+    billSignKeyConfigured: Boolean(row.bill_sign_key),
     refreshIntervalSeconds: row.refresh_interval_seconds,
     tokenExpiresAt: row.token_expires_at,
     listPayload: parseListPayload(row.list_payload_json),
@@ -228,6 +277,7 @@ function mapTenant(row, options = {}) {
     tenant.appId = row.app_id;
     tenant.appKey = row.app_key;
     tenant.accessToken = row.access_token;
+    tenant.billSignKey = row.bill_sign_key;
   }
   return tenant;
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildMockTemplate } from '../../backend/src/mock-template.js';
-import { buildVoucherPreview } from '../../backend/src/voucher-mapper.js';
+import { buildExpenseReimbursementPreview } from '../../backend/src/expense-reimbursement-mapper.js';
 import { getSystemStatus } from '../../backend/src/services/system-status.js';
 import { resetRepository } from '../../backend/src/repository.js';
 import { validateFenbeitongConfig } from '../../backend/src/config.js';
@@ -18,72 +18,59 @@ import {
 
 test('mock template contains required fields and no real token', () => {
   const template = buildMockTemplate();
-  assert.equal(template.accountBookNumber, '007');
-  assert.equal(template.voucherGroupNumber, 'PZZ9');
-  assert.equal(template.templateErpFid, '111814');
-  assert.equal(template.categoryAccountNumbers.TRAVEL, '6111');
-  assert.equal(template.categoryAccountNumbers.CI007, '6111');
-  assert.equal(template.departmentDetailField, '');
-  assert.equal(template.employeeDetailField, '');
-  assert.equal(template.creditAccountNumber, '1001.01');
-  assert.equal(template.splitDeductibleTax, false);
-  assert.equal(template.erpTemplateModel.AccountBookID.Number, '007');
-  assert.equal(template.erpTemplateModel.ACCBOOKORGID.Number, '886');
-  assert.equal(template.erpTemplateModel.VOUCHERGROUPID.Number, 'PZZ9');
+  assert.equal(template.expenseReimbursementOrgNumber, '886');
+  assert.equal(template.expenseReimbursementBillTypeNumber, 'FYBXD001_SYS');
+  assert.equal(template.expenseItemNumberMappings.TRAVEL, 'CI011');
+  assert.equal(template.expenseItemNumberMappings.CI00802, 'CI008');
+  assert.equal(template.employeeDetailNumberMappings.X040, '0000000000001');
+  assert.equal(template.employeeDetailNumberMappings.X026, 'PL0205');
   assert.equal(template.fenbeitongAccessToken, '');
   assert.match(template.mockFixedJson, /MOCK-REIMB-001/);
 });
 
 test('preview response keeps stable contract fields', () => {
   const template = buildMockTemplate();
-  const preview = buildVoucherPreview({
+  const preview = buildExpenseReimbursementPreview({
     fixedJson: template.mockFixedJson,
-    voucherDate: template.mockVoucherDate,
-    year: template.mockYear,
-    period: template.mockPeriod,
+    documentDate: template.mockDocumentDate,
     config: template
   });
 
-  for (const field of ['sourceId', 'sourceCode', 'idempotencyKey', 'contentHash', 'debitTotal', 'creditTotal', 'balanced', 'payload']) {
+  for (const field of ['sourceId', 'sourceCode', 'idempotencyKey', 'contentHash', 'totalAmount', 'expenseEntries', 'payload']) {
     assert.ok(Object.hasOwn(preview, field), `${field} should exist`);
   }
-  assert.ok(Array.isArray(preview.voucherLines));
-  assert.ok(preview.voucherLines.length > 0);
-  assert.ok(Array.isArray(preview.sourceSummary.expenseCategories));
-  assert.equal(preview.sourceSummary.requester, 'Mock User');
-  assert.equal(preview.taxSummary.deductibleTaxAmount, 0);
-  assert.equal(preview.voucherLines[0].sourceExpenseId, 'EXP-001');
-  assert.match(preview.voucherLines[0].mappingRule, /category TRAVEL/);
-  assert.equal(preview.financialSummary.documentStatusName, 'Saved draft only; not submitted, audited, or posted');
-  assert.equal(preview.financialSummary.lineCount, preview.voucherLines.length);
+  assert.ok(Array.isArray(preview.expenseEntries));
+  assert.ok(preview.expenseEntries.length > 0);
+  assert.equal(preview.sourceSummary.requester, '吴立珠');
+  assert.equal(preview.taxSummary.taxAmount, 6.11);
+  assert.equal(preview.expenseEntries[0].sourceExpenseId, 'EXP-001');
+  assert.equal(preview.expenseEntries[0].expenseItemNumber, 'CI011');
+  assert.equal(preview.documentSummary.formId, 'ER_ExpReimbursement');
+  assert.equal(preview.documentSummary.entryCount, preview.expenseEntries.length);
 });
 
-test('voucher payload writes only Kingdee GL_VOUCHER fields', () => {
+test('payload writes only Kingdee ER_ExpReimbursement fields', () => {
   const template = buildMockTemplate();
-  const preview = buildVoucherPreview({
+  const preview = buildExpenseReimbursementPreview({
     fixedJson: template.mockFixedJson,
-    voucherDate: template.mockVoucherDate,
-    year: template.mockYear,
-    period: template.mockPeriod,
+    documentDate: template.mockDocumentDate,
     config: template
   });
 
-  assert.ok(Object.hasOwn(preview.payload.Model, 'AccountBookID'));
-  assert.ok(Object.hasOwn(preview.payload.Model, 'VOUCHERGROUPID'));
+  assert.equal(preview.payload.Model.FOrgID.FNumber, '886');
+  assert.equal(preview.payload.Model.FBillTypeID.FNumber, 'FYBXD001_SYS');
+  assert.equal(preview.payload.Model.FProposerID.FStaffNumber, 'PH022');
+  assert.equal(preview.payload.Model.FRequestDeptID.FNumber, 'BM000006');
+  assert.equal(preview.payload.Model.FRequestType, '0');
+  assert.equal(preview.payload.Model.FRealPay, false);
+  assert.equal(preview.payload.Model.FReqAmountSum, 228);
   assert.ok(Object.hasOwn(preview.payload.Model, 'FEntity'));
-  assert.equal(Object.hasOwn(preview.payload.Model, 'FAccountBookID'), false);
-  assert.equal(Object.hasOwn(preview.payload.Model, 'FVOUCHERGROUPID'), false);
-  assert.equal(preview.payload.Model.AccountBookID.Number, '007');
-  assert.equal(preview.payload.Model.ACCBOOKORGID.Number, '886');
-  assert.equal(preview.payload.Model.VOUCHERGROUPID.Number, 'PZZ9');
-  assert.equal(preview.payload.Model.FEntity[0].FEXCHANGERATETYPE.FNumber, 'HLTX01_SYS');
-  assert.equal(preview.payload.Model.FEntity[0].FAMOUNTFOR, 108);
-  assert.equal(preview.payload.Model.FEntity[0].FDC, '1');
-  assert.equal(preview.payload.Model.FEntity[0].FACCOUNTID.FNumber, '6111');
-  assert.deepEqual(preview.payload.Model.FEntity[0].FDetailID, {});
-  assert.equal(preview.payload.Model.FEntity.at(-1).FACCOUNTID.FNumber, '1001.01');
-  assert.equal(Object.hasOwn(preview.payload.Model, 'reimb_id'), false);
-  assert.equal(Object.hasOwn(preview.payload.Model.FEntity[0], 'cost_category'), false);
+  assert.equal(preview.payload.Model.FEntity[0].FExpID.FNumber, 'CI011');
+  assert.equal(preview.payload.Model.FEntity[0].FExpenseDeptEntryID, null);
+  assert.equal(preview.payload.Model.FEntity[0].FExpSubmitAmount, 108);
+  assert.equal(preview.payload.Model.FEntity[0].FRequestAmount, 108);
+  assert.equal(preview.payload.Model.FEntity[0].FTaxAmt, 6.11);
+  assert.doesNotMatch(JSON.stringify(preview.payload), /GL_VOUCHER|FVOUCHERID|FAccountBookID|FVOUCHERGROUPID|FDEBIT|FCREDIT/);
 });
 
 test('system status exposes mode and readiness for formal workflow', () => {
@@ -145,17 +132,18 @@ test('mock Fenbeitong pull returns finance-sized sortable reimbursement ledger',
     const result = await pullFenbeitongReimbursements();
     assert.equal(result.mode, 'mock');
     assert.equal(result.mockReplacement, true);
-    assert.equal(result.documents.length, 100);
+    assert.equal(result.documents.length, 101);
 
-    const sourceIds = result.documents.map((document) => document.data.reimb_id);
-    const sourceCodes = result.documents.map((document) => document.data.reimb_code);
-    const amounts = result.documents.map((document) => Number(document.data.total_amount));
-    const times = result.documents.map((document) => document.data.create_time);
+    const sourceIds = result.documents.map((document) => document.data.reimb_id || `${document.data.bill_no}:${document.data.order?.order_id}`);
+    const sourceCodes = result.documents.map((document) => document.data.reimb_code || document.data.bill_no);
+    const amounts = result.documents.map((document) => Number(document.data.total_amount || document.data.order?.repayment_total_amount));
+    const times = result.documents.map((document) => document.data.create_time || document.data.order?.order_create_time);
 
-    assert.equal(new Set(sourceIds).size, 100);
-    assert.equal(new Set(sourceCodes).size, 100);
+    assert.equal(new Set(sourceIds).size, 101);
+    assert.equal(new Set(sourceCodes).size, 101);
     assert.ok(new Set(amounts).size > 20);
     assert.ok(new Set(times).size > 20);
+    assert.equal(result.documents.filter((document) => document.data.source_kind === 'ONLINE_MONTHLY_BILL').length, 1);
   } finally {
     restore();
   }
@@ -229,6 +217,13 @@ test('real Fenbeitong app-key mode obtains token from official getToken endpoint
         }
       });
     }
+    if (String(url).endsWith('/openapi/bill/business/v1/list')) {
+      return jsonResponse({
+        code: 0,
+        msg: 'success',
+        data: { page_info: { total_pages: 1 }, list: [] }
+      });
+    }
     assert.deepEqual(JSON.parse(options.body), { reimb_code: 'REAL-REIMB-001' });
     return jsonResponse({
       code: 0,
@@ -260,7 +255,14 @@ test('real Fenbeitong app-key mode obtains token from official getToken endpoint
   assert.equal(result.documents[0].data.reimb_id, 'REAL-REIMB-001');
   assert.equal(result.documents[0].data.reimb_code, 'REAL-REIMB-001');
   assert.equal(result.documents[0].data.proposer_name, 'Real User');
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 7);
+  assert.deepEqual(
+    calls
+      .filter((call) => call.url.endsWith('/openapi/bill/business/v1/list'))
+      .map((call) => JSON.parse(call.options.body).state),
+    [1, 2, 3, 4]
+  );
+  assert.equal(calls.some((call) => call.url.includes('/openapi/order/')), false);
 
   globalThis.fetch = previousFetch;
   resetTenantStoreForTest();
@@ -303,6 +305,13 @@ test('real Fenbeitong app-key mode pulls reimbursement detail after list summary
         }
       });
     }
+    if (String(url).endsWith('/openapi/bill/business/v1/list')) {
+      return jsonResponse({
+        code: 0,
+        msg: 'success',
+        data: { page_info: { total_pages: 1 }, list: [] }
+      });
+    }
     assert.equal(options.headers['access-token'], 'issued-access-token');
     assert.deepEqual(JSON.parse(options.body), { reimb_code: 'REAL-CODE-001' });
     return jsonResponse({
@@ -342,7 +351,14 @@ test('real Fenbeitong app-key mode pulls reimbursement detail after list summary
   assert.equal(result.documents[0].data.reimb_id, 'REAL-ID-001');
   assert.equal(result.documents[0].data.reimb_code, 'REAL-CODE-001');
   assert.equal(result.documents[0].data.expenses[0].cost_category.code, 'TRAVEL');
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 7);
+  assert.deepEqual(
+    calls
+      .filter((call) => call.url.endsWith('/openapi/bill/business/v1/list'))
+      .map((call) => JSON.parse(call.options.body).state),
+    [1, 2, 3, 4]
+  );
+  assert.equal(calls.some((call) => call.url.includes('/openapi/order/')), false);
 
   globalThis.fetch = previousFetch;
   resetTenantStoreForTest();
@@ -367,6 +383,13 @@ test('real Fenbeitong app-key mode reuses Puhui access token within two hours', 
         code: 0,
         msg: 'success',
         data: { reimbursements: [{ id: 'REAL-CODE-CACHE' }] }
+      });
+    }
+    if (String(url).endsWith('/openapi/bill/business/v1/list')) {
+      return jsonResponse({
+        code: 0,
+        msg: 'success',
+        data: { page_info: { total_pages: 1 }, list: [] }
       });
     }
     return jsonResponse({
@@ -395,6 +418,7 @@ test('real Fenbeitong app-key mode reuses Puhui access token within two hours', 
 
   assert.equal(calls.filter((call) => call.url.endsWith('/openapi/auth/getToken')).length, 1);
   assert.equal(calls.filter((call) => call.url.endsWith('/openapi/reimbursement/v1/list')).length, 2);
+  assert.equal(calls.filter((call) => call.url.includes('/openapi/order/')).length, 0);
   assert.equal(Date.parse(getFenbeitongTenant('puhui', { includeSecrets: true }).tokenExpiresAt) > Date.now(), true);
 
   globalThis.fetch = previousFetch;

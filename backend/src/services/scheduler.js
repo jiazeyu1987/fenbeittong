@@ -1,6 +1,9 @@
 import { getAppConfig } from '../config.js';
 import { getConfig, recordOperation } from '../repository.js';
-import { pushVoucherToErp, syncFenbeitongDocuments } from './voucher-workflow.js';
+import {
+  saveExpenseReimbursementToErp,
+  syncFenbeitongDocuments
+} from './expense-reimbursement-workflow.js';
 
 let timer = null;
 let running = false;
@@ -77,17 +80,15 @@ export async function runSchedulerOnce(trigger = 'manual') {
     const pushed = [];
 
     if (schedulerState.autoPushErp) {
-      const voucherConfig = getConfig();
-      if (!voucherConfig) {
-        throw new Error('scheduler auto push requires saved voucher configuration');
+      const reimbursementConfig = getConfig();
+      if (!reimbursementConfig) {
+        throw new Error('scheduler auto save requires expense reimbursement configuration');
       }
       for (const record of syncResult.records) {
-        pushed.push(await pushVoucherToErp({
+        pushed.push(await saveExpenseReimbursementToErp({
           sourceId: record.sourceId,
-          voucherDate: currentDate(),
-          year: new Date().getFullYear(),
-          period: new Date().getMonth() + 1,
-          config: voucherConfig
+          documentDate: currentDate(),
+          config: reimbursementConfig
         }));
       }
     }

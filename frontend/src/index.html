@@ -3,119 +3,218 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>分贝通金蝶凭证集成工作台</title>
+    <title>分贝通金蝶费用报销单工作台</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="ledger-shell">
-      <section id="financeWorkbenchHeader" class="ledger-header" aria-label="凭证生成工作台">
-        <div>
-          <h1>报销单列表</h1>
-          <p>按报销单逐笔复核费用、税额、科目、辅助核算和借贷平衡，仅保存ERP草稿凭证。</p>
+      <section id="financeWorkbenchHeader" class="ledger-header" aria-label="费用报销单工作台">
+        <div class="ledger-brand">
+          <span class="ledger-brand-mark" aria-hidden="true">费</span>
+          <div>
+            <p class="ledger-eyebrow">FINANCE OPERATIONS</p>
+            <h1>费用报销工作台</h1>
+            <p>统一核对分贝通真实结算数据，并生成金蝶费用报销单</p>
+          </div>
         </div>
-        <span id="statusBadge" class="badge">未连接</span>
+        <div class="ledger-header-status">
+          <span class="data-scope-chip">线上仅取结算入账</span>
+          <span class="data-scope-chip">ERP仅暂存</span>
+          <span id="statusBadge" class="badge">未连接</span>
+        </div>
       </section>
 
       <section id="ledgerToolbar" class="ledger-toolbar" aria-label="&#x62A5;&#x9500;&#x5355;&#x67E5;&#x8BE2;&#x5DE5;&#x5177;&#x680F;">
-        <select id="searchFieldSelect" aria-label="&#x67E5;&#x8BE2;&#x5B57;&#x6BB5;">
-          <option value="sourceCode">&#x62A5;&#x9500;&#x5355;&#x53F7;</option>
-          <option value="requester">&#x62A5;&#x9500;&#x4EBA;</option>
-          <option value="department">&#x90E8;&#x95E8;</option>
-          <option value="status">&#x5355;&#x636E;&#x72B6;&#x6001;</option>
-        </select>
-        <select id="matchModeSelect" aria-label="&#x5339;&#x914D;&#x65B9;&#x5F0F;">
-          <option value="contains">&#x5305;&#x542B;</option>
-          <option value="equals">&#x7B49;&#x4E8E;</option>
-          <option value="notEquals">&#x4E0D;&#x7B49;&#x4E8E;</option>
-        </select>
-        <input id="sourceSearchInput" placeholder="&#x8BF7;&#x8F93;&#x5165;&#x62A5;&#x9500;&#x5355;&#x53F7;" />
-        <button id="queryLedgerButton" class="primary-action compact-action">&#x67E5;&#x8BE2;</button>
+        <div class="toolbar-row toolbar-filter-row">
+          <div class="toolbar-row-title">
+            <span class="toolbar-step">01</span>
+            <div><strong>筛选数据</strong><small>快速定位需要处理的费用明细</small></div>
+          </div>
+          <div class="toolbar-controls toolbar-search-controls">
+            <select id="searchFieldSelect" aria-label="&#x67E5;&#x8BE2;&#x5B57;&#x6BB5;">
+              <option value="sourceCode">&#x62A5;&#x9500;&#x5355;&#x53F7;</option>
+              <option value="requester">&#x62A5;&#x9500;&#x4EBA;</option>
+              <option value="department">&#x90E8;&#x95E8;</option>
+              <option value="status">&#x5355;&#x636E;&#x72B6;&#x6001;</option>
+              <option value="sourceType">来源类型</option>
+            </select>
+            <select id="matchModeSelect" aria-label="&#x5339;&#x914D;&#x65B9;&#x5F0F;">
+              <option value="contains">&#x5305;&#x542B;</option>
+              <option value="equals">&#x7B49;&#x4E8E;</option>
+              <option value="notEquals">&#x4E0D;&#x7B49;&#x4E8E;</option>
+            </select>
+            <input id="sourceSearchInput" placeholder="&#x8BF7;&#x8F93;&#x5165;&#x62A5;&#x9500;&#x5355;&#x53F7;" />
+            <button id="queryLedgerButton" class="primary-action compact-action">&#x67E5;&#x8BE2;</button>
+          </div>
+          <div class="toolbar-controls toolbar-quick-filters">
+            <select id="requesterFilterSelect" class="ledger-quick-filter" aria-label="按报销人筛选">
+              <option value="">全部报销人</option>
+            </select>
+            <select id="sourceTypeFilterSelect" class="ledger-quick-filter" aria-label="按来源类型筛选">
+              <option value="">全部来源类型</option>
+            </select>
+            <select id="dateFilterSelect" class="ledger-quick-filter" aria-label="按日期筛选">
+              <option value="">全部日期</option>
+            </select>
+            <button id="resetButton" class="secondary">&#x91CD;&#x7F6E;</button>
+            <button id="columnSettingsButton" class="secondary">&#x663E;&#x793A;&#x5B57;&#x6BB5;</button>
+          </div>
+        </div>
 
-        <div class="toolbar-spacer"></div>
+        <div class="toolbar-row toolbar-config-row">
+          <div class="toolbar-row-title">
+            <span class="toolbar-step">02</span>
+            <div><strong>连接配置</strong><small>选择分贝通公司与金蝶账套</small></div>
+          </div>
+          <div class="toolbar-controls toolbar-config-controls">
+            <label class="compact-field"><span>分贝通公司</span>
+              <select id="companySelect" class="company-selector" aria-label="分贝通公司">
+                <option value="puhui">璞慧</option>
+                <option value="yingtai">瑛泰</option>
+              </select>
+            </label>
+            <span id="tenantStatusText" class="tenant-status">璞慧接口已启用</span>
+            <label class="compact-field"><span>ERP账号</span>
+              <select id="kingdeeAccountSelect" class="kingdee-account-selector" aria-label="ERP账号">
+                <option value="current">当前ERP账号</option>
+              </select>
+            </label>
+            <span id="kingdeeAccountStatusText" class="tenant-status">ERP账号</span>
+            <label class="compact-field"><span>账套</span>
+              <select id="kingdeeAcctIdSelect" class="kingdee-acct-id-selector" aria-label="Kingdee acctID">
+                <option value="puhui-6977227150362f">6977227150362f</option>
+              </select>
+            </label>
+            <span id="kingdeeAcctIdStatusText" class="tenant-status">acctID</span>
+            <button id="saveConfigButton" class="secondary config-save-action">保存配置</button>
+          </div>
+        </div>
 
-        <select id="companySelect" class="company-selector" aria-label="分贝通公司">
-          <option value="puhui">璞慧</option>
-          <option value="yingtai">瑛泰</option>
-        </select>
-        <span id="tenantStatusText" class="tenant-status">璞慧接口已启用</span>
-        <select id="kingdeeAccountSelect" class="kingdee-account-selector" aria-label="ERP账号">
-          <option value="current">当前ERP账号</option>
-        </select>
-        <span id="kingdeeAccountStatusText" class="tenant-status">ERP账号</span>
-        <select id="kingdeeAcctIdSelect" class="kingdee-acct-id-selector" aria-label="Kingdee acctID">
-          <option value="puhui-6977227150362f">6977227150362f</option>
-        </select>
-        <span id="kingdeeAcctIdStatusText" class="tenant-status">acctID</span>
-        <button id="saveConfigButton" class="secondary config-save-action">保存配置</button>
-        <button id="syncFenbeitongButton" class="outline-action">&#x540C;&#x6B65;&#x5206;&#x8D1D;&#x901A;</button>
-        <button id="generateVoucherButton" class="outline-action">&#x751F;&#x6210;&#x51ED;&#x8BC1;</button>
-        <button id="saveErpButton" class="outline-action">&#x4FDD;&#x5B58;&#x81F3;ERP</button>
-        <button id="viewVoucherButton" class="outline-action">&#x67E5;&#x770B;&#x51ED;&#x8BC1;</button>
-        <button id="exportButton" class="success-action">&#x5BFC;&#x51FA;</button>
-        <button id="resetButton" class="secondary">&#x91CD;&#x7F6E;</button>
-        <button id="columnSettingsButton" class="secondary">&#x663E;&#x793A;&#x5B57;&#x6BB5;</button>
+        <div class="toolbar-row toolbar-action-row">
+          <div class="toolbar-row-title">
+            <span class="toolbar-step">03</span>
+            <div><strong>业务操作</strong><small>按顺序完成同步、生成与ERP暂存</small></div>
+          </div>
+          <div class="toolbar-controls toolbar-workflow-controls">
+            <button id="syncFenbeitongButton" class="outline-action workflow-sync">&#x540C;&#x6B65;&#x5206;&#x8D1D;&#x901A;</button>
+            <span class="workflow-arrow" aria-hidden="true">→</span>
+            <button id="generateVoucherButton" class="outline-action">生成费用报销单</button>
+            <span class="workflow-arrow" aria-hidden="true">→</span>
+            <button id="saveErpButton" class="outline-action workflow-primary">保存费用报销单</button>
+            <button id="resaveErpButton" class="outline-action">重新保存费用报销单</button>
+            <button id="viewVoucherButton" class="outline-action">查看费用报销单</button>
+            <span class="toolbar-divider" aria-hidden="true"></span>
+            <button id="exportButton" class="success-action">&#x5BFC;&#x51FA;</button>
+          </div>
+        </div>
       </section>
 
       <section id="operationFeedback" class="operation-feedback" hidden aria-live="polite"></section>
 
       <section id="columnSettingsPanel" class="column-settings-panel" hidden aria-label="&#x663E;&#x793A;&#x5B57;&#x6BB5;">
-        <label><input type="checkbox" data-column-toggle="status" checked />&#x5355;&#x636E;&#x72B6;&#x6001;</label>
+        <label><input type="checkbox" data-column-toggle="status" checked />处理状态</label>
+        <label><input type="checkbox" data-column-toggle="sourceType" checked />来源类型</label>
         <label><input type="checkbox" data-column-toggle="sourceCode" checked />&#x6765;&#x6E90;&#x5355;&#x53F7;</label>
+        <label><input type="checkbox" data-column-toggle="documentType" checked />单据类型</label>
+        <label><input type="checkbox" data-column-toggle="reason" checked />事由</label>
         <label><input type="checkbox" data-column-toggle="requester" checked />&#x62A5;&#x9500;&#x4EBA;</label>
         <label><input type="checkbox" data-column-toggle="department" checked />&#x90E8;&#x95E8;</label>
         <label><input type="checkbox" data-column-toggle="expenseCategories" checked />&#x8D39;&#x7528;&#x7C7B;&#x578B;</label>
-        <label><input type="checkbox" data-column-toggle="amount" checked />&#x91D1;&#x989D;</label>
+        <label><input type="checkbox" data-column-toggle="startLocation" checked />出发地</label>
+        <label><input type="checkbox" data-column-toggle="arrivalLocation" checked />目的地</label>
+        <label><input type="checkbox" data-column-toggle="trafficType" checked />交通类型</label>
+        <label><input type="checkbox" data-column-toggle="purpose" checked />用途</label>
+        <label><input type="checkbox" data-column-toggle="expenseDepartment" checked />费用承担部门</label>
+        <label><input type="checkbox" data-column-toggle="splitTaxAmount" checked />税额</label>
+        <label><input type="checkbox" data-column-toggle="splitExcludingTaxAmount" checked />不含税金额</label>
+        <label><input type="checkbox" data-column-toggle="departmentAttributionAmount" checked />报销金额</label>
+        <label><input type="checkbox" data-column-toggle="requestOrganization" checked />申请组织</label>
+        <label><input type="checkbox" data-column-toggle="requestPaymentAmount" checked />申请退/付款金额</label>
+        <label><input type="checkbox" data-column-toggle="sourceDocumentStatus" checked />单据状态</label>
+        <label><input type="checkbox" data-column-toggle="expenseOrganization" checked />费用承担组织</label>
+        <label><input type="checkbox" data-column-toggle="paymentAmount" checked />付款金额</label>
+        <label><input type="checkbox" data-column-toggle="businessLine" checked />业务线</label>
         <label><input type="checkbox" data-column-toggle="interfaceSource" checked />&#x63A5;&#x53E3;&#x6765;&#x6E90;</label>
-        <label><input type="checkbox" data-column-toggle="time" checked />&#x66F4;&#x65B0;&#x65F6;&#x95F4;</label>
+        <label><input type="checkbox" data-column-toggle="time" checked />&#x65E5;&#x671F;</label>
       </section>
 
       <section id="environmentWarning" class="ledger-warning">
         当前外部接口未全部启用，保存动作仅记录处理结果，不写入正式ERP。
       </section>
 
+      <section class="ledger-content-card">
+        <div class="ledger-content-header">
+          <div>
+            <h2>费用明细</h2>
+            <p>表格仅展示真实接口数据；拖动表头边界可调整列宽，双击可自动适应内容。</p>
+          </div>
+          <span class="ledger-content-hint">当前筛选结果会自动合计</span>
+        </div>
       <section id="financeQueuePanel" class="ledger-table-panel">
         <table class="ledger-table">
           <thead>
             <tr>
               <th><input id="selectAllRowsCheckbox" type="checkbox" aria-label="全选当前筛选单据" /></th>
-              <th data-column-key="status">单据状态</th>
+              <th data-column-key="status">处理状态</th>
+              <th data-column-key="sourceType">来源类型</th>
               <th data-column-key="sourceCode"><button class="sort-header" data-sort-field="sourceCode" type="button">来源单号</button></th>
+              <th data-column-key="documentType">单据类型</th>
+              <th data-column-key="reason">事由</th>
               <th data-column-key="requester">报销人</th>
               <th data-column-key="department">部门</th>
               <th data-column-key="expenseCategories">费用类型</th>
-              <th data-column-key="amount" class="amount"><button class="sort-header" data-sort-field="amount" type="button">金额</button></th>
+              <th data-column-key="startLocation">出发地</th>
+              <th data-column-key="arrivalLocation">目的地</th>
+              <th data-column-key="trafficType">交通类型</th>
+              <th data-column-key="purpose">用途</th>
+              <th data-column-key="expenseDepartment">费用承担部门</th>
+              <th data-column-key="splitTaxAmount" class="amount" title="对应分贝通本次拆分税额"><button class="sort-header" data-sort-field="splitTaxAmount" type="button">税额</button></th>
+              <th data-column-key="splitExcludingTaxAmount" class="amount" title="对应分贝通本次拆分不含税金额"><button class="sort-header" data-sort-field="splitExcludingTaxAmount" type="button">不含税金额</button></th>
+              <th data-column-key="departmentAttributionAmount" class="amount" title="对应分贝通费用归属部门金额"><button class="sort-header" data-sort-field="departmentAttributionAmount" type="button">报销金额</button></th>
+              <th data-column-key="requestOrganization">申请组织</th>
+              <th data-column-key="requestPaymentAmount" class="amount">申请退/付款金额</th>
+              <th data-column-key="sourceDocumentStatus">单据状态</th>
+              <th data-column-key="expenseOrganization">费用承担组织</th>
+              <th data-column-key="paymentAmount" class="amount">付款金额</th>
+              <th data-column-key="businessLine">业务线</th>
               <th data-column-key="interfaceSource">接口来源</th>
-              <th data-column-key="time"><button class="sort-header" data-sort-field="time" type="button">更新时间</button></th>
+              <th data-column-key="time"><button class="sort-header" data-sort-field="time" type="button">日期</button></th>
               <th data-column-key="operationPanel">&#x64CD;&#x4F5C;&#x9762;&#x677F;</th>
             </tr>
           </thead>
           <tbody id="sourceQueueBody">
-            <tr><td colspan="10">&#x6682;&#x65E0;&#x5F85;&#x5904;&#x7406;&#x5355;&#x636E;&#xFF0C;&#x8BF7;&#x5148;&#x6267;&#x884C;&#x540C;&#x6B65;&#x5206;&#x8D1D;&#x901A;&#x3002;</td></tr>
+            <tr><td colspan="12">&#x6682;&#x65E0;&#x5F85;&#x5904;&#x7406;&#x5355;&#x636E;&#xFF0C;&#x8BF7;&#x5148;&#x6267;&#x884C;&#x540C;&#x6B65;&#x5206;&#x8D1D;&#x901A;&#x3002;</td></tr>
           </tbody>
+          <tfoot id="sourceQueueTotals" aria-label="当前筛选结果金额合计"></tfoot>
         </table>
       </section>
 
       <section class="ledger-pagination" aria-label="分页">
         <span id="paginationSummary">Total 0</span>
         <select id="pageSizeSelect" aria-label="每页条数">
-          <option>20/page</option>
-          <option>50/page</option>
-          <option>100/page</option>
+          <option value="20">20/page</option>
+          <option value="50">50/page</option>
+          <option value="100">100/page</option>
         </select>
-        <button class="page-button" disabled>‹</button>
-        <button id="currentPageButton" class="page-button active">1</button>
-        <button class="page-button">2</button>
-        <button class="page-button">3</button>
-        <button class="page-button">4</button>
-        <button class="page-button">›</button>
-        <label class="goto-page">Go to <input id="gotoPageInput" value="1" /></label>
+        <button id="previousPageButton" class="page-button" type="button" disabled aria-label="上一页">‹</button>
+        <span id="paginationPageButtons" class="pagination-page-buttons">
+          <button id="currentPageButton" class="page-button active" type="button" data-page="1">1</button>
+        </span>
+        <button id="nextPageButton" class="page-button" type="button" disabled aria-label="下一页">›</button>
+        <label class="goto-page">
+          跳转到第
+          <input id="gotoPageInput" type="number" min="1" value="1" aria-label="跳转页码" />
+          页
+        </label>
+        <button id="gotoPageButton" class="goto-page-button" type="button">跳转</button>
+      </section>
       </section>
 
       <section id="financeReviewPanel" class="auxiliary-panel" hidden>
         <div id="financeReviewSummary">请先从报销单列表选择一张单据。</div>
         <div id="saveConfirmPanel" hidden>
-          <p id="saveConfirmSummary">请先预览凭证。</p>
-          <p id="saveRiskNotice">凭证只保存为金蝶暂存，不提交、不审核、不过账。</p>
+          <p id="saveConfirmSummary">请先预览费用报销单。</p>
+          <p id="saveRiskNotice">费用报销单只保存为金蝶暂存，不提交、不审核。</p>
         </div>
         <div id="voucherValidationList"></div>
         <div id="voucherPreviewBody"></div>
@@ -143,15 +242,15 @@
         <span id="schedulerDetail">-</span>
         <span id="nextActionText">等待导入来源单据。</span>
         <span id="syncBatchSummary">尚未产生同步批次。</span>
-        <span id="previewHashSummary">尚未生成凭证预览。</span>
+        <span id="previewHashSummary">尚未生成费用报销单预览。</span>
         <span id="actionBlockReason">请先导入来源单据。</span>
         <button id="primaryActionButton">主操作</button>
         <button id="loadTemplateButton">载入默认设置</button>
           <button id="syncButton">同步分贝通</button>
         <button id="runSchedulerButton">执行定时同步</button>
-        <button id="previewButton">预览凭证</button>
-        <button id="prepareButton">生成待保存凭证</button>
-        <button id="pushErpButton">保存ERP草稿</button>
+        <button id="previewButton">预览费用报销单</button>
+        <button id="prepareButton">生成待保存费用报销单</button>
+        <button id="pushErpButton">保存费用报销单</button>
         <button id="refreshButton">刷新状态</button>
         <div id="sourceQueueFilters"></div>
         <details id="technicalDetails">
@@ -159,20 +258,18 @@
           <ul id="configValidationList"></ul>
           <div id="resultSummary">暂无处理结果。</div>
           <pre id="resultOutput">{}</pre>
-          <input id="accountBookNumber" />
-          <input id="voucherGroupNumber" />
-          <input id="templateErpFid" />
-          <input id="mockVoucherDate" type="date" />
+          <input id="mockDocumentDate" type="date" />
           <input id="mockYear" type="number" />
           <input id="mockPeriod" type="number" />
           <textarea id="currencyNumbers"></textarea>
-          <textarea id="categoryAccountNumbers"></textarea>
-          <textarea id="creditDetailNumbers"></textarea>
           <textarea id="mockFixedJson"></textarea>
           <input id="sourceIdInput" />
           <button id="queryButton">查询单条记录</button>
           <button id="listRecordsButton">刷新记录列表</button>
-          <table><tbody id="recordsTable"></tbody></table>
+          <table>
+            <thead><tr><th>来源ID</th><th>来源单号</th><th>处理状态</th><th>ERP FID</th><th>更新日期</th></tr></thead>
+            <tbody id="recordsTable"></tbody>
+          </table>
           <div id="logsList"></div>
         </details>
       </section>

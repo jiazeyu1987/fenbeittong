@@ -1,0 +1,361 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { parseFenbeitongDetail } from '../src/fenbeitong-detail.js';
+
+test('expands Fenbeitong invoice usage into the confirmed 20 current-split rows', () => {
+  const invoiceGroups = [
+    [[394, 300, 0]],
+    [[498, 498, 28.19]],
+    [[77.84, 77.84, 0.77], [0.5, 0.5, 0.03]],
+    [[56, 56, 3.17]],
+    [[18.71, 18.71, 0.19]],
+    [[1235, 1235, 12.23]],
+    [[80, 80, 4.53]],
+    [[41.98, 41.98, 0.42], [2.1, 2.1, 0.12]],
+    [[100, 100, 5.66]],
+    [[339.93, 339.93, 19.24]],
+    [[139, 80, 7.87, 'FID4574364324625367042072490046']],
+    [[78.1, 78.1, 0.77], [0.5, 0.5, 0.03]],
+    [[75.1, 75.1, 0.74]],
+    [[45, 45, 0.45]],
+    [[112.14, 80, 1.11], [0.2, 0, 0.01]],
+    [[118, 80, 6.68, 'FID4599943802294353926369161594']]
+  ];
+  const expenses = invoiceGroups.map((group, expenseIndex) => ({
+    id: `EXP-${expenseIndex + 1}`,
+    cost_category: { code: 'CI013', name: '餐费-个人' },
+    total_amount: group.reduce((sum, [, used]) => sum + used, 0),
+    reason: 'confirmed split row',
+    cost_attributions: [],
+    cost_custom_fields: [],
+    invoices: group.map(([total, used, tax, id], invoiceIndex) => ({
+      id: id || `INV-${expenseIndex + 1}-${invoiceIndex + 1}`,
+      total_amount: total,
+      used_amount: used,
+      tax_amount: tax,
+      exclude_tax_amount: total - tax
+    }))
+  }));
+  const total = expenses.reduce((sum, expense) => sum + expense.total_amount, 0);
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      reimb_id: 'CONFIRMED-SPLIT-ID',
+      reimb_code: 'B1IELSHBX26053100003',
+      currency_code: 'CNY',
+      total_amount: total,
+      payment_amount: total,
+      create_time: '2026-07-20 09:52:23',
+      user: { code: 'X026', name: '孙天一', department_code: 'BM000006', department_name: '销售部' },
+      expenses
+    }
+  }));
+
+  assert.equal(parsed.expenses.length, 20);
+  assert.deepEqual(parsed.expenses.map((expense) => expense.splitTaxAmount), [
+    0, 28.19, 0.77, 0.03, 3.17, 0.19, 12.23, 4.53, 0.42, 0.12,
+    5.66, 19.24, 4.56, 0.77, 0.03, 0.74, 0.45, 0.79, 0, 4.54
+  ]);
+  assert.deepEqual(parsed.expenses.map((expense) => expense.splitExcludingTaxAmount), [
+    300, 469.81, 77.07, 0.47, 52.83, 18.52, 1222.77, 75.47, 41.56, 1.98,
+    94.34, 320.69, 75.44, 77.33, 0.47, 74.36, 44.55, 79.21, 0, 75.46
+  ]);
+  assert.equal(parsed.totalAmount, 3188.76);
+  assert.equal(parsed.splitTaxAmount, 86.43);
+  assert.equal(parsed.splitExcludingTaxAmount, 3102.33);
+  assert.ok(parsed.expenses.every((expense) => expense.purpose === 'confirmed split row'));
+  assert.ok(parsed.expenses.every((expense) => expense.trafficType === ''));
+});
+
+test('normalizes online route, purpose, traffic type and direct department fields', () => {
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      source_kind: 'ONLINE_MONTHLY_BILL',
+      bill_no: 'BILL-ROUTE-001',
+      settlement_month: '202607',
+      order: {
+        order_category: 3,
+        order_id: 'ORDER-ROUTE-001',
+        order_create_time: '2026-07-21 08:30:00',
+        employee_name: '\u5b59\u5929\u4e00',
+        third_employee_id: 'X026',
+        cost_attribution_name: '\u9879\u76ee\u6210\u672c\u4e2d\u5fc3',
+        booker_department_name: '\u9500\u552e\u90e8',
+        booker_department_code: 'BM000006',
+        pickup_city_name: '\u4e0a\u6d77\u5e02',
+        return_city_name: '\u82cf\u5dde\u5e02',
+        business_line_name: '\u7528\u8f66',
+        reason: '\u5ba2\u6237\u62dc\u8bbf',
+        travel_approval_reason: '\u5546\u52a1\u6d3d\u8c08',
+        repayment_total_amount: 100,
+        reference_deductible_total_amount: 5,
+        reference_non_deductible_amount: 95
+      }
+    }
+  }));
+
+  assert.equal(parsed.departmentName, '\u9500\u552e\u90e8');
+  assert.equal(parsed.departmentCode, 'BM000006');
+  assert.equal(parsed.expenses[0].startLocation, '\u4e0a\u6d77\u5e02');
+  assert.equal(parsed.expenses[0].arrivalLocation, '\u82cf\u5dde\u5e02');
+  assert.equal(parsed.expenses[0].trafficType, '\u7528\u8f66');
+  assert.equal(parsed.expenses[0].purpose, '\u5546\u52a1\u6d3d\u8c08');
+  assert.equal(parsed.expenses[0].businessLine, '\u7528\u8f66');
+});
+
+test('uses source-native hotel, dining, and express locations without inventing cities', () => {
+  const common = {
+    employee_name: '任向阳',
+    employee_code: 'X016',
+    department_name: '中部战区',
+    third_department_id: '3039607800797',
+    reference_deductible_total_amount: 0
+  };
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      source_kind: 'ONLINE_MONTHLY_BILL',
+      bill_no: 'BILL-LOCATION-001',
+      settlement_month: '202607',
+      orders: [
+        {
+          ...common,
+          order_category: 11,
+          order_id: 'HOTEL-1',
+          order_create_time: '2026-07-01 08:00:00',
+          business_line_name: '酒店',
+          pickup_city_name: '武汉市',
+          arrival_name: '武汉市',
+          repayment_total_amount: 100,
+          reference_non_deductible_amount: 100
+        },
+        {
+          ...common,
+          order_category: 60,
+          order_id: 'DINING-1',
+          order_create_time: '2026-07-02 08:00:00',
+          business_line_name: '用餐',
+          order: { restaurant: '分贝通原始餐厅名称' },
+          repayment_total_amount: 80,
+          reference_non_deductible_amount: 80
+        },
+        {
+          ...common,
+          order_category: 130,
+          order_id: 'EXPRESS-1',
+          order_create_time: '2026-07-03 08:00:00',
+          business_line_name: '快递',
+          express: { sender_address: '寄件地址', receiver_address: '收件地址' },
+          repayment_total_amount: 20,
+          reference_non_deductible_amount: 20
+        }
+      ]
+    }
+  }));
+
+  assert.deepEqual(parsed.expenses.map((expense) => [expense.startLocation, expense.arrivalLocation]), [
+    ['武汉市', '武汉市'],
+    ['分贝通原始餐厅名称', '分贝通原始餐厅名称'],
+    ['寄件地址', '收件地址']
+  ]);
+});
+
+test('leaves online traffic type blank for a non-transport business line', () => {
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      source_kind: 'ONLINE_MONTHLY_BILL',
+      bill_no: 'BILL-HOTEL-001',
+      settlement_month: '202607',
+      order: {
+        order_category: 11,
+        order_id: 'ORDER-HOTEL-001',
+        order_create_time: '2026-07-21 08:30:00',
+        employee_name: '\u5b59\u5929\u4e00',
+        third_employee_id: 'X026',
+        department_name: '\u9500\u552e\u90e8',
+        third_department_id: 'BM000006',
+        business_line_name: '\u9152\u5e97',
+        repayment_total_amount: 500,
+        reference_deductible_total_amount: 0,
+        reference_non_deductible_amount: 500
+      }
+    }
+  }));
+
+  assert.equal(parsed.expenses[0].trafficType, '');
+  assert.equal(parsed.expenses[0].purpose, '');
+});
+
+test('prefers the Fenbeitong employee code over an internal third-party id', () => {
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      source_kind: 'ONLINE_MONTHLY_BILL',
+      bill_no: 'BILL-EMPLOYEE-001',
+      settlement_month: '202607',
+      order: {
+        order_category: 60,
+        order_id: 'ORDER-EMPLOYEE-001',
+        order_create_time: '2026-07-22 10:01:15',
+        employee_name: '\u5434\u4e9a\u660a',
+        third_employee_id: '180920411821365220',
+        payer: { code: 'X036', third_id: '180920411821365220' },
+        department_name: '\u9500\u552e\u90e8',
+        third_department_id: '6463471272514',
+        business_line_name: '\u7528\u9910',
+        repayment_total_amount: 33.15,
+        reference_deductible_total_amount: 0,
+        reference_non_deductible_amount: 0
+      }
+    }
+  }));
+
+  assert.equal(parsed.userCode, 'X036');
+});
+
+test('does not infer missing online ERP display fields from unrelated fields', () => {
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      source_kind: 'ONLINE_MONTHLY_BILL',
+      bill_no: 'BILL-BLANK-001',
+      settlement_month: '202607',
+      order: {
+        order_category: 3,
+        order_id: 'ORDER-BLANK-001',
+        order_create_time: '2026-07-21 08:30:00',
+        employee_name: '\u5b59\u5929\u4e00',
+        third_employee_id: 'X026',
+        cost_attribution_name: '\u4e0d\u5e94\u8865\u5165\u7684\u8d39\u7528\u5f52\u5c5e\u90e8\u95e8',
+        from_station_name: '\u4e0d\u5e94\u8865\u5165\u7684\u51fa\u53d1\u7ad9',
+        to_station_name: '\u4e0d\u5e94\u8865\u5165\u7684\u5230\u8fbe\u7ad9',
+        reason: '\u4e0d\u5e94\u8865\u5165\u7528\u9014\u7684\u4e8b\u7531',
+        repayment_total_amount: 100,
+        reference_deductible_total_amount: 0,
+        reference_non_deductible_amount: 100
+      }
+    }
+  }));
+
+  assert.equal(parsed.departmentName, '');
+  assert.equal(parsed.departmentCode, '');
+  assert.equal(parsed.businessLine, '');
+  assert.equal(parsed.expenses[0].startLocation, '');
+  assert.equal(parsed.expenses[0].arrivalLocation, '');
+  assert.equal(parsed.expenses[0].trafficType, '');
+  assert.equal(parsed.expenses[0].purpose, '');
+});
+
+test('combines one employee month into one online document with one detail per order', () => {
+  const common = {
+    order_category: 3,
+    employee_name: '孙钊',
+    employee_code: 'X001',
+    booker_department_name: '销售部',
+    booker_department_code: '6463471272514',
+    business_line_name: '用车',
+    reference_deductible_total_amount: 0
+  };
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      source_kind: 'ONLINE_MONTHLY_BILL',
+      group_id: 'ONLINE-MONTH:puhui:X001:202607',
+      group_bill_no: 'FBT202607X001',
+      bill_no: 'FBT202607X001',
+      settlement_month: '2026-07',
+      orders: [
+        {
+          ...common,
+          order_id: 'ORDER-1',
+          order_create_time: '2026-07-01 08:00:00',
+          repayment_total_amount: 100,
+          reference_non_deductible_amount: 100
+        },
+        {
+          ...common,
+          order_id: 'ORDER-2',
+          order_create_time: '2026-07-22 18:00:00',
+          repayment_total_amount: 157.72,
+          reference_non_deductible_amount: 157.72
+        }
+      ]
+    }
+  }));
+
+  assert.equal(parsed.reimbursementId, 'ONLINE-MONTH:puhui:X001:202607');
+  assert.equal(parsed.reimbursementCode, 'FBT202607X001');
+  assert.equal(parsed.userCode, 'X001');
+  assert.equal(parsed.applicationDate, '2026-07-22');
+  assert.equal(parsed.expenses.length, 2);
+  assert.equal(parsed.totalAmount, 257.72);
+  assert.equal(parsed.splitExcludingTaxAmount, 257.72);
+  assert.deepEqual(parsed.expenses.map((expense) => expense.id), ['ORDER-1', 'ORDER-2']);
+});
+
+test('maps Fenbeitong deductible and un-deductible totals without using tax-rate fallbacks', () => {
+  const common = {
+    employee_name: '毛云',
+    employee_code: 'X022',
+    booker_department_name: '西南战区',
+    booker_department_code: 'SW',
+    reason: '日常出差'
+  };
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      source_kind: 'ONLINE_MONTHLY_BILL',
+      bill_no: '0013808520260701',
+      settlement_month: '202606',
+      orders: [
+        { ...common, order_id: 'RIDE-14.10', order_category: 3, repayment_total_amount: 14.1, refer_including_tax_amount_par_price: 14.1 },
+        { ...common, order_id: 'HOTEL-293', order_category: 11, repayment_total_amount: 293, deductible_total_amount: 16.58, un_deductible_total_amount: 276.42 },
+        { ...common, order_id: 'TRAIN-REFUND', order_category: 15, repayment_total_amount: -151, deductible_total_amount: -12.68, un_deductible_total_amount: -138.32 },
+        { ...common, order_id: 'EXPRESS-22', order_category: 131, repayment_total_amount: 22, deductible_total_amount: 1.25, un_deductible_total_amount: 20.75 },
+        { ...common, order_id: 'VALUE-0.59', order_category: 913, business_line_name: '增值服务', repayment_total_amount: 0.59, refer_including_tax_amount_par_price: 0.59, refer_total_amount_deductible_par_price: 0.03 }
+      ]
+    }
+  }));
+
+  assert.deepEqual(parsed.expenses.map((expense) => expense.splitTaxAmount), [0, 16.58, -12.68, 1.25, 0]);
+  assert.deepEqual(parsed.expenses.map((expense) => expense.splitExcludingTaxAmount), [14.1, 276.42, -138.32, 20.75, 0.59]);
+  assert.deepEqual(parsed.expenses.map((expense) => expense.taxSplitSource), [
+    'FENBEITONG_REFERENCE_DEDUCTIBLE_FIELDS',
+    'FENBEITONG_REFERENCE_DEDUCTIBLE_FIELDS',
+    'FENBEITONG_REFERENCE_DEDUCTIBLE_FIELDS',
+    'FENBEITONG_REFERENCE_DEDUCTIBLE_FIELDS',
+    'FENBEITONG_REFERENCE_DEDUCTIBLE_FIELDS'
+  ]);
+  assert.equal(parsed.taxMappingComplete, true);
+});
+
+test('uses the red deductible columns instead of blue tax and excluding-tax columns', () => {
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      source_kind: 'ONLINE_MONTHLY_BILL',
+      bill_no: '0013808520260601',
+      settlement_month: '202605',
+      order: {
+        order_id: 'HOTEL-1670',
+        order_category: 11,
+        employee_name: '栗大志',
+        employee_code: 'X002',
+        booker_department_name: '销售部',
+        booker_department_code: '6463471272514',
+        repayment_total_amount: 1670,
+        exclude_tax_amount: 1575.47,
+        total_tax: 94.53,
+        deductible_total_amount: 0,
+        un_deductible_total_amount: 1670,
+        refer_including_tax_amount_par_price: 1670
+      }
+    }
+  }));
+
+  assert.equal(parsed.expenses[0].splitTaxAmount, 0);
+  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 1670);
+  assert.equal(parsed.expenses[0].taxSplitSource, 'FENBEITONG_REFERENCE_DEDUCTIBLE_FIELDS');
+});

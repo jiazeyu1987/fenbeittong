@@ -24,6 +24,10 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(data)
   }),
+  saveFenbeitongTenant: (tenantKey, data) => request(`/api/fenbeitong-expense-reimbursement/tenants/${encodeURIComponent(tenantKey)}`, {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  }),
   listKingdeeAccounts: () => request('/api/kingdee/accounts'),
   selectKingdeeAccount: (data) => request('/api/kingdee/account-selection', {
     method: 'PUT',
@@ -34,29 +38,33 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({})
   }),
-  getMockTemplate: () => request('/api/fenbeitong-voucher/config/mock-template'),
-  saveConfig: (data) => request('/api/fenbeitong-voucher/config', {
+  getMockTemplate: () => request('/api/fenbeitong-expense-reimbursement/config/mock-template'),
+  saveConfig: (data) => request('/api/fenbeitong-expense-reimbursement/config', {
     method: 'PUT',
     body: JSON.stringify(data)
   }),
-  syncFenbeitong: (data = {}) => request('/api/fenbeitong-voucher/sync', {
+  syncFenbeitong: (data = {}) => request('/api/fenbeitong-expense-reimbursement/sync', {
     method: 'POST',
     body: JSON.stringify(data)
   }),
-  listSyncedDocuments: () => request('/api/fenbeitong-voucher/synced-documents'),
-  preview: (data) => request('/api/fenbeitong-voucher/preview', {
+  listSyncedDocuments: () => request('/api/fenbeitong-expense-reimbursement/synced-documents'),
+  preview: (data) => request('/api/fenbeitong-expense-reimbursement/preview', {
     method: 'POST',
     body: JSON.stringify(data)
   }),
-  prepare: (data) => request('/api/fenbeitong-voucher/prepare', {
+  prepare: (data) => request('/api/fenbeitong-expense-reimbursement/prepare', {
     method: 'POST',
     body: JSON.stringify(data)
   }),
-  pushErp: (data) => request('/api/fenbeitong-voucher/push-erp', {
+  saveErp: (data) => request('/api/fenbeitong-expense-reimbursement/save-erp', {
     method: 'POST',
     body: JSON.stringify(data)
   }),
-  listProcessRecords: () => request('/api/fenbeitong-voucher/process'),
-  getProcess: (sourceId) => request(`/api/fenbeitong-voucher/process/${encodeURIComponent(sourceId)}`),
+  listProcessRecords: () => request('/api/fenbeitong-expense-reimbursement/process'),
+  getProcess: (sourceId) => request(`/api/fenbeitong-expense-reimbursement/process/${encodeURIComponent(sourceId)}`),
+  createCsvExport: (data) => request('/api/exports', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    }),
   listLogs: () => request('/api/operations/logs')
 };

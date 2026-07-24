@@ -12,13 +12,13 @@ function startServer() {
     });
   });
 }
-test('mock user path can template, sync Fenbeitong, push ERP, and query', async () => {
+test('user path previews and saves a Kingdee expense reimbursement', async () => {
   const restoreEnv = forceMockExternalEnv();
   const restoreFetch = stubKingdeeFetch();
   resetRepository();
   const { server, baseUrl } = await startServer();
   try {
-    const templateResponse = await fetch(`${baseUrl}/api/fenbeitong-voucher/config/mock-template`);
+    const templateResponse = await fetch(`${baseUrl}/api/fenbeitong-expense-reimbursement/config/mock-template`);
     const templateBody = await templateResponse.json();
     assert.equal(templateBody.success, true);
 
@@ -43,12 +43,12 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
 
     const savedSettingsBody = await postJson(`${baseUrl}/api/integration-settings`, {
       tenantKey: 'yingtai',
-      kingdeeAccountKey: 'jia-zeyu',
+      kingdeeAccountKey: 'current',
       kingdeeAcctIdKey: 'puhui-6977227150362f'
     }, 'PUT');
     assert.equal(savedSettingsBody.success, true);
     assert.equal(savedSettingsBody.data.selection.tenantKey, 'yingtai');
-    assert.equal(savedSettingsBody.data.selection.kingdeeAccountKey, 'jia-zeyu');
+    assert.equal(savedSettingsBody.data.selection.kingdeeAccountKey, 'current');
     assert.equal(savedSettingsBody.data.selection.kingdeeAcctIdKey, 'puhui-6977227150362f');
     const restoredSettingsBody = await postJson(`${baseUrl}/api/integration-settings`, {
       tenantKey: 'puhui',
@@ -69,31 +69,29 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
     const template = templateBody.data;
     const request = {
       fixedJson: template.mockFixedJson,
-      voucherDate: template.mockVoucherDate,
-      year: template.mockYear,
-      period: template.mockPeriod,
+      documentDate: template.mockDocumentDate,
       config: template
     };
 
-    const previewBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/preview`, request);
-    assert.equal(previewBody.data.balanced, true);
-    assert.ok(previewBody.data.voucherLines.length >= 2);
-    assert.equal(previewBody.data.sourceSummary.requester, 'Mock User');
-    assert.equal(previewBody.data.taxSummary.deductibleTaxAmount, 0);
-    assert.equal(previewBody.data.voucherLines.some((line) => line.lineType === 'TAX'), false);
-    assert.equal(previewBody.data.financialSummary.documentStatusName, 'Saved draft only; not submitted, audited, or posted');
+    const previewBody = await postJson(`${baseUrl}/api/fenbeitong-expense-reimbursement/preview`, request);
+    assert.equal(previewBody.data.documentSummary.formId, 'ER_ExpReimbursement');
+    assert.ok(previewBody.data.expenseEntries.length >= 2);
+    assert.equal(previewBody.data.sourceSummary.requester, '吴立珠');
+    assert.equal(previewBody.data.taxSummary.taxAmount, 6.11);
+    assert.equal(previewBody.data.expenseEntries[0].expenseItemNumber, 'CI011');
+    assert.equal(previewBody.data.documentSummary.documentStatus, 'Z');
 
-    const syncBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/sync`, {});
+    const syncBody = await postJson(`${baseUrl}/api/fenbeitong-expense-reimbursement/sync`, {});
     assert.equal(syncBody.data.batch.status, 'SUCCESS');
     assert.equal(syncBody.data.batch.mockReplacement, true);
-    assert.equal(syncBody.data.records.length, 100);
+    assert.equal(syncBody.data.records.length, 101);
     assert.equal(syncBody.data.records[0].processStage, 'SYNCED');
     assert.equal(syncBody.data.records[0].mockReplacement, true);
     const sourceId = syncBody.data.records[0].sourceId;
 
-    const syncedDocumentsResponse = await fetch(`${baseUrl}/api/fenbeitong-voucher/synced-documents`);
+    const syncedDocumentsResponse = await fetch(`${baseUrl}/api/fenbeitong-expense-reimbursement/synced-documents`);
     const syncedDocumentsBody = await syncedDocumentsResponse.json();
-    assert.equal(syncedDocumentsBody.data.length, 100);
+    assert.equal(syncedDocumentsBody.data.length, 101);
     assert.equal(syncedDocumentsBody.data[0].batchId, syncBody.data.batch.batchId);
     assert.equal(syncedDocumentsBody.data[0].mockReplacement, true);
 
@@ -101,40 +99,39 @@ test('mock user path can template, sync Fenbeitong, push ERP, and query', async 
     assert.equal(schedulerRunBody.data.sync.batch.status, 'SUCCESS');
     assert.equal(schedulerRunBody.data.sync.records[0].processStage, 'SYNCED');
 
-    const pushBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/push-erp`, {
+    const pushBody = await postJson(`${baseUrl}/api/fenbeitong-expense-reimbursement/save-erp`, {
       sourceId,
-      voucherDate: template.mockVoucherDate,
-      year: template.mockYear,
-      period: template.mockPeriod,
+      documentDate: template.mockDocumentDate,
       config: template,
-      kingdeeAccountKey: 'jia-zeyu',
+      kingdeeAccountKey: 'current',
       kingdeeAcctIdKey: 'puhui-6977227150362f'
     });
-    assert.equal(pushBody.data.processStage, 'ERP_PUSHED');
+    assert.equal(pushBody.success, true, JSON.stringify(pushBody));
+    assert.equal(pushBody.data.processStage, 'ERP_EXPENSE_REIMBURSEMENT_SAVED');
     assert.equal(pushBody.data.erpFid, '100033');
     assert.equal(pushBody.data.erpMockReplacement, false);
 
-    const duplicatePushBody = await postJson(`${baseUrl}/api/fenbeitong-voucher/push-erp`, {
+    const duplicatePushBody = await postJson(`${baseUrl}/api/fenbeitong-expense-reimbursement/save-erp`, {
       sourceId,
-      voucherDate: template.mockVoucherDate,
-      year: template.mockYear,
-      period: template.mockPeriod,
+      documentDate: template.mockDocumentDate,
       config: template
     });
-    assert.equal(duplicatePushBody.success, false);
-    assert.match(duplicatePushBody.error.message, /already pushed to ERP/);
+    assert.equal(duplicatePushBody.success, true);
+    assert.equal(duplicatePushBody.data.idempotentReplay, true);
+    assert.equal(duplicatePushBody.data.erpFid, '100033');
+    assert.equal(duplicatePushBody.data.erpNumber, '23');
 
-    const queryResponse = await fetch(`${baseUrl}/api/fenbeitong-voucher/process/${sourceId}`);
+    const queryResponse = await fetch(`${baseUrl}/api/fenbeitong-expense-reimbursement/process/${sourceId}`);
     const queryBody = await queryResponse.json();
     assert.equal(queryBody.data.sourceId, sourceId);
 
-    const recordsResponse = await fetch(`${baseUrl}/api/fenbeitong-voucher/process`);
+    const recordsResponse = await fetch(`${baseUrl}/api/fenbeitong-expense-reimbursement/process`);
     const recordsBody = await recordsResponse.json();
     assert.equal(recordsBody.data.length, 1);
 
     const logsResponse = await fetch(`${baseUrl}/api/operations/logs`);
     const logsBody = await logsResponse.json();
-    assert.ok(logsBody.data.some((log) => log.action === 'ERP_PUSH'));
+    assert.ok(logsBody.data.some((log) => log.action === 'ERP_EXPENSE_REIMBURSEMENT_SAVE'));
   } finally {
     await new Promise((resolve) => server.close(resolve));
     restoreFetch();
@@ -193,22 +190,38 @@ function forceMockExternalEnv() {
 
 function stubKingdeeFetch() {
   const previousFetch = globalThis.fetch;
+  let savedModel;
   globalThis.fetch = async (url, options = {}) => {
     const text = String(url);
     if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.AuthService.ValidateUser.common.kdsvc')) {
       assert.match(String(options.body), /acctID=6977227150362f/);
-      assert.match(String(options.body), /username=jia-user/);
+      assert.match(String(options.body), /username=test-user/);
       return new Response(JSON.stringify({ LoginResultType: 1 }), {
         status: 200,
         headers: { 'Set-Cookie': 'kdservice-sessionid=e2e123; Path=/K3Cloud' }
       });
     }
+    if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.SwitchOrg.common.kdsvc')) {
+      assert.equal(options.headers.Cookie, 'kdservice-sessionid=e2e123');
+      const data = JSON.parse(new URLSearchParams(String(options.body)).get('data'));
+      assert.deepEqual(data, { OrgNumber: '886' });
+      return new Response(JSON.stringify({
+        Result: {
+          ResponseStatus: {
+            IsSuccess: true,
+            Errors: [],
+            SuccessEntitys: [{ Id: 238131, Number: '886', DIndex: 0 }]
+          }
+        }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
     if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.Save.common.kdsvc')) {
       assert.equal(options.headers.Cookie, 'kdservice-sessionid=e2e123');
       const body = JSON.parse(String(options.body));
-      assert.equal(body.formid, 'GL_VOUCHER');
+      assert.equal(body.formid, 'ER_ExpReimbursement');
       const payload = JSON.parse(body.data);
-      assert.equal(payload.Model.ACCBOOKORGID.Number, '886');
+      savedModel = payload.Model;
+      assert.equal(payload.Model.FOrgID.FNumber, '886');
       assert.ok(payload.Model.FEntity.length >= 2);
       return new Response(JSON.stringify({
         Result: {
@@ -220,7 +233,7 @@ function stubKingdeeFetch() {
     }
     if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.View.common.kdsvc')) {
       const body = JSON.parse(String(options.body));
-      assert.equal(body.formid, 'GL_VOUCHER');
+      assert.equal(body.formid, 'ER_ExpReimbursement');
       assert.equal(JSON.parse(body.data).Id, '100033');
       return new Response(JSON.stringify({
         Result: {
@@ -228,9 +241,11 @@ function stubKingdeeFetch() {
           Result: {
             FID: 100033,
             FBillNo: '23',
-            AccountBookID: { Number: '007' },
-            ACCBOOKORGID: { Number: '886' },
-            VOUCHERGROUPID: { Number: 'PZZ9' },
+            FOrgID: savedModel.FOrgID,
+            FProposerID: savedModel.FProposerID,
+            FRequestDeptID: savedModel.FRequestDeptID,
+            FBillTypeID: savedModel.FBillTypeID,
+            FExpAmountSum: savedModel.FExpAmountSum,
             FDocumentStatus: 'Z'
           }
         }

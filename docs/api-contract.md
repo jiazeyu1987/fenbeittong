@@ -1,140 +1,52 @@
 # API Contract
 
-Base URL in local development: `http://127.0.0.1:3001`.
+Local base URL: `http://127.0.0.1:3001`.
 
-## GET `/api/health`
+The integration target is Kingdee expense reimbursement form `ER_ExpReimbursement`. It does not create or query general-ledger vouchers.
 
-Returns service status.
+## System and configuration
 
-## GET `/api/ready`
+- `GET /api/health` — liveness.
+- `GET /api/ready` — dependency readiness.
+- `GET /api/system/status` — modes, sanitized configuration, scheduler and counts.
+- `GET /api/integration-settings` — saved Fenbeitong tenant, ERP account and acctID selections.
+- `PUT /api/integration-settings` — validates and saves those selections.
+- `GET /api/scheduler/status` — scheduler state.
+- `POST /api/scheduler/run-once` — synchronizes once and optionally saves expense reimbursements when auto-save is enabled.
 
-Returns dependency readiness. Mock mode is ready only because it is explicitly configured; real mode fails readiness when required configuration is missing.
+## Fenbeitong expense reimbursement workflow
 
-## GET `/api/system/status`
+- `GET /api/fenbeitong-expense-reimbursement/config/mock-template`
+- `PUT /api/fenbeitong-expense-reimbursement/config`
+- `GET /api/fenbeitong-expense-reimbursement/tenants`
+- `PUT /api/fenbeitong-expense-reimbursement/tenants/:tenantKey`
+- `POST /api/fenbeitong-expense-reimbursement/sync`
+- `GET /api/fenbeitong-expense-reimbursement/synced-documents`
+- `POST /api/fenbeitong-expense-reimbursement/preview`
+- `POST /api/fenbeitong-expense-reimbursement/prepare`
+- `POST /api/fenbeitong-expense-reimbursement/save-erp`
+- `GET /api/fenbeitong-expense-reimbursement/process`
+- `GET /api/fenbeitong-expense-reimbursement/process/:sourceId`
 
-Returns product mode, dependency readiness, local state path, latest sync batch, dashboard counts, scheduler state, sanitized configuration, and saved `integrationSelection`.
+`preview` accepts either `fixedJson` or `sourceId`, plus `documentDate`, selected Kingdee account keys and mapping configuration. It returns `documentSummary`, `expenseEntries`, source/tax summaries, an idempotency key, content hash and the K3Cloud Save payload.
 
-## GET `/api/system/config-summary`
+`sync` combines two source kinds through one Fenbeitong access token: `OFFLINE_REIMBURSEMENT` from reimbursement list/detail `expenses`, and `ONLINE_MONTHLY_BILL` only from the settlement-entry bill list and bill-detail APIs. Reimbursement-detail `orders` references and ordinary order list/detail APIs are not online accounting sources. The original bill number becomes `bill_no`, with `source_origin: "SETTLEMENT_POSTING"` and the bill period as `settlement_month`.
 
-Returns sanitized configuration only. Fenbeitong reports `credentialStore: "sqlite"`, the default tenant key, list override keys, tenant store path, saved integration selection, and tenant public fields. It never returns tokens, app keys, passwords, cookies, or authorization header values.
+The online settlement sequence is bill list first, then bill details for every returned `bill_no`. Token-header bill endpoints use JSON and the same `access-token` header. Legacy bill endpoints are also supported when a tenant has an official `sign_key`, using the documented form-encoded signature. The enterprise-paid amount is read from the bill detail (`company_price`, with compatible aliases); rows with no enterprise-payment field are skipped. Business lines such as express and value-added service remain independent bill rows.
 
-Kingdee account summaries include only `key`, `label`, and boolean configured flags. Kingdee acctID summaries include only `key`, `label`, and configured flags. Usernames, passwords, and raw acctID values are never returned.
-
-## GET `/api/integration-settings`
-
-Returns the saved dropdown selection and sanitized options for all three selectors:
-
-```json
-{
-  "selection": {
-    "tenantKey": "puhui",
-    "kingdeeAccountKey": "current",
-    "kingdeeAcctIdKey": "puhui-6977227150362f",
-    "updatedAt": ""
-  },
-  "tenants": [],
-  "kingdeeAccounts": [],
-  "kingdeeAcctIds": []
-}
-```
-
-## PUT `/api/integration-settings`
-
-Persists the selected Fenbeitong company, ERP login account, and Kingdee acctID key in `runtime-data/state.json`. Unknown tenant, account, or acctID keys fail fast and do not modify the previous saved selection.
+`save-erp` logs in to K3Cloud, switches to the organization in `FOrgID`, then posts:
 
 ```json
 {
-  "tenantKey": "puhui",
-  "kingdeeAccountKey": "current",
-  "kingdeeAcctIdKey": "puhui-6977227150362f"
+  "formid": "ER_ExpReimbursement",
+  "data": "<expense-reimbursement-payload-json>"
 }
 ```
 
-## GET `/api/kingdee/accounts`
+After Save succeeds, the backend calls the configured View service with the same `ER_ExpReimbursement` FormId and validates organization, applicant employee, request department, bill type and total amount before recording `ERP_EXPENSE_REIMBURSEMENT_SAVED`.
 
-Returns the current ERP account selection and sanitized account list used by legacy clients.
+Already-saved source records are blocked unless `forceRetry=true`. A retry updates the existing expense reimbursement through `Model.FID`; it never uses a voucher primary key.
 
-## PUT `/api/kingdee/account-selection`
+## Logs
 
-Stores the selected ERP account key through the unified integration selection state for backward compatibility. New frontend code uses `/api/integration-settings`. Unknown account keys fail fast and do not fall back to another account.
-
-```json
-{ "accountKey": "jia-zeyu" }
-```
-
-## GET `/api/scheduler/status`
-
-Returns scheduler status:
-
-```json
-{
-  "enabled": false,
-  "intervalSeconds": 3600,
-  "autoPushErp": false,
-  "running": false,
-  "lastRunAt": "",
-  "lastSuccessAt": "",
-  "lastErrorAt": "",
-  "lastError": "",
-  "lastBatchId": "",
-  "runCount": 0
-}
-```
-
-## POST `/api/scheduler/run-once`
-
-Runs one scheduler cycle immediately. When `SCHEDULER_AUTO_PUSH_ERP=false`, it only syncs source documents. When `SCHEDULER_AUTO_PUSH_ERP=true`, it also pushes synced records to Kingdee and fails fast if voucher mapping config is missing.
-
-## GET `/api/fenbeitong-voucher/config/mock-template`
-
-Returns a non-secret mock configuration and fixed source JSON.
-
-## GET `/api/fenbeitong-voucher/tenants`
-
-Returns public Fenbeitong tenant records from SQLite. Secret fields are always omitted.
-
-## PUT `/api/fenbeitong-voucher/tenants/:tenantKey`
-
-Creates or updates one Fenbeitong tenant in SQLite. This is where company-specific `appId`, `appKey`, cached `accessToken`, token expiry, refresh interval, API paths, and list payload are stored. The response is sanitized and does not echo secrets.
-
-## PUT `/api/fenbeitong-voucher/config`
-
-Stores local voucher mapping configuration.
-
-## POST `/api/fenbeitong-voucher/preview`
-
-Builds a GL_VOUCHER payload from fixed JSON or a synced source record. Response includes `sourceId`, `debitTotal`, `creditTotal`, `balanced`, voucher lines, source summary, and `payload`.
-
-## POST `/api/fenbeitong-voucher/prepare`
-
-Creates a local prepared process record. This does not call Kingdee.
-
-## POST `/api/fenbeitong-voucher/sync`
-
-Runs the Fenbeitong adapter. Request body accepts optional `{ "tenantKey": "puhui" | "yingtai" }`; missing `tenantKey` uses the saved `integrationSelection.tenantKey`. `yingtai` fails fast with waiting-development behavior and never falls back to Puhui credentials.
-
-In `FENBEITONG_MODE=mock`, it loads the fixed JSON fixture. In `real` mode, the selected tenant is read from SQLite. `authMode=access-token` uses the stored access token directly; `authMode=app-key` posts tenant `appId/appKey` as JSON to the tenant `authPath`, stores the returned token and expiry in SQLite, and reuses it until the tenant-specific refresh interval expires.
-
-## GET `/api/fenbeitong-voucher/synced-documents`
-
-Returns the local queue of synced Fenbeitong source documents. Records include source id, source code, source mode, mock replacement marker, batch id, process stage, fixed JSON and timestamps.
-
-## POST `/api/fenbeitong-voucher/push-erp`
-
-Runs the Kingdee adapter. In `KINGDEE_MODE=mock`, ERP save fails fast and does not simulate a saved voucher. In `real` mode, missing real interface configuration fails fast.
-
-Real Kingdee mode uses K3Cloud WebAPI session login. The backend posts `acctID`, `username`, `password`, and `lcid` to `KINGDEE_AUTH_PATH`, extracts the returned `Set-Cookie`, and then posts a JSON wrapper `{ "formid": "GL_VOUCHER", "data": "<payload-json>" }` to `KINGDEE_SAVE_PATH`. After Save succeeds, the backend calls `KINGDEE_VIEW_PATH` for the returned id before marking the local process as `ERP_PUSHED`.
-
-Request bodies may include `kingdeeAccountKey` and `kingdeeAcctIdKey`. When either is omitted, the backend uses the saved integration selection. `kingdeeAccountKey` selects only username/password; `kingdeeAcctIdKey` selects only the Kingdee data-center acctID. Duplicate pushes for an already saved source id are rejected before any Kingdee login call.
-
-## GET `/api/fenbeitong-voucher/process`
-
-Returns all local voucher process records.
-
-## GET `/api/fenbeitong-voucher/process/:sourceId`
-
-Returns a local process record.
-
-## GET `/api/operations/logs`
-
-Returns local operation logs for sync, prepare, push, scheduler, and configuration actions. Secret-like fields are redacted before persistence.
+`GET /api/operations/logs` returns sanitized sync, prepare, save, retry, scheduler and configuration events. Secret-like fields are redacted before persistence.

@@ -1,0 +1,207 @@
+分贝通“结算入账”接口选择
+生成日期：2026-07-23
+
+一、最终结论
+
+ERP 费用报销单的线上数据主流程只需要以下两个接口：
+
+1. 查询商务消费账单信息
+2. 查询商务消费账单详情
+
+当普通账单详情没有返回完整税额拆分时，再按条件补充调用：
+
+3. 查询商务消费账单详情（按单收费模式）
+
+其他接口不作为 ERP 费用明细的主数据源。
+
+
+二、主调用流程
+
+第一步：查询商务消费账单信息
+
+用途：
+- 查询分贝通“结算入账 → 企业账单 → 已出账单”中的真实账单列表。
+- 获取原始账单编号、账单周期、账单状态和账单汇总金额。
+
+官方接口：
+- 文档 ID：248
+- URL：/openapi/bill/business/v1/list
+- Method：POST
+- Content-Type：application/json
+- 鉴权：请求头 access-token，不需要 sign-key
+- 请求体：start_time、end_time、state、page_index、page_size
+
+关键返回字段：
+- data.bills[].code：原始账单编号，例如 0013808520260701。
+- data.bills[].start_time / end_time：账单月份。
+- data.bills[].bill_cycle：实际账单周期。
+- data.bills[].state：账单状态。
+- data.bills[].company_total_price：企业支付金额汇总。
+- data.bills[].personal_total_price：个人支付金额汇总。
+- data.bills[].fbb_total_price：分贝币金额汇总。
+- data.bills[].pay_after_total_price：后付金额汇总。
+- data.total_pages / total_count：分页信息。
+
+筛选规则：
+- 只处理已出账且符合财务要求的账单状态。
+- 必须使用接口返回的 code 作为原始账单编号，禁止程序自行拼接。
+- 账单月份和账单周期必须使用接口返回值，禁止根据订单日期猜测。
+
+
+第二步：查询商务消费账单详情
+
+用途：
+- 使用第一步返回的原始账单编号查询真实账单明细。
+- 每条 details 记录作为一条 ERP 报销明细。
+
+官方接口：
+- 文档 ID：249
+- URL：/openapi/bill/business/v1/detail
+- Method：POST
+- Content-Type：application/json
+- 鉴权：请求头 access-token，不需要 sign-key
+- 请求体：bill_code、order_category（可选）、page_index、page_size
+
+必须读取的字段：
+- order_id：订单编号。
+- order_category：业务线/订单类型。
+- order_create_time：订单时间。
+- company_price：企业支付金额，是判断明细是否进入 ERP 的核心字段。
+- repayment_price：应还款/结算金额，仅作核对。
+- user_name / user_code / user_phone：消费人信息。
+- payer_name / payer_phone：付款人信息。
+- user_dept / user_dept_all_path：消费人部门。
+- payer_dept / payer_dept_all_path：付款人部门。
+- cost_category：费用类别。
+- public_payment_reason：事由。
+- public_payment_use：用途。
+- start_city_name / start_address_name：出发地。
+- end_city_name / end_address_name：目的地。
+- order_category_type：交通类型。
+- cost_attributions：费用承担部门及分摊金额。
+- subject_name / subject_code：账单主体。
+- include_tax_amount：含税金额。
+- exclude_tax_amount：不含税金额。
+- total_tax：税额。
+- deductible_total_amount：可抵扣税额。
+- invoice_type / invoice_number：发票信息。
+- bill_type：是否已入账。
+
+明细入选规则：
+- company_price 字段必须存在。
+- company_price 为 0 的普通消费记录不进入 ERP。
+- 退款记录允许为负数，必须与原始账单中的退款明细保持一致，不得改成正数。
+- 分贝通本身为空的字段保持为空，禁止自动补值。
+- 所有金额按接口原始精度读取，写入 ERP 前再统一保留两位小数。
+
+
+第三步：查询商务消费账单详情（按单收费模式，条件调用）
+
+用途：
+- 当普通“商务消费账单详情”中的税额、不含税金额缺失或无法核对时，
+  按 order_id / ticket_id 获取订单级发票拆分。
+
+关键返回字段：
+- data.orders[].order_id
+- data.orders[].ticket_id
+- data.orders[].bill_code
+- data.orders[].invoice_detail[].include_tax_amount
+- data.orders[].invoice_detail[].exclude_tax_amount
+- data.orders[].invoice_detail[].total_tax
+- data.orders[].invoice_detail[].deductible_total_amount
+- data.orders[].invoice_detail[].nondeductible_total_amount
+- data.orders[].invoice_detail[].name
+- data.orders[].invoice_detail[].rate
+
+使用规则：
+- 只在账户确实采用按单收贵模式，或普通账单详情缺少税额拆分时调用。
+- 同一订单可能返回票根、预订服务费、垫资服务费、抢票费、保险等多行。
+- 税额与不含税金额应按 invoice_detail 明细汇总，不得重复计算。
+- 汇总后必须满足：
+  企业支付金额 = 税额 + 不含税金额
+  如因接口口径不同不满足，应阻止保存并报告原始订单编号。
+
+
+三、不作为 ERP 费用主数据源的接口
+
+1. 查询分贝券消费账单详情
+
+原因：
+- 返回的是分贝券/红包券消费与退款流水。
+- 示例中 company_price 为 0，主要金额在 red_coupon_price。
+- 按当前规则“只要有企业支付金额”，这类记录不进入 ERP。
+- 如以后财务要求单独入账，应作为独立来源类型处理，不能混入商务消费账单。
+
+
+2. 查询商务消费账单发票详情
+
+原因：
+- 主要返回发票、行程单、票号、开票主体、PDF/OFD 等信息。
+- 可用于开票核验和附件关联，但不能替代账单订单明细。
+- itinerary_list 中的 company_total_pay 可作交叉校验，不能作为所有业务线的统一金额来源。
+
+
+3. 查询预开票详情
+
+原因：
+- 主要返回开票申请、发票状态、发票号码、开票金额和文件地址。
+- 属于发票流程数据，不是结算入账订单明细。
+- 仅在需要核对开票状态或挂接发票附件时调用。
+
+
+4. 查询账单个人发票详情
+
+原因：
+- 属于个人发票信息，不是企业支付账单的主数据。
+- 当前 ERP 费用报销单保存范围只处理企业支付金额，因此不调用。
+
+
+四、ERP 字段来源建议
+
+ERP 单据编号：
+- 使用“查询商务消费账单信息”返回的 bills[].code。
+
+ERP 一张报销单的合并规则：
+- 同一原始账单编号 + 同一报销人 + 同一账单月份，合并为一张费用报销单。
+- 账单中的每个订单保存为一行明细。
+
+报销人：
+- 优先使用账单详情的 user_name / user_code。
+- 无 user_name 时再使用 payer_name。
+- 禁止用内部第三方人员 ID 代替员工编号。
+
+费用承担部门：
+- 优先使用 cost_attributions 中部门类型的明细。
+- 没有费用承担部门时保持为空。
+
+业务线：
+- 使用 order_category 和接口返回的业务类型字段进行映射。
+
+报销金额：
+- 使用 company_price。
+
+税额：
+- 优先使用账单详情 total_tax 或 deductible_total_amount，具体按财务确认口径。
+- 普通账单详情缺失时，汇总按单收贵接口 invoice_detail[].total_tax。
+
+不含税金额：
+- 优先使用账单详情 exclude_tax_amount。
+- 普通账单详情缺失时，汇总按单收贵接口 invoice_detail[].exclude_tax_amount。
+
+来源标记：
+- source_origin = SETTLEMENT_POSTING
+- source_contract = BUSINESS_BILL_LIST_AND_DETAIL
+- source_bill_no = bills[].code
+
+
+五、已完成的官方文档核验和运行验证
+
+- 原先提供的 document?id=161 是“更新申请单审批状态”，不是账单接口。
+- 账单列表和账单详情均为 access-token 请求头鉴权，不需要 sign-key。
+- 账单列表必须传 start_time / end_time，不能传旧参数 start_month / end_month。
+- 账单详情必须传 bill_code，不能传旧参数 bill_no。
+- 程序已使用官方接口完成真实同步，原始账单号直接来自 data.bills[].code。
+- 账期使用 data.bills[].bill_cycle，避免把 7 月 1 日出具的 6 月账单错误显示成 7 月。
+- 实际详情中的 order_category=913 映射为“增值服务”。
+- 当详情只返回 deductible_total_amount 时，不含税金额按“企业支付金额 - 税额”计算，
+  并在写入 ERP 前校验“税额 + 不含税金额 = 企业支付金额”。

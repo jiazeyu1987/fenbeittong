@@ -1,8 +1,15 @@
 import { buildMockTemplate } from './mock-template.js';
 import { readJson, sendError, sendJson } from './http-utils.js';
+import { AppError } from './errors.js';
+import { createCsvDownload } from './export-downloads.js';
 import { getSchedulerStatus, runSchedulerOnce } from './services/scheduler.js';
 import { getReadinessStatus, getSystemStatus } from './services/system-status.js';
-import { prepareVoucher, previewVoucher, pushVoucherToErp, syncFenbeitongDocuments } from './services/voucher-workflow.js';
+import {
+  prepareExpenseReimbursement,
+  previewExpenseReimbursement,
+  saveExpenseReimbursementToErp,
+  syncFenbeitongDocuments
+} from './services/expense-reimbursement-workflow.js';
 import { listFenbeitongTenants, saveFenbeitongTenantCredentials } from './tenant-store.js';
 import {
   findPreparedRecord,
@@ -38,6 +45,12 @@ export async function handleApi(request, response) {
     if (request.method === 'GET' && url.pathname === '/api/system/config-summary') {
       return sendJson(response, 200, { success: true, data: getSystemStatus().config });
     }
+    if (request.method === 'POST' && url.pathname === '/api/exports') {
+      return sendJson(response, 201, {
+        success: true,
+        data: createCsvDownload(await readJson(request))
+      });
+    }
     if (request.method === 'GET' && url.pathname === '/api/kingdee/accounts') {
       const config = getAppConfig().kingdee;
       const selectedAccount = resolveKingdeeAccount(config, getKingdeeAccountSelection());
@@ -71,13 +84,13 @@ export async function handleApi(request, response) {
     if (request.method === 'POST' && url.pathname === '/api/scheduler/run-once') {
       return sendJson(response, 200, { success: true, data: await runSchedulerOnce('manual') });
     }
-    if (request.method === 'GET' && url.pathname === '/api/fenbeitong-voucher/config/mock-template') {
+    if (request.method === 'GET' && url.pathname === '/api/fenbeitong-expense-reimbursement/config/mock-template') {
       return sendJson(response, 200, { success: true, data: buildMockTemplate() });
     }
-    if (request.method === 'GET' && url.pathname === '/api/fenbeitong-voucher/tenants') {
+    if (request.method === 'GET' && url.pathname === '/api/fenbeitong-expense-reimbursement/tenants') {
       return sendJson(response, 200, { success: true, data: listFenbeitongTenants() });
     }
-    if (request.method === 'PUT' && url.pathname.startsWith('/api/fenbeitong-voucher/tenants/')) {
+    if (request.method === 'PUT' && url.pathname.startsWith('/api/fenbeitong-expense-reimbursement/tenants/')) {
       const tenantKey = decodeURIComponent(url.pathname.split('/').pop());
       return sendJson(response, 200, {
         success: true,
@@ -87,35 +100,35 @@ export async function handleApi(request, response) {
         })
       });
     }
-    if (request.method === 'PUT' && url.pathname === '/api/fenbeitong-voucher/config') {
+    if (request.method === 'PUT' && url.pathname === '/api/fenbeitong-expense-reimbursement/config') {
       return sendJson(response, 200, { success: true, data: saveConfig(await readJson(request)) });
     }
-    if (request.method === 'GET' && url.pathname === '/api/fenbeitong-voucher/config') {
+    if (request.method === 'GET' && url.pathname === '/api/fenbeitong-expense-reimbursement/config') {
       const current = getConfig();
       if (!current) {
         throw new Error('configuration is missing');
       }
       return sendJson(response, 200, { success: true, data: current });
     }
-    if (request.method === 'POST' && url.pathname === '/api/fenbeitong-voucher/sync') {
+    if (request.method === 'POST' && url.pathname === '/api/fenbeitong-expense-reimbursement/sync') {
       return sendJson(response, 200, { success: true, data: await syncFenbeitongDocuments(await readJson(request)) });
     }
-    if (request.method === 'GET' && url.pathname === '/api/fenbeitong-voucher/synced-documents') {
+    if (request.method === 'GET' && url.pathname === '/api/fenbeitong-expense-reimbursement/synced-documents') {
       return sendJson(response, 200, { success: true, data: listSyncedDocuments() });
     }
-    if (request.method === 'POST' && url.pathname === '/api/fenbeitong-voucher/preview') {
-      return sendJson(response, 200, { success: true, data: previewVoucher(await readJson(request)) });
+    if (request.method === 'POST' && url.pathname === '/api/fenbeitong-expense-reimbursement/preview') {
+      return sendJson(response, 200, { success: true, data: await previewExpenseReimbursement(await readJson(request)) });
     }
-    if (request.method === 'POST' && url.pathname === '/api/fenbeitong-voucher/prepare') {
-      return sendJson(response, 200, { success: true, data: prepareVoucher(await readJson(request)) });
+    if (request.method === 'POST' && url.pathname === '/api/fenbeitong-expense-reimbursement/prepare') {
+      return sendJson(response, 200, { success: true, data: await prepareExpenseReimbursement(await readJson(request)) });
     }
-    if (request.method === 'POST' && url.pathname === '/api/fenbeitong-voucher/push-erp') {
-      return sendJson(response, 200, { success: true, data: await pushVoucherToErp(await readJson(request)) });
+    if (request.method === 'POST' && url.pathname === '/api/fenbeitong-expense-reimbursement/save-erp') {
+      return sendJson(response, 200, { success: true, data: await saveExpenseReimbursementToErp(await readJson(request)) });
     }
-    if (request.method === 'GET' && url.pathname === '/api/fenbeitong-voucher/process') {
+    if (request.method === 'GET' && url.pathname === '/api/fenbeitong-expense-reimbursement/process') {
       return sendJson(response, 200, { success: true, data: listProcessRecords() });
     }
-    if (request.method === 'GET' && url.pathname.startsWith('/api/fenbeitong-voucher/process/')) {
+    if (request.method === 'GET' && url.pathname.startsWith('/api/fenbeitong-expense-reimbursement/process/')) {
       const sourceId = decodeURIComponent(url.pathname.split('/').pop());
       const record = findPreparedRecord(sourceId);
       if (!record) {

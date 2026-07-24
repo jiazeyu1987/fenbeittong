@@ -5,7 +5,7 @@
 The application runs the production workflow even when external dependencies are missing:
 
 - Fenbeitong sync uses an explicit adapter mode.
-- Kingdee voucher save uses an explicit adapter mode.
+- Kingdee expense reimbursement save uses an explicit adapter mode.
 - Timed synchronization uses an explicit scheduler mode and does not start unless `SCHEDULER_ENABLED=true`.
 - Fenbeitong mock data is allowed only when `FENBEITONG_MODE=mock`; Kingdee mock mode is not allowed to produce ERP save success.
 - Real mode fails fast when required configuration is missing.
@@ -27,7 +27,7 @@ Mock replacement is visible in API responses, local records, sync batches, opera
 
 - Default mode is disabled to avoid surprise background writes.
 - Manual run is available for validation before enabling timed execution.
-- Auto-push to ERP is disabled by default. It should only be enabled after real `GL_VOUCHER` save behavior is confirmed in the test account set.
+- Auto-save to ERP is disabled by default. Enable it only after real `ER_ExpReimbursement` save behavior is confirmed in the test account set.
 - Scheduler errors are written to operation logs and surfaced in scheduler status.
 
 ## Data Storage

@@ -202,7 +202,9 @@ function buildKingdeeConfig() {
     savePath: process.env.KINGDEE_SAVE_PATH
       || 'Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.Save.common.kdsvc',
     viewPath: process.env.KINGDEE_VIEW_PATH
-      || 'Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.View.common.kdsvc'
+      || 'Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.View.common.kdsvc',
+    switchOrgPath: process.env.KINGDEE_SWITCH_ORG_PATH
+      || 'Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.SwitchOrg.common.kdsvc'
   };
   kingdee.selectedAccountKey = process.env.KINGDEE_ACCOUNT_KEY || DEFAULT_KINGDEE_ACCOUNT_KEY;
   kingdee.selectedAcctIdKey = process.env.KINGDEE_ACCT_ID_KEY || DEFAULT_KINGDEE_ACCT_ID_KEY;

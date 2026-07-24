@@ -1,0 +1,36 @@
+{
+  "code": "0",
+  "msg": "success",
+  "data": {
+    "source_kind": "ONLINE_MONTHLY_BILL",
+    "source_origin": "SETTLEMENT_POSTING",
+    "bill_no": "MOCK-BILL-202607",
+    "start_month": "202607",
+    "end_month": "202607",
+    "settlement_month": "202607",
+    "currency_code": "CNY",
+    "order": {
+      "order_category": 3,
+      "business_line_name": "用车",
+      "order_id": "MOCK-ORDER-001",
+      "source_order_id": "MOCK-ORDER-001",
+      "order_create_time": "2026-07-15 09:30:00",
+      "employee_name": "李雄",
+      "third_employee_id": "X040",
+      "department_name": "销售部",
+      "third_department_id": "BM000330",
+      "cost_attribution_category": 1,
+      "cost_attribution_name": "销售部",
+      "booker_department_name": "技术部",
+      "booker_department_code": "BM000330",
+      "order_city_name": "上海市",
+      "destination_city_name": "苏州市",
+      "reason": "客户拜访用车",
+      "travel_approval_reason": "商务洽谈",
+      "repayment_total_amount": "1000.00",
+      "reference_deductible_total_amount": "100.00",
+      "reference_non_deductible_amount": "900.00",
+      "custom_field1": "璞慧医疗器械"
+    }
+  }
+}

@@ -10,9 +10,10 @@
     "reimb_third_id": "MOCK-THIRD-001",
     "user": {
       "id": "USER-001",
-      "name": "Mock User",
-      "code": "PL0189",
-      "department_code": "BM000330"
+      "name": "吴立珠",
+      "code": "PH022",
+      "department_code": "BM000006",
+      "department_name": "销售部"
     },
     "currency_code": "CNY",
     "total_amount": "228.00",
@@ -20,6 +21,7 @@
     "expense_number": 2,
     "apply_reason": "Mock reimbursement for voucher prepare",
     "create_time": "2026-07-11 10:30:00",
+    "payment_time": "2026-07-11 10:30:00",
     "expenses": [
       {
         "id": "EXP-001",

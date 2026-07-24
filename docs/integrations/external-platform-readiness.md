@@ -2,14 +2,14 @@
 
 ## Scope
 
-Fenbeitong production OpenAPI and Kingdee GL_VOUCHER save integration readiness for the local voucher workbench.
+Fenbeitong production OpenAPI and Kingdee `ER_ExpReimbursement` save integration readiness.
 
 ## Status Matrix
 
 | Platform | Environment | Status | Evidence |
 | --- | --- | --- | --- |
 | Fenbeitong OpenAPI | Production | CONFIRMED | App-key auth obtained a token and browser sync pulled 5 real detail-backed reimbursement documents with `mockReplacement=false`. |
-| Kingdee GL_VOUCHER Save | Test account set | IMPLEMENTED, PENDING LIVE VERIFICATION | Adapter now uses K3Cloud `ValidateUser` session login and dynamic-form `Save` with `formid=GL_VOUCHER`; local `.env` must hold credentials and live save must still be verified by querying the saved voucher. |
+| Kingdee expense reimbursement Save | Test account set | IMPLEMENTED, PENDING LIVE WRITE VERIFICATION | Adapter uses K3Cloud `ValidateUser`, dynamic-form `Save` and `View` with `formid=ER_ExpReimbursement`; local `.env` must hold credentials. |
 
 ## Credentials And Secrets
 
@@ -31,10 +31,10 @@ Fenbeitong production OpenAPI and Kingdee GL_VOUCHER save integration readiness 
 ## Verification
 
 - Fenbeitong real browser E2E: PASS, evidence in `E:\ProjectPackage\fenbeitong\doc\tasks\20260714-real-data-e2e-validation\runtime\real-data-e2e-api-verification-1784017369173.json`.
-- Row-level voucher workflow through configured ERP adapter: PASS, final API query returned `ERP_PUSHED`.
-- Kingdee adapter unit verification: PASS, `npm run test:backend` covers K3Cloud login, session cookie reuse, and GL_VOUCHER Save form submission.
-- Full live Kingdee write: PENDING, because a saved GL_VOUCHER must still be queried back from the test account set after local credentials are enabled.
+- Row-level expense reimbursement workflow through configured ERP adapter: PASS, final local state returned `ERP_EXPENSE_REIMBURSEMENT_SAVED`.
+- Kingdee adapter unit verification: PASS, `npm run test:backend` covers login, session reuse, expense reimbursement Save and View verification.
+- Full live Kingdee write: PENDING explicit authorization for a real expense reimbursement write.
 
 ## Blockers And Launch Impact
 
-- Production or test-account Kingdee save cannot be claimed complete until `KINGDEE_MODE=real`, required K3Cloud login configuration is supplied locally, and a saved GL_VOUCHER is queried back from Kingdee.
+- Production or test-account Kingdee save cannot be claimed complete until an authorized `ER_ExpReimbursement` is saved and verified in the target organization.

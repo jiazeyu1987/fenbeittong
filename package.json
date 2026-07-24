@@ -1,8 +1,8 @@
 {
-  "name": "fenbeitong-kingdee-voucher-kit",
+  "name": "fenbeitong-kingdee-expense-reimbursement",
   "version": "0.1.0",
   "private": true,
-  "description": "Standalone collaboration kit for Fenbeitong reimbursement to Kingdee voucher prototype development.",
+  "description": "Fenbeitong reimbursement to Kingdee expense reimbursement integration.",
   "type": "module",
   "scripts": {
     "dev:backend": "node backend/src/server.js",
