@@ -1,6 +1,7 @@
 node_modules/
 dist/
 runtime-data/
+runtime-data-offline/
 data/
 .env
 *.log
