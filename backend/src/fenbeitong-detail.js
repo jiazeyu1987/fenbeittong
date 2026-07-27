@@ -405,7 +405,9 @@ function invoiceSplitTaxAmount(invoice) {
   }
   const confirmedOverride = CONFIRMED_INVOICE_SPLIT_TAX_AMOUNTS[String(invoice?.id || '')];
   if (Number.isFinite(confirmedOverride)) return confirmedOverride;
-  const tax = money(invoice?.tax_amount || 0, 'invoice.tax_amount');
+  const invoiceTax = money(invoice?.tax_amount || 0, 'invoice.tax_amount');
+  const deductibleTax = money(invoice?.deductible_tax || 0, 'invoice.deductible_tax');
+  const tax = invoiceTax === 0 && deductibleTax > 0 ? deductibleTax : invoiceTax;
   const total = money(invoice?.total_amount || 0, 'invoice.total_amount');
   const used = Number(invoice?.used_amount ?? invoice?.standard_trade_amt);
   if (total > 0 && Number.isFinite(used) && used >= 0) return round(tax * Math.min(used, total) / total);

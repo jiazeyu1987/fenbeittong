@@ -1650,7 +1650,9 @@ function invoiceSplitTaxAmount(invoice) {
   if (Number.isFinite(confirmedOverride)) return confirmedOverride;
   const legacyDeductible = Number(invoice?.deductible_tax_amount);
   if (Number.isFinite(legacyDeductible)) return roundMoney(legacyDeductible);
-  const tax = Number(invoice?.tax_amount || 0);
+  const invoiceTax = Number(invoice?.tax_amount || 0);
+  const deductibleTax = Number(invoice?.deductible_tax || 0);
+  const tax = invoiceTax === 0 && deductibleTax > 0 ? deductibleTax : invoiceTax;
   const total = Number(invoice?.total_amount || 0);
   const used = Number(invoice?.used_amount);
   if (total > 0 && Number.isFinite(used) && used >= 0) {

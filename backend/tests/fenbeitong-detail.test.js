@@ -83,6 +83,40 @@ test('uses invoice tax and excluding-tax amounts instead of deductible custom fi
   assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 37.71);
 });
 
+test('uses invoice deductible tax when Fenbeitong returns zero invoice tax', () => {
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      reimb_id: 'ZERO-INVOICE-TAX-ID',
+      reimb_code: 'ZERO-INVOICE-TAX-CODE',
+      currency_code: 'CNY',
+      total_amount: 455,
+      payment_amount: 455,
+      user: { code: 'X039', name: 'Tester' },
+      expenses: [{
+        id: 'ZERO-INVOICE-TAX-EXPENSE',
+        cost_category: { code: 'CI00802', name: 'Train' },
+        total_amount: 455,
+        cost_attributions: [],
+        invoices: [{
+          id: 'ZERO-INVOICE-TAX-INVOICE',
+          total_amount: 455,
+          used_amount: 455,
+          tax_amount: 0,
+          exclude_tax_amount: 0,
+          deductible_tax: 37.57
+        }],
+        cost_custom_fields: [
+          { field_code: 'date_of_expense', detail: '2026-05-07 00:00:00' }
+        ]
+      }]
+    }
+  }));
+
+  assert.equal(parsed.expenses[0].splitTaxAmount, 37.57);
+  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 417.43);
+});
+
 test('expands Fenbeitong invoice usage into the confirmed 20 current-split rows', () => {
   const invoiceGroups = [
     [[394, 300, 0]],
