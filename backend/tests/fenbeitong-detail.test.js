@@ -174,6 +174,40 @@ test('uses confirmed source splits for partially used invoices with discount lin
   }
 });
 
+test('uses the confirmed Fenbeitong split instead of rounding a proportional tax to one yuan', () => {
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      reimb_id: 'MAO-YUN-SPLIT-ID',
+      reimb_code: 'B1IELSHBX26070100003',
+      currency_code: 'CNY',
+      total_amount: 101,
+      payment_amount: 101,
+      user: { code: 'X022', name: 'Tester' },
+      expenses: [{
+        id: '8596904',
+        cost_category: { code: 'CI020', name: 'Hospitality' },
+        total_amount: 101,
+        cost_attributions: [],
+        invoices: [{
+          id: 'FID5024904612158095362399925113',
+          total_amount: 394,
+          used_amount: 101,
+          tax_amount: 3.9,
+          exclude_tax_amount: 390.1,
+          tax_rate: 1
+        }],
+        cost_custom_fields: [
+          { field_code: 'date_of_expense', detail: '2026-06-14 00:00:00' }
+        ]
+      }]
+    }
+  }));
+
+  assert.equal(parsed.expenses[0].splitTaxAmount, 1.01);
+  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 99.99);
+});
+
 test('expands Fenbeitong invoice usage into the confirmed 20 current-split rows', () => {
   const invoiceGroups = [
     [[394, 300, 0]],
