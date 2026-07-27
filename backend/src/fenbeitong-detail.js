@@ -305,17 +305,15 @@ function parseExpense(expense, index, invoiceIds) {
   });
   const amount = money(expense.total_amount, `data.expenses[${index}].total_amount`);
   const departmentAttributionAmount = expenseDepartmentAttributionAmount(expense) ?? amount;
-  const customTaxAmount = customFieldNumber(expense, 'deductible_tax');
-  const customExcludingTaxAmount = customFieldNumber(expense, 'untaxed_amount');
-  const splitTaxAmount = customTaxAmount !== null
-    ? round(customTaxAmount)
-    : round(Math.min(amount, invoices.reduce((sum, invoice) => sum + invoice.splitTaxAmount, 0)));
+  const splitTaxAmount = round(Math.min(
+    amount,
+    invoices.reduce((sum, invoice) => sum + invoice.splitTaxAmount, 0)
+  ));
   const invoiceExcludingTaxAmount = round(invoices.reduce((sum, invoice) => sum + invoice.excludingTaxAmount, 0));
-  const splitExcludingTaxAmount = customExcludingTaxAmount !== null
-    ? customExcludingTaxAmount
-    : invoiceExcludingTaxAmount > 0 && round(splitTaxAmount + invoiceExcludingTaxAmount) === amount
-      ? invoiceExcludingTaxAmount
-      : round(amount - splitTaxAmount);
+  const splitExcludingTaxAmount = invoiceExcludingTaxAmount > 0
+    && round(splitTaxAmount + invoiceExcludingTaxAmount) === amount
+    ? invoiceExcludingTaxAmount
+    : round(amount - splitTaxAmount);
   const department = expenseAttributionDepartment(expense);
   return {
     id: requiredText(expense.id || `EXP-${index + 1}`, `data.expenses[${index}].id`),
@@ -325,7 +323,7 @@ function parseExpense(expense, index, invoiceIds) {
     departmentAttributionAmount,
     splitTaxAmount,
     splitExcludingTaxAmount,
-    taxSplitProvided: customTaxAmount !== null && customExcludingTaxAmount !== null,
+    taxSplitProvided: invoices.length > 0,
     reason: String(expense.reason || ''),
     purpose: String(expense.reason || ''),
     trafficType: '',
@@ -348,12 +346,15 @@ function expandExpenseByInvoiceSplits(expense) {
 
   const invoiceEntries = expense.invoices.map((invoice, index) => {
     const amount = round(Math.max(0, invoice.usedAmount));
+    const splitTaxAmount = round(Math.min(amount, invoice.splitTaxAmount));
     return {
       ...expense,
       id: `${expense.id}:${invoice.id || index + 1}`,
       sourceExpenseId: expense.id,
       sourceInvoiceId: invoice.id,
       amount,
+      splitTaxAmount,
+      splitExcludingTaxAmount: round(amount - splitTaxAmount),
       invoices: [invoice],
       invoiceCount: 1,
       invoiceTotalAmount: invoice.totalAmount,
@@ -384,45 +385,9 @@ function expandExpenseByInvoiceSplits(expense) {
     throw new Error(`invoice used amounts ${expandedTotal.toFixed(2)} do not match expense ${expense.id} amount ${expense.amount.toFixed(2)}`);
   }
 
-  // The expense custom fields are Fenbeitong's authoritative “current split”
-  // amounts. Invoice tax is the invoice's face-value tax and must not replace
-  // the amount the employee actually selected for this reimbursement.
-  let allocatedSplitTaxAmount = 0;
-  let allocatedSplitExcludingTaxAmount = 0;
-  const splitEntries = invoiceEntries.map((entry, index) => {
-    if (!expense.taxSplitProvided) {
-      const splitTaxAmount = round(Math.min(entry.amount, entry.invoices[0]?.splitTaxAmount || 0));
-      return {
-        ...entry,
-        splitTaxAmount,
-        splitExcludingTaxAmount: round(entry.amount - splitTaxAmount)
-      };
-    }
-    const isLast = index === invoiceEntries.length - 1;
-    const splitTaxAmount = isLast
-      ? round(expense.splitTaxAmount - allocatedSplitTaxAmount)
-      : round(expense.amount > 0
-        ? expense.splitTaxAmount * entry.amount / expense.amount
-        : 0);
-    const splitExcludingTaxAmount = isLast
-      ? round(expense.splitExcludingTaxAmount - allocatedSplitExcludingTaxAmount)
-      : round(expense.amount > 0
-        ? expense.splitExcludingTaxAmount * entry.amount / expense.amount
-        : 0);
-    allocatedSplitTaxAmount = round(allocatedSplitTaxAmount + splitTaxAmount);
-    allocatedSplitExcludingTaxAmount = round(
-      allocatedSplitExcludingTaxAmount + splitExcludingTaxAmount
-    );
-    return {
-      ...entry,
-      splitTaxAmount,
-      splitExcludingTaxAmount
-    };
-  });
-
   let allocatedDepartmentAmount = 0;
-  return splitEntries.map((entry, index) => {
-    const isLast = index === splitEntries.length - 1;
+  return invoiceEntries.map((entry, index) => {
+    const isLast = index === invoiceEntries.length - 1;
     const departmentAttributionAmount = isLast
       ? round(expense.departmentAttributionAmount - allocatedDepartmentAmount)
       : round(expense.amount > 0

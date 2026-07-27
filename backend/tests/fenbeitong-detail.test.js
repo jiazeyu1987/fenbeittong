@@ -47,7 +47,7 @@ test('uses the latest expense occurrence date instead of the approval date', () 
   ]);
 });
 
-test('keeps the source expense date and current split amounts without invoice substitution', () => {
+test('uses invoice tax and excluding-tax amounts instead of deductible custom fields', () => {
   const parsed = parseFenbeitongDetail(JSON.stringify({
     code: 0,
     data: {
@@ -79,8 +79,8 @@ test('keeps the source expense date and current split amounts without invoice su
   }));
 
   assert.equal(parsed.expenses[0].expenseDate, '2026-04-02');
-  assert.equal(parsed.expenses[0].splitTaxAmount, 1.39);
-  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 47.7);
+  assert.equal(parsed.expenses[0].splitTaxAmount, 9.99);
+  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 37.71);
 });
 
 test('expands Fenbeitong invoice usage into the confirmed 20 current-split rows', () => {

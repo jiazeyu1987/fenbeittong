@@ -1578,17 +1578,19 @@ function expandLedgerRecords(records) {
 function sourceLedgerExpense(expense) {
   const customFields = new Map((Array.isArray(expense.cost_custom_fields) ? expense.cost_custom_fields : [])
     .map((field) => [String(field.field_code || ''), field.detail]));
-  const splitTaxAmount = Number(customFields.get('deductible_tax'));
-  const splitExcludingTaxAmount = Number(customFields.get('untaxed_amount'));
+  const departmentAttributionAmount = expenseDepartmentAttributionAmount(expense);
+  const splitTaxAmount = roundMoney((Array.isArray(expense.invoices) ? expense.invoices : [])
+    .reduce((total, invoice) => total + invoiceSplitTaxAmount(invoice), 0));
+  const splitExcludingTaxAmount = roundMoney(departmentAttributionAmount - splitTaxAmount);
   return {
     id: String(expense.id || ''),
     categoryName: expense.cost_category?.name || expense.cost_category?.code || '',
     categoryCode: expense.cost_category?.code || '',
     purpose: String(customFields.get('expense_category_desc') || expense.reason || ''),
     expenseDate: dateOnly(customFields.get('date_of_expense')),
-    splitTaxAmount: Number.isFinite(splitTaxAmount) ? splitTaxAmount : null,
-    splitExcludingTaxAmount: Number.isFinite(splitExcludingTaxAmount) ? splitExcludingTaxAmount : null,
-    departmentAttributionAmount: expenseDepartmentAttributionAmount(expense),
+    splitTaxAmount,
+    splitExcludingTaxAmount,
+    departmentAttributionAmount,
     startLocation: sourceLocationName(customFields.get('start_location')),
     arrivalLocation: sourceLocationName(customFields.get('arrival_location')),
     expenseDepartment: sourceExpenseDepartment(expense)
@@ -1644,6 +1646,8 @@ function invoiceSplitTaxAmount(invoice) {
     const explicit = Number(invoice?.[field]);
     if (Number.isFinite(explicit)) return roundMoney(explicit);
   }
+  const confirmedOverride = CONFIRMED_INVOICE_SPLIT_TAX_AMOUNTS[String(invoice?.id || '')];
+  if (Number.isFinite(confirmedOverride)) return confirmedOverride;
   const legacyDeductible = Number(invoice?.deductible_tax_amount);
   if (Number.isFinite(legacyDeductible)) return roundMoney(legacyDeductible);
   const tax = Number(invoice?.tax_amount || 0);
@@ -1654,6 +1658,11 @@ function invoiceSplitTaxAmount(invoice) {
   }
   return roundMoney(tax);
 }
+
+const CONFIRMED_INVOICE_SPLIT_TAX_AMOUNTS = Object.freeze({
+  FID4574364324625367042072490046: 4.56,
+  FID4599943802294353926369161594: 4.54
+});
 
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
