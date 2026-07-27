@@ -434,7 +434,7 @@ async function generateExpenseReimbursementFromRow(event) {
   const record = state.syncedDocuments.find((item) => item.sourceId === sourceId);
   if (!record) throw new Error(`待处理单据不存在：${sourceId}`);
   if (buildSourceSummary(record).documentTaxMappingComplete === false) {
-    throw new Error('该单据存在部分使用发票，但分贝通接口未返回本次拆分税额，必须先核对，不能生成或保存到 ERP。');
+    throw new Error('该单据缺少分贝通接口明确返回且核对一致的本次拆分税额和本次拆分不含税金额，不能生成或保存到 ERP。');
   }
   if (state.pushedSourceIds.has(sourceId)) {
     throw new Error('该费用报销单已保存到金蝶，请使用“重新保存费用报销单”。');
@@ -679,7 +679,7 @@ async function toggleQueuedDocument(event) {
   if (!record) throw new Error(`待处理单据不存在：${sourceId}`);
   if (buildSourceSummary(record).documentTaxMappingComplete === false) {
     checkbox.checked = false;
-    throw new Error('该单据存在部分使用发票，但分贝通接口未返回本次拆分税额，必须先核对，不能生成或保存到 ERP。');
+    throw new Error('该单据缺少分贝通接口明确返回且核对一致的本次拆分税额和本次拆分不含税金额，不能生成或保存到 ERP。');
   }
   if (checkbox.checked) {
     state.selectedSourceIds.add(sourceId);
@@ -1044,7 +1044,7 @@ function renderSourceQueue(records) {
         ${renderLedgerCell('interfaceSource', escapeHtml(legacyUnverified ? '历史数据待核验' : record.mockReplacement ? '接口未启用' : '正式接口'))}
         ${renderLedgerCell('time', escapeHtml(summary.paymentDate || ''))}
         <td data-column-key="operationPanel" class="operation-panel-cell">
-          <button class="row-action row-generate-expense-reimbursement" type="button" data-source-id="${escapeHtml(record.sourceId)}" aria-label="为 ${escapeHtml(displaySourceCode(record))} ${legacyUnverified || taxUnresolved ? '待核对税额' : pushed ? '已保存费用报销单' : '生成待保存费用报销单'}" ${legacyUnverified || taxUnresolved || pushed ? 'disabled' : ''}>${legacyUnverified ? '禁止保存' : taxUnresolved ? '待核对' : pushed ? '已保存' : actionText}</button>
+          <button class="row-action row-generate-expense-reimbursement" type="button" data-source-id="${escapeHtml(record.sourceId)}" aria-label="为 ${escapeHtml(displaySourceCode(record))} ${legacyUnverified ? '禁止保存' : taxUnresolved ? '缺少本次拆分金额，禁止生成' : pushed ? '已保存费用报销单' : '生成待保存费用报销单'}" ${legacyUnverified || taxUnresolved || pushed ? 'disabled' : ''}>${legacyUnverified ? '禁止保存' : pushed ? '已保存' : actionText}</button>
         </td>
       </tr>
     `;
@@ -1167,7 +1167,7 @@ function renderLedgerTotals(records) {
     const unresolvedSplitTotal = !taxMappingComplete
       && (column.key === 'splitTaxAmount' || column.key === 'splitExcludingTaxAmount');
     const content = unresolvedSplitTotal
-      ? '待核对'
+      ? ''
       : amountKeys.has(column.key)
         ? formatMoney(roundMoney(totals[column.key]))
         : '';
@@ -1616,24 +1616,16 @@ function sourceLedgerExpense(expense) {
   const customFields = new Map((Array.isArray(expense.cost_custom_fields) ? expense.cost_custom_fields : [])
     .map((field) => [String(field.field_code || ''), field.detail]));
   const departmentAttributionAmount = expenseDepartmentAttributionAmount(expense);
-  const splitResults = (Array.isArray(expense.invoices) ? expense.invoices : [])
-    .map((invoice) => invoiceSplitTaxAmount(invoice));
-  const taxMappingComplete = splitResults.every(Number.isFinite);
-  const splitTaxAmount = taxMappingComplete
-    ? roundMoney(splitResults.reduce((total, amount) => total + amount, 0))
-    : null;
-  const splitExcludingTaxAmount = taxMappingComplete
-    ? roundMoney(departmentAttributionAmount - splitTaxAmount)
-    : null;
+  const split = expenseSplitAmounts(expense);
   return {
     id: String(expense.id || ''),
     categoryName: expense.cost_category?.name || expense.cost_category?.code || '',
     categoryCode: expense.cost_category?.code || '',
     purpose: String(customFields.get('expense_category_desc') || expense.reason || ''),
     expenseDate: dateOnly(customFields.get('date_of_expense')),
-    splitTaxAmount,
-    splitExcludingTaxAmount,
-    taxMappingComplete,
+    splitTaxAmount: split.resolved ? split.taxAmount : null,
+    splitExcludingTaxAmount: split.resolved ? split.excludingTaxAmount : null,
+    taxMappingComplete: split.resolved,
     departmentAttributionAmount,
     startLocation: sourceLocationName(customFields.get('start_location')),
     arrivalLocation: sourceLocationName(customFields.get('arrival_location')),
@@ -1657,27 +1649,25 @@ function sourceExpenseDepartment(expense) {
 
 function fenbeitongSplitAmounts(expenses) {
   let splitTaxAmount = 0;
+  let splitExcludingTaxAmount = 0;
   let departmentAttributionAmount = 0;
   let taxMappingComplete = true;
   for (const expense of Array.isArray(expenses) ? expenses : []) {
     const departmentAmount = expenseDepartmentAttributionAmount(expense);
     departmentAttributionAmount += departmentAmount;
-    const splitResults = (Array.isArray(expense?.invoices) ? expense.invoices : [])
-      .map((invoice) => invoiceSplitTaxAmount(invoice));
-    const expenseComplete = splitResults.every(Number.isFinite);
-    taxMappingComplete = taxMappingComplete && expenseComplete;
-    if (expenseComplete) {
-      const invoiceTax = splitResults.reduce((total, amount) => total + amount, 0);
-      splitTaxAmount += Math.min(departmentAmount, Math.max(0, invoiceTax));
+    const split = expenseSplitAmounts(expense);
+    taxMappingComplete = taxMappingComplete && split.resolved;
+    if (split.resolved) {
+      splitTaxAmount += split.taxAmount;
+      splitExcludingTaxAmount += split.excludingTaxAmount;
     }
   }
   splitTaxAmount = roundMoney(splitTaxAmount);
+  splitExcludingTaxAmount = roundMoney(splitExcludingTaxAmount);
   departmentAttributionAmount = roundMoney(departmentAttributionAmount);
   return {
-    splitTaxAmount,
-    splitExcludingTaxAmount: taxMappingComplete
-      ? roundMoney(departmentAttributionAmount - splitTaxAmount)
-      : null,
+    splitTaxAmount: taxMappingComplete ? splitTaxAmount : null,
+    splitExcludingTaxAmount: taxMappingComplete ? splitExcludingTaxAmount : null,
     departmentAttributionAmount,
     taxMappingComplete
   };
@@ -1694,38 +1684,79 @@ function expenseDepartmentAttributionAmount(expense) {
     : Number(expense?.total_amount || 0));
 }
 
-function invoiceSplitTaxAmount(invoice) {
-  for (const field of ['current_split_tax_amount', 'split_tax_amount', 'used_tax_amount', 'allocated_tax_amount']) {
-    const rawValue = invoice?.[field];
-    const explicit = Number(rawValue);
-    if (rawValue !== undefined && rawValue !== null && rawValue !== '' && Number.isFinite(explicit)) {
-      return roundMoney(explicit);
-    }
+function expenseSplitAmounts(expense) {
+  const amount = roundMoney(expense?.total_amount);
+  const direct = directExpenseSplitAmounts(expense, amount);
+  if (direct.resolved) return direct;
+  const invoices = Array.isArray(expense?.invoices) ? expense.invoices : [];
+  if (invoices.length === 0) {
+    return { taxAmount: 0, excludingTaxAmount: amount, resolved: true };
   }
-  const confirmedOverride = CONFIRMED_INVOICE_SPLIT_TAX_AMOUNTS[String(invoice?.id || '')];
-  if (Number.isFinite(confirmedOverride)) return confirmedOverride;
-  const invoiceTax = Number(invoice?.tax_amount || 0);
-  const deductibleTax = Number(invoice?.deductible_tax || 0);
-  const tax = invoiceTax === 0 && deductibleTax > 0 ? deductibleTax : invoiceTax;
-  if (!Number.isFinite(tax)) return null;
-  if (tax === 0) return 0;
-  const total = Number(invoice?.total_amount || 0);
-  const used = Number(invoice?.used_amount ?? invoice?.standard_trade_amt);
-  if (Number.isFinite(used) && Math.round(used * 100) === 0) return 0;
-  if (total > 0 && Number.isFinite(used)
-    && Math.round(used * 100) === Math.round(total * 100)) {
-    return roundMoney(tax);
+  let taxAmount = 0;
+  let excludingTaxAmount = 0;
+  for (const invoice of invoices) {
+    const split = invoiceSplitAmounts(invoice);
+    if (!split.resolved) return split;
+    taxAmount += split.taxAmount;
+    excludingTaxAmount += split.excludingTaxAmount;
   }
-  return null;
+  if (roundMoney(taxAmount + excludingTaxAmount) !== amount) return unresolvedSplit();
+  return {
+    taxAmount: roundMoney(taxAmount),
+    excludingTaxAmount: roundMoney(excludingTaxAmount),
+    resolved: true
+  };
 }
 
-const CONFIRMED_INVOICE_SPLIT_TAX_AMOUNTS = Object.freeze({
-  FID4574364324625367042072490046: 4.56,
-  FID4599943802294353926369161594: 4.54,
-  FID1251385483190845442942893798: 11.80,
-  FID2305658563354705927713335813: 23.80,
-  FID5024904612158095362399925113: 1.01
-});
+function invoiceSplitAmounts(invoice) {
+  const total = Number(invoice?.total_amount || 0);
+  const used = Number(invoice?.used_amount ?? invoice?.standard_trade_amt);
+  if (!Number.isFinite(total) || !Number.isFinite(used)
+    || roundMoney(total) <= 0 || roundMoney(used) !== roundMoney(total)) {
+    return unresolvedSplit();
+  }
+  const taxAmount = explicitAmount(invoice?.tax_amount);
+  const excludingTaxAmount = explicitAmount(invoice?.exclude_tax_amount);
+  if (taxAmount === null || excludingTaxAmount === null
+    || roundMoney(taxAmount + excludingTaxAmount) !== roundMoney(used)) {
+    return unresolvedSplit();
+  }
+  return { taxAmount, excludingTaxAmount, resolved: true };
+}
+
+function directExpenseSplitAmounts(expense, totalAmount) {
+  const fields = Array.isArray(expense?.cost_custom_fields) ? expense.cost_custom_fields : [];
+  const taxAmount = explicitCustomAmount(fields, ['税额'], ['tax_amount']);
+  const excludingTaxAmount = explicitCustomAmount(
+    fields,
+    ['未税金额', '不含税金额'],
+    ['untaxed_amount', 'exclude_tax_amount']
+  );
+  if (taxAmount === null || excludingTaxAmount === null
+    || roundMoney(taxAmount + excludingTaxAmount) !== roundMoney(totalAmount)) {
+    return unresolvedSplit();
+  }
+  return { taxAmount, excludingTaxAmount, resolved: true };
+}
+
+function explicitCustomAmount(fields, exactTitles, exactCodes) {
+  const field = fields.find((item) => {
+    const title = String(item?.title || item?.name || '').trim();
+    const code = String(item?.field_code || '').trim();
+    return exactTitles.includes(title) || exactCodes.includes(code);
+  });
+  return explicitAmount(field?.detail);
+}
+
+function explicitAmount(rawValue) {
+  if (rawValue === undefined || rawValue === null || rawValue === '') return null;
+  const amount = Number(rawValue);
+  return Number.isFinite(amount) ? roundMoney(amount) : null;
+}
+
+function unresolvedSplit() {
+  return { taxAmount: null, excludingTaxAmount: null, resolved: false };
+}
 
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
@@ -1828,7 +1859,7 @@ function buildExpenseReimbursementRequest() {
 
 function buildExpenseReimbursementRequestForRecord(record, options = {}) {
   if (buildSourceSummary(record).documentTaxMappingComplete === false) {
-    throw new Error('该单据存在部分使用发票，但分贝通接口未返回本次拆分税额；已停止生成，未使用整票税额按比例反算。');
+    throw new Error('该单据缺少分贝通接口明确返回且核对一致的本次拆分税额和本次拆分不含税金额；缺失值保持为空，已停止生成，未按整票金额反算。');
   }
   const timing = expenseReimbursementTimingForRecord(record);
   return {
@@ -1979,7 +2010,7 @@ function formatMoney(value) {
 }
 
 function formatSplitMoney(summary, field) {
-  return summary.taxMappingComplete === false ? '待核对' : formatMoney(summary[field]);
+  return summary.taxMappingComplete === false ? '' : formatMoney(summary[field]);
 }
 
 function formatOptionalMoney(value) {

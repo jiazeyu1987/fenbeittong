@@ -29,7 +29,7 @@
         "total_amount": "108.00",
         "reason": "Mock travel expense",
         "invoices": [
-          { "id": "INV-001", "total_amount": "108.00", "used_amount": "108.00", "tax_amount": "6.11", "deductible_tax_amount": "6.11" }
+          { "id": "INV-001", "total_amount": "108.00", "used_amount": "108.00", "tax_amount": "6.11", "exclude_tax_amount": "101.89", "deductible_tax_amount": "6.11" }
         ]
       },
       {

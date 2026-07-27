@@ -83,7 +83,7 @@ test('uses invoice tax and excluding-tax amounts instead of deductible custom fi
   assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 37.71);
 });
 
-test('uses invoice deductible tax when Fenbeitong returns zero invoice tax', () => {
+test('does not substitute deductible tax for a missing exact tax and net pair', () => {
   const parsed = parseFenbeitongDetail(JSON.stringify({
     code: 0,
     data: {
@@ -113,11 +113,83 @@ test('uses invoice deductible tax when Fenbeitong returns zero invoice tax', () 
     }
   }));
 
-  assert.equal(parsed.expenses[0].splitTaxAmount, 37.57);
-  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 417.43);
+  assert.equal(parsed.expenses[0].splitTaxAmount, null);
+  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, null);
+  assert.equal(parsed.expenses[0].taxMappingComplete, false);
 });
 
-test('uses confirmed source splits for partially used invoices with discount lines', () => {
+test('uses an explicit expense tax and net pair returned by Fenbeitong', () => {
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      reimb_id: 'EXPLICIT-SPLIT-ID',
+      reimb_code: 'EXPLICIT-SPLIT-CODE',
+      currency_code: 'CNY',
+      total_amount: 101.78,
+      payment_amount: 101.78,
+      user: { code: 'X017', name: 'Tester' },
+      expenses: [{
+        id: 'EXPLICIT-SPLIT-EXPENSE',
+        cost_category: { code: 'CI00805', name: 'Mileage' },
+        total_amount: 101.78,
+        cost_attributions: [],
+        invoices: [{
+          id: 'PARTIAL-INVOICE',
+          total_amount: 293.16,
+          used_amount: 101.78,
+          tax_amount: 33.72,
+          exclude_tax_amount: 259.44
+        }],
+        cost_custom_fields: [
+          { field_code: 'date_of_expense', detail: '2026-04-10 00:00:00' },
+          { field_code: 'custom_tax', title: '\u7a0e\u989d', detail: '11.80' },
+          { field_code: 'untaxed_amount', title: '\u672a\u7a0e\u91d1\u989d', detail: '89.98' }
+        ]
+      }]
+    }
+  }));
+
+  assert.equal(parsed.expenses[0].splitTaxAmount, 11.8);
+  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 89.98);
+  assert.equal(parsed.expenses[0].taxMappingComplete, true);
+});
+
+test('does not treat deductible tax plus untaxed amount as total tax and net', () => {
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      reimb_id: 'DEDUCTIBLE-ONLY-ID',
+      reimb_code: 'DEDUCTIBLE-ONLY-CODE',
+      currency_code: 'CNY',
+      total_amount: 101,
+      payment_amount: 101,
+      user: { code: 'X022', name: 'Tester' },
+      expenses: [{
+        id: 'DEDUCTIBLE-ONLY-EXPENSE',
+        cost_category: { code: 'CI020', name: 'Hospitality' },
+        total_amount: 101,
+        cost_attributions: [],
+        invoices: [{
+          id: 'PARTIAL-INVOICE',
+          total_amount: 394,
+          used_amount: 101,
+          tax_amount: 3.9,
+          exclude_tax_amount: 390.1
+        }],
+        cost_custom_fields: [
+          { field_code: 'deductible_tax', title: '\u53ef\u62b5\u6263\u7a0e\u989d', detail: '0.00' },
+          { field_code: 'untaxed_amount', title: '\u672a\u7a0e\u91d1\u989d', detail: '101.00' }
+        ]
+      }]
+    }
+  }));
+
+  assert.equal(parsed.expenses[0].splitTaxAmount, null);
+  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, null);
+  assert.equal(parsed.expenses[0].taxMappingComplete, false);
+});
+
+test('leaves partially used invoice splits empty even when an old override id is present', () => {
   const cases = [
     {
       invoiceId: 'FID1251385483190845442942893798',
@@ -169,12 +241,13 @@ test('uses confirmed source splits for partially used invoices with discount lin
       }
     }));
 
-    assert.equal(parsed.expenses[0].splitTaxAmount, item.expectedTax);
-    assert.equal(parsed.expenses[0].splitExcludingTaxAmount, item.expectedExcludingTax);
+    assert.equal(parsed.expenses[0].splitTaxAmount, null);
+    assert.equal(parsed.expenses[0].splitExcludingTaxAmount, null);
+    assert.equal(parsed.expenses[0].taxMappingComplete, false);
   }
 });
 
-test('uses the confirmed Fenbeitong split instead of rounding a proportional tax to one yuan', () => {
+test('does not invent 1.01 and 99.99 when Fenbeitong only returns whole-invoice values', () => {
   const parsed = parseFenbeitongDetail(JSON.stringify({
     code: 0,
     data: {
@@ -204,11 +277,12 @@ test('uses the confirmed Fenbeitong split instead of rounding a proportional tax
     }
   }));
 
-  assert.equal(parsed.expenses[0].splitTaxAmount, 1.01);
-  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 99.99);
+  assert.equal(parsed.expenses[0].splitTaxAmount, null);
+  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, null);
+  assert.equal(parsed.expenses[0].taxMappingComplete, false);
 });
 
-test('expands Fenbeitong invoice usage into the confirmed 20 current-split rows', () => {
+test('uses exact full-invoice fields and leaves every partial invoice split empty', () => {
   const invoiceGroups = [
     [[394, 300, 0]],
     [[498, 498, 28.19]],
@@ -260,16 +334,13 @@ test('expands Fenbeitong invoice usage into the confirmed 20 current-split rows'
 
   assert.equal(parsed.expenses.length, 20);
   assert.deepEqual(parsed.expenses.map((expense) => expense.splitTaxAmount), [
-    0, 28.19, 0.77, 0.03, 3.17, 0.19, 12.23, 4.53, 0.42, 0.12,
-    5.66, 19.24, 4.56, 0.77, 0.03, 0.74, 0.45, 0.79, 0, 4.54
-  ]);
-  assert.deepEqual(parsed.expenses.map((expense) => expense.splitExcludingTaxAmount), [
-    300, 469.81, 77.07, 0.47, 52.83, 18.52, 1222.77, 75.47, 41.56, 1.98,
-    94.34, 320.69, 75.44, 77.33, 0.47, 74.36, 44.55, 79.21, 0, 75.46
+    null, 28.19, 0.77, 0.03, 3.17, 0.19, 12.23, 4.53, 0.42, 0.12,
+    5.66, 19.24, null, 0.77, 0.03, 0.74, 0.45, null, null, null
   ]);
   assert.equal(parsed.totalAmount, 3188.76);
-  assert.equal(parsed.splitTaxAmount, 86.43);
-  assert.equal(parsed.splitExcludingTaxAmount, 3102.33);
+  assert.equal(parsed.splitTaxAmount, null);
+  assert.equal(parsed.splitExcludingTaxAmount, null);
+  assert.equal(parsed.taxMappingComplete, false);
   assert.ok(parsed.expenses.every((expense) => expense.purpose === 'confirmed split row'));
   assert.ok(parsed.expenses.every((expense) => expense.trafficType === ''));
 });
@@ -305,9 +376,11 @@ test('never prorates whole-invoice tax when a partial-use split is missing', () 
 
   assert.equal(parsed.taxMappingComplete, false);
   assert.equal(parsed.expenses[0].taxMappingComplete, false);
-  assert.equal(parsed.expenses[0].taxSplitSource, 'PARTIAL_INVOICE_SPLIT_MISSING');
-  assert.equal(parsed.expenses[0].splitTaxAmount, 0);
-  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 0);
+  assert.equal(parsed.expenses[0].taxSplitSource, 'FENBEITONG_SPLIT_FIELDS_MISSING');
+  assert.equal(parsed.expenses[0].splitTaxAmount, null);
+  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, null);
+  assert.equal(parsed.splitTaxAmount, null);
+  assert.equal(parsed.splitExcludingTaxAmount, null);
 });
 
 test('normalizes online route, purpose, traffic type and direct department fields', () => {

@@ -503,65 +503,104 @@ function departmentAttributionTotal(data) {
 function fenbeitongSplitAmounts(data) {
   const expenses = Array.isArray(data.expenses) ? data.expenses : [];
   let splitTaxAmount = 0;
+  let splitExcludingTaxAmount = 0;
   let departmentAttributionAmount = 0;
   let taxMappingComplete = true;
   for (const expense of expenses) {
     const departmentAmount = expenseDepartmentAttributionAmount(expense)
       ?? numericAmount(expense.total_amount);
     departmentAttributionAmount += departmentAmount;
-    const splitResults = (Array.isArray(expense?.invoices) ? expense.invoices : [])
-      .map((invoice) => invoiceSplitTaxAmount(invoice));
-    const expenseComplete = splitResults.every(Number.isFinite);
-    taxMappingComplete = taxMappingComplete && expenseComplete;
-    if (expenseComplete) {
-      const invoiceTax = splitResults.reduce((total, amount) => total + amount, 0);
-      splitTaxAmount += Math.min(departmentAmount, Math.max(0, invoiceTax));
+    const split = expenseSplitAmounts(expense);
+    taxMappingComplete = taxMappingComplete && split.resolved;
+    if (split.resolved) {
+      splitTaxAmount += split.taxAmount;
+      splitExcludingTaxAmount += split.excludingTaxAmount;
     }
   }
   splitTaxAmount = Math.round(splitTaxAmount * 100) / 100;
+  splitExcludingTaxAmount = Math.round(splitExcludingTaxAmount * 100) / 100;
   departmentAttributionAmount = Math.round(departmentAttributionAmount * 100) / 100;
   return {
-    splitTaxAmount,
-    splitExcludingTaxAmount: taxMappingComplete
-      ? Math.round((departmentAttributionAmount - splitTaxAmount) * 100) / 100
-      : 0,
+    splitTaxAmount: taxMappingComplete ? splitTaxAmount : null,
+    splitExcludingTaxAmount: taxMappingComplete ? splitExcludingTaxAmount : null,
     departmentAttributionAmount,
     taxMappingComplete
   };
 }
 
-function invoiceSplitTaxAmount(invoice) {
-  for (const field of ['current_split_tax_amount', 'split_tax_amount', 'used_tax_amount', 'allocated_tax_amount']) {
-    const rawValue = invoice?.[field];
-    const explicit = Number(rawValue);
-    if (rawValue !== undefined && rawValue !== null && rawValue !== '' && Number.isFinite(explicit)) {
-      return Math.round(explicit * 100) / 100;
-    }
+function expenseSplitAmounts(expense) {
+  const amount = numericAmount(expense?.total_amount);
+  const direct = directExpenseSplitAmounts(expense, amount);
+  if (direct.resolved) return direct;
+  const invoices = Array.isArray(expense?.invoices) ? expense.invoices : [];
+  if (invoices.length === 0) {
+    return { taxAmount: 0, excludingTaxAmount: amount, resolved: true };
   }
-  const confirmedOverride = CONFIRMED_INVOICE_SPLIT_TAX_AMOUNTS[String(invoice?.id || '')];
-  if (Number.isFinite(confirmedOverride)) return confirmedOverride;
-  const invoiceTax = Number(invoice?.tax_amount || 0);
-  const deductibleTax = Number(invoice?.deductible_tax || 0);
-  const tax = invoiceTax === 0 && deductibleTax > 0 ? deductibleTax : invoiceTax;
-  if (!Number.isFinite(tax)) return null;
-  if (tax === 0) return 0;
-  const total = Number(invoice?.total_amount);
-  const used = Number(invoice?.used_amount ?? invoice?.standard_trade_amt);
-  if (Number.isFinite(used) && Math.round(used * 100) === 0) return 0;
-  if (Number.isFinite(total) && total > 0 && Number.isFinite(used)
-    && Math.round(used * 100) === Math.round(total * 100)) {
-    return Math.round(tax * 100) / 100;
+  let taxAmount = 0;
+  let excludingTaxAmount = 0;
+  for (const invoice of invoices) {
+    const split = invoiceSplitAmounts(invoice);
+    if (!split.resolved) return split;
+    taxAmount += split.taxAmount;
+    excludingTaxAmount += split.excludingTaxAmount;
   }
-  return null;
+  if (roundMoney(taxAmount + excludingTaxAmount) !== amount) return unresolvedSplit();
+  return {
+    taxAmount: roundMoney(taxAmount),
+    excludingTaxAmount: roundMoney(excludingTaxAmount),
+    resolved: true
+  };
 }
 
-const CONFIRMED_INVOICE_SPLIT_TAX_AMOUNTS = Object.freeze({
-  FID4574364324625367042072490046: 4.56,
-  FID4599943802294353926369161594: 4.54,
-  FID1251385483190845442942893798: 11.80,
-  FID2305658563354705927713335813: 23.80,
-  FID5024904612158095362399925113: 1.01
-});
+function invoiceSplitAmounts(invoice) {
+  const total = Number(invoice?.total_amount);
+  const used = Number(invoice?.used_amount ?? invoice?.standard_trade_amt);
+  if (!Number.isFinite(total) || !Number.isFinite(used)
+    || roundMoney(total) <= 0 || roundMoney(used) !== roundMoney(total)) {
+    return unresolvedSplit();
+  }
+  const taxAmount = explicitAmount(invoice?.tax_amount);
+  const excludingTaxAmount = explicitAmount(invoice?.exclude_tax_amount);
+  if (taxAmount === null || excludingTaxAmount === null
+    || roundMoney(taxAmount + excludingTaxAmount) !== roundMoney(used)) {
+    return unresolvedSplit();
+  }
+  return { taxAmount, excludingTaxAmount, resolved: true };
+}
+
+function directExpenseSplitAmounts(expense, totalAmount) {
+  const fields = Array.isArray(expense?.cost_custom_fields) ? expense.cost_custom_fields : [];
+  const taxAmount = explicitCustomAmount(fields, ['税额'], ['tax_amount']);
+  const excludingTaxAmount = explicitCustomAmount(
+    fields,
+    ['未税金额', '不含税金额'],
+    ['untaxed_amount', 'exclude_tax_amount']
+  );
+  if (taxAmount === null || excludingTaxAmount === null
+    || roundMoney(taxAmount + excludingTaxAmount) !== roundMoney(totalAmount)) {
+    return unresolvedSplit();
+  }
+  return { taxAmount, excludingTaxAmount, resolved: true };
+}
+
+function explicitCustomAmount(fields, exactTitles, exactCodes) {
+  const field = fields.find((item) => {
+    const title = String(item?.title || item?.name || '').trim();
+    const code = String(item?.field_code || '').trim();
+    return exactTitles.includes(title) || exactCodes.includes(code);
+  });
+  return explicitAmount(field?.detail);
+}
+
+function explicitAmount(rawValue) {
+  if (rawValue === undefined || rawValue === null || rawValue === '') return null;
+  const amount = Number(rawValue);
+  return Number.isFinite(amount) ? roundMoney(amount) : null;
+}
+
+function unresolvedSplit() {
+  return { taxAmount: null, excludingTaxAmount: null, resolved: false };
+}
 
 function expenseDepartmentAttributionAmount(expense) {
   let found = false;

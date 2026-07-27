@@ -55,7 +55,7 @@ export function buildExpenseReimbursementPreview(input) {
   const document = parseFenbeitongDetail(input.fixedJson);
   const documentDate = requiredDate(document.applicationDate || input.documentDate, 'documentDate');
   if (!document.taxMappingComplete) {
-    throw new Error('分贝通单据存在部分使用发票，但接口未返回本次拆分税额；已停止生成，未使用整票税额按比例反算。');
+    throw new Error('分贝通接口未返回可直接使用且核对一致的本次拆分税额和本次拆分不含税金额；缺失值保持为空，已停止生成，未使用整票税额按比例反算。');
   }
   const employeeNumber = resolveEmployeeNumber(config, document);
   const departmentNumber = resolveDepartmentNumber(config, document);
