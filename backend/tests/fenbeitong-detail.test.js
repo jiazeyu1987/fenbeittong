@@ -224,7 +224,7 @@ test('expands Fenbeitong invoice usage into the confirmed 20 current-split rows'
     [[78.1, 78.1, 0.77], [0.5, 0.5, 0.03]],
     [[75.1, 75.1, 0.74]],
     [[45, 45, 0.45]],
-    [[112.14, 80, 1.11], [0.2, 0, 0.01]],
+    [[112.14, 80, 1.11, undefined, 0.79], [0.2, 0, 0.01]],
     [[118, 80, 6.68, 'FID4599943802294353926369161594']]
   ];
   const expenses = invoiceGroups.map((group, expenseIndex) => ({
@@ -234,12 +234,13 @@ test('expands Fenbeitong invoice usage into the confirmed 20 current-split rows'
     reason: 'confirmed split row',
     cost_attributions: [],
     cost_custom_fields: [],
-    invoices: group.map(([total, used, tax, id], invoiceIndex) => ({
+    invoices: group.map(([total, used, tax, id, currentSplitTax], invoiceIndex) => ({
       id: id || `INV-${expenseIndex + 1}-${invoiceIndex + 1}`,
       total_amount: total,
       used_amount: used,
       tax_amount: tax,
-      exclude_tax_amount: total - tax
+      exclude_tax_amount: total - tax,
+      ...(currentSplitTax === undefined ? {} : { current_split_tax_amount: currentSplitTax })
     }))
   }));
   const total = expenses.reduce((sum, expense) => sum + expense.total_amount, 0);
@@ -271,6 +272,42 @@ test('expands Fenbeitong invoice usage into the confirmed 20 current-split rows'
   assert.equal(parsed.splitExcludingTaxAmount, 3102.33);
   assert.ok(parsed.expenses.every((expense) => expense.purpose === 'confirmed split row'));
   assert.ok(parsed.expenses.every((expense) => expense.trafficType === ''));
+});
+
+test('never prorates whole-invoice tax when a partial-use split is missing', () => {
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      reimb_id: 'PARTIAL-TAX-MISSING-ID',
+      reimb_code: 'PARTIAL-TAX-MISSING-CODE',
+      currency_code: 'CNY',
+      total_amount: 101,
+      payment_amount: 101,
+      user: { code: 'X001', name: 'Tester' },
+      expenses: [{
+        id: 'PARTIAL-TAX-MISSING-EXPENSE',
+        cost_category: { code: 'CI020', name: 'Hospitality' },
+        total_amount: 101,
+        cost_attributions: [],
+        invoices: [{
+          id: 'PARTIAL-TAX-MISSING-INVOICE',
+          total_amount: 394,
+          used_amount: 101,
+          tax_amount: 3.9,
+          exclude_tax_amount: 390.1
+        }],
+        cost_custom_fields: [
+          { field_code: 'date_of_expense', detail: '2026-06-14 00:00:00' }
+        ]
+      }]
+    }
+  }));
+
+  assert.equal(parsed.taxMappingComplete, false);
+  assert.equal(parsed.expenses[0].taxMappingComplete, false);
+  assert.equal(parsed.expenses[0].taxSplitSource, 'PARTIAL_INVOICE_SPLIT_MISSING');
+  assert.equal(parsed.expenses[0].splitTaxAmount, 0);
+  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 0);
 });
 
 test('normalizes online route, purpose, traffic type and direct department fields', () => {

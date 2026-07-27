@@ -433,6 +433,9 @@ async function generateExpenseReimbursementFromRow(event) {
   const sourceId = button.dataset.sourceId;
   const record = state.syncedDocuments.find((item) => item.sourceId === sourceId);
   if (!record) throw new Error(`待处理单据不存在：${sourceId}`);
+  if (buildSourceSummary(record).documentTaxMappingComplete === false) {
+    throw new Error('该单据存在部分使用发票，但分贝通接口未返回本次拆分税额，必须先核对，不能生成或保存到 ERP。');
+  }
   if (state.pushedSourceIds.has(sourceId)) {
     throw new Error('该费用报销单已保存到金蝶，请使用“重新保存费用报销单”。');
   }
@@ -674,6 +677,10 @@ async function toggleQueuedDocument(event) {
   const sourceId = checkbox.dataset.sourceId;
   const record = state.syncedDocuments.find((item) => item.sourceId === sourceId);
   if (!record) throw new Error(`待处理单据不存在：${sourceId}`);
+  if (buildSourceSummary(record).documentTaxMappingComplete === false) {
+    checkbox.checked = false;
+    throw new Error('该单据存在部分使用发票，但分贝通接口未返回本次拆分税额，必须先核对，不能生成或保存到 ERP。');
+  }
   if (checkbox.checked) {
     state.selectedSourceIds.add(sourceId);
     setActiveSourceRecord(record, true);
@@ -694,7 +701,8 @@ async function toggleQueuedDocument(event) {
 
 function toggleAllFilteredDocuments(checked) {
   const filteredRecords = filterLedgerRecords(state.syncedDocuments)
-    .filter((record) => !isLegacyUnverified(record));
+    .filter((record) => !isLegacyUnverified(record)
+      && buildSourceSummary(record).documentTaxMappingComplete !== false);
   for (const record of filteredRecords) {
     if (checked) {
       state.selectedSourceIds.add(record.sourceId);
@@ -776,7 +784,8 @@ function setActiveSourceRecord(record, invalidate) {
 }
 
 function renderSelectAllState(filteredRecords) {
-  const selectableRecords = filteredRecords.filter((record) => !isLegacyUnverified(record));
+  const selectableRecords = filteredRecords.filter((record) => !isLegacyUnverified(record)
+    && buildSourceSummary(record).documentTaxMappingComplete !== false);
   const selectedCount = selectableRecords.filter((record) => state.selectedSourceIds.has(record.sourceId)).length;
   selectAllRowsCheckbox.checked = selectableRecords.length > 0 && selectedCount === selectableRecords.length;
   selectAllRowsCheckbox.indeterminate = selectedCount > 0 && selectedCount < selectableRecords.length;
@@ -841,20 +850,22 @@ function renderActionState() {
   const pushed = sourceId ? state.pushedSourceIds.has(sourceId) : false;
   const hasPushedSelection = selectedLedgerRecords()
     .some((record) => state.pushedSourceIds.has(record.sourceId));
+  const hasUnresolvedTaxSelection = selectedLedgerRecords()
+    .some((record) => buildSourceSummary(record).documentTaxMappingComplete === false);
   const viewSourceId = sourceId || selectedLedgerRecords()[0]?.sourceId || '';
   const canViewVoucher = state.preparedSourceIds.has(viewSourceId)
     || state.pushedSourceIds.has(viewSourceId);
   const tenantWaiting = isSelectedTenantWaiting();
   controls.syncFenbeitong.disabled = tenantWaiting;
   controls.sync.disabled = tenantWaiting;
-  controls.generateVoucher.disabled = !hasSource;
-  controls.saveErp.disabled = !hasSource || pushed;
+  controls.generateVoucher.disabled = !hasSource || hasUnresolvedTaxSelection;
+  controls.saveErp.disabled = !hasSource || pushed || hasUnresolvedTaxSelection;
   controls.resaveErp.disabled = !hasPushedSelection && !pushed;
   controls.viewVoucher.disabled = !canViewVoucher;
   controls.viewVoucher.title = canViewVoucher ? '' : '请先生成费用报销单';
-  controls.preview.disabled = !hasSource;
-  controls.prepare.disabled = !hasSource;
-  controls.pushErp.disabled = !hasSource || pushed;
+  controls.preview.disabled = !hasSource || hasUnresolvedTaxSelection;
+  controls.prepare.disabled = !hasSource || hasUnresolvedTaxSelection;
+  controls.pushErp.disabled = !hasSource || pushed || hasUnresolvedTaxSelection;
   controls.primaryAction.dataset.action = !state.configSaved ? 'save-config' : state.syncedDocuments.length === 0 ? 'sync' : 'push';
   controls.primaryAction.textContent = !state.configSaved ? '保存配置' : state.syncedDocuments.length === 0 ? '立即同步分贝通数据' : '保存费用报销单';
   controls.primaryAction.disabled = tenantWaiting && controls.primaryAction.dataset.action === 'sync';
@@ -1000,13 +1011,14 @@ function renderSourceQueue(records) {
   sourceQueueBody.innerHTML = pageRecords.map((record) => {
     const summary = buildSourceSummary(record);
     const legacyUnverified = isLegacyUnverified(record);
+    const taxUnresolved = summary.documentTaxMappingComplete === false;
     const selected = state.selectedSourceIds.has(record.sourceId);
     const prepared = state.preparedSourceIds.has(record.sourceId);
     const pushed = state.pushedSourceIds.has(record.sourceId);
     const actionText = prepared ? '重新生成' : '生成费用报销单';
     return `
       <tr class="${selected ? 'selected' : ''}">
-        <td><input class="row-checkbox" type="checkbox" data-source-id="${escapeHtml(record.sourceId)}" aria-label="选择 ${escapeHtml(displaySourceCode(record))}" ${selected ? 'checked' : ''} ${legacyUnverified ? 'disabled' : ''} /></td>
+        <td><input class="row-checkbox" type="checkbox" data-source-id="${escapeHtml(record.sourceId)}" aria-label="选择 ${escapeHtml(displaySourceCode(record))}" ${selected ? 'checked' : ''} ${legacyUnverified || taxUnresolved ? 'disabled' : ''} /></td>
         ${renderLedgerCell('status', `<span class="status-tag">${escapeHtml(queueStatus(record))}</span>`)}
         ${renderLedgerCell('sourceType', escapeHtml(`${summary.sourceKindName}${summary.sourceForm ? ` · ${summary.sourceForm}` : ''}`))}
         ${renderLedgerCell('sourceCode', escapeHtml(displaySourceCode(record)))}
@@ -1020,8 +1032,8 @@ function renderSourceQueue(records) {
         ${renderLedgerCell('trafficType', escapeHtml(summary.trafficType))}
         ${renderLedgerCell('purpose', escapeHtml(summary.purpose))}
         ${renderLedgerCell('expenseDepartment', escapeHtml(summary.expenseDepartment))}
-        ${renderLedgerCell('splitTaxAmount', formatMoney(summary.splitTaxAmount), 'amount')}
-        ${renderLedgerCell('splitExcludingTaxAmount', formatMoney(summary.splitExcludingTaxAmount), 'amount')}
+        ${renderLedgerCell('splitTaxAmount', formatSplitMoney(summary, 'splitTaxAmount'), 'amount')}
+        ${renderLedgerCell('splitExcludingTaxAmount', formatSplitMoney(summary, 'splitExcludingTaxAmount'), 'amount')}
         ${renderLedgerCell('departmentAttributionAmount', formatMoney(summary.departmentAttributionAmount), 'amount')}
         ${renderLedgerCell('requestOrganization', escapeHtml(summary.requestOrganization))}
         ${renderLedgerCell('requestPaymentAmount', formatOptionalMoney(summary.requestPaymentAmount), 'amount')}
@@ -1032,7 +1044,7 @@ function renderSourceQueue(records) {
         ${renderLedgerCell('interfaceSource', escapeHtml(legacyUnverified ? '历史数据待核验' : record.mockReplacement ? '接口未启用' : '正式接口'))}
         ${renderLedgerCell('time', escapeHtml(summary.paymentDate || ''))}
         <td data-column-key="operationPanel" class="operation-panel-cell">
-          <button class="row-action row-generate-expense-reimbursement" type="button" data-source-id="${escapeHtml(record.sourceId)}" aria-label="为 ${escapeHtml(displaySourceCode(record))} ${legacyUnverified ? '禁止保存' : pushed ? '已保存费用报销单' : '生成待保存费用报销单'}" ${legacyUnverified || pushed ? 'disabled' : ''}>${legacyUnverified ? '禁止保存' : pushed ? '已保存' : actionText}</button>
+          <button class="row-action row-generate-expense-reimbursement" type="button" data-source-id="${escapeHtml(record.sourceId)}" aria-label="为 ${escapeHtml(displaySourceCode(record))} ${legacyUnverified || taxUnresolved ? '待核对税额' : pushed ? '已保存费用报销单' : '生成待保存费用报销单'}" ${legacyUnverified || taxUnresolved || pushed ? 'disabled' : ''}>${legacyUnverified ? '禁止保存' : taxUnresolved ? '待核对' : pushed ? '已保存' : actionText}</button>
         </td>
       </tr>
     `;
@@ -1142,15 +1154,23 @@ function renderLedgerTotals(records) {
     'paymentAmount'
   ]);
   const totals = Object.fromEntries([...amountKeys].map((key) => [key, 0]));
+  let taxMappingComplete = true;
   for (const record of records) {
     const summary = buildSourceSummary(record);
+    taxMappingComplete = taxMappingComplete && summary.taxMappingComplete !== false;
     for (const key of amountKeys) {
       const amount = Number(summary[key]);
       if (Number.isFinite(amount)) totals[key] += amount;
     }
   }
   const cells = ledgerColumnDefinitions().map((column) => {
-    const content = amountKeys.has(column.key) ? formatMoney(roundMoney(totals[column.key])) : '';
+    const unresolvedSplitTotal = !taxMappingComplete
+      && (column.key === 'splitTaxAmount' || column.key === 'splitExcludingTaxAmount');
+    const content = unresolvedSplitTotal
+      ? '待核对'
+      : amountKeys.has(column.key)
+        ? formatMoney(roundMoney(totals[column.key]))
+        : '';
     return renderLedgerCell(column.key, content, amountKeys.has(column.key) ? 'amount' : '');
   }).join('');
   sourceQueueTotals.innerHTML = `
@@ -1304,8 +1324,8 @@ async function exportLedgerCsv() {
         trafficType: summary.trafficType,
         purpose: summary.purpose,
         expenseDepartment: summary.expenseDepartment,
-        splitTaxAmount: formatMoney(summary.splitTaxAmount),
-        splitExcludingTaxAmount: formatMoney(summary.splitExcludingTaxAmount),
+        splitTaxAmount: formatSplitMoney(summary, 'splitTaxAmount'),
+        splitExcludingTaxAmount: formatSplitMoney(summary, 'splitExcludingTaxAmount'),
         departmentAttributionAmount: formatMoney(summary.departmentAttributionAmount),
         requestOrganization: summary.requestOrganization,
         requestPaymentAmount: formatOptionalMoney(summary.requestPaymentAmount),
@@ -1393,8 +1413,8 @@ function renderFinanceReview(preview) {
         <div><dt>来源单号</dt><dd>${escapeHtml(displaySourceCode(selectedRecord))}</dd></div>
         <div><dt>报销人</dt><dd>${escapeHtml(displayRequester(selectedRecord, summary.requester))}</dd></div>
         <div><dt>部门</dt><dd>${escapeHtml(summary.department)}</dd></div>
-        <div><dt>本次拆分税额</dt><dd>${formatMoney(summary.splitTaxAmount)}</dd></div>
-        <div><dt>本次拆分不含税金额</dt><dd>${formatMoney(summary.splitExcludingTaxAmount)}</dd></div>
+        <div><dt>本次拆分税额</dt><dd>${formatSplitMoney(summary, 'splitTaxAmount')}</dd></div>
+        <div><dt>本次拆分不含税金额</dt><dd>${formatSplitMoney(summary, 'splitExcludingTaxAmount')}</dd></div>
         <div><dt>费用归属部门金额</dt><dd>${formatMoney(summary.departmentAttributionAmount)}</dd></div>
       </dl>
     `;
@@ -1517,13 +1537,24 @@ function buildSourceSummary(record) {
     const data = parsed.data || {};
     const expenses = Array.isArray(data.expenses) ? data.expenses : [];
     const splitAmounts = fenbeitongSplitAmounts(expenses);
+    const isOfflineReimbursement = record.sourceType === 'OFFLINE_REIMBURSEMENT'
+      || data.source_kind !== 'ONLINE_MONTHLY_BILL';
     const departmentAttributionAmount = Number(record.departmentAttributionAmount
       ?? record.totalAmount
       ?? splitAmounts.departmentAttributionAmount);
-    const splitTaxAmount = Number(record.splitTaxAmount ?? splitAmounts.splitTaxAmount);
-    const splitExcludingTaxAmount = Number(record.splitExcludingTaxAmount
-      ?? (departmentAttributionAmount - splitTaxAmount));
+    const splitTaxAmount = isOfflineReimbursement
+      ? splitAmounts.splitTaxAmount
+      : Number(record.splitTaxAmount ?? splitAmounts.splitTaxAmount);
+    const splitExcludingTaxAmount = isOfflineReimbursement
+      ? splitAmounts.splitExcludingTaxAmount
+      : Number(record.splitExcludingTaxAmount ?? (departmentAttributionAmount - splitTaxAmount));
+    const documentTaxMappingComplete = isOfflineReimbursement
+      ? splitAmounts.taxMappingComplete
+      : record.taxMappingComplete !== false;
     const expense = record.ledgerExpense;
+    const taxMappingComplete = expense
+      ? expense.taxMappingComplete
+      : documentTaxMappingComplete;
     return {
       sourceKindName: record.sourceKindName || (record.sourceType === 'ONLINE_MONTHLY_BILL' ? '线上月结' : '线下报销'),
       sourceForm: record.sourceForm || (record.sourceType === 'ONLINE_MONTHLY_BILL' ? '企业账单' : '费用明细'),
@@ -1538,8 +1569,14 @@ function buildSourceSummary(record) {
       purpose: expense?.purpose ?? record.purpose ?? '',
       expenseDepartment: expense?.expenseDepartment ?? record.expenseDepartment ?? '',
       totalAmount: expense?.departmentAttributionAmount ?? departmentAttributionAmount,
-      splitTaxAmount: expense ? expense.splitTaxAmount : splitTaxAmount,
-      splitExcludingTaxAmount: expense ? expense.splitExcludingTaxAmount : splitExcludingTaxAmount,
+      splitTaxAmount: taxMappingComplete
+        ? (expense ? expense.splitTaxAmount : splitTaxAmount)
+        : null,
+      splitExcludingTaxAmount: taxMappingComplete
+        ? (expense ? expense.splitExcludingTaxAmount : splitExcludingTaxAmount)
+        : null,
+      taxMappingComplete,
+      documentTaxMappingComplete,
       departmentAttributionAmount: expense ? expense.departmentAttributionAmount : departmentAttributionAmount,
       requestOrganization: record.requestOrganizationName || record.requestOrganizationCode || '',
       requestPaymentAmount: record.requestPaymentAmount,
@@ -1552,7 +1589,7 @@ function buildSourceSummary(record) {
         : record.paymentDate || dateOnly(data.payment_time || data.pay_time || data.payment_date || data.reimburse_time || '')
     };
   } catch {
-    return { sourceKindName: '', sourceForm: '', documentType: '', reason: '', requester: '-', department: '-', expenseCategories: 'JSON解析失败', startLocation: '', arrivalLocation: '', trafficType: '', purpose: '', expenseDepartment: '', totalAmount: 0, splitTaxAmount: 0, splitExcludingTaxAmount: 0, departmentAttributionAmount: 0, requestOrganization: '', requestPaymentAmount: null, sourceDocumentStatus: '', expenseOrganization: '', paymentAmount: null, businessLine: '', paymentDate: '' };
+    return { sourceKindName: '', sourceForm: '', documentType: '', reason: '', requester: '-', department: '-', expenseCategories: 'JSON解析失败', startLocation: '', arrivalLocation: '', trafficType: '', purpose: '', expenseDepartment: '', totalAmount: 0, splitTaxAmount: null, splitExcludingTaxAmount: null, taxMappingComplete: false, documentTaxMappingComplete: false, departmentAttributionAmount: 0, requestOrganization: '', requestPaymentAmount: null, sourceDocumentStatus: '', expenseOrganization: '', paymentAmount: null, businessLine: '', paymentDate: '' };
   }
 }
 
@@ -1579,9 +1616,15 @@ function sourceLedgerExpense(expense) {
   const customFields = new Map((Array.isArray(expense.cost_custom_fields) ? expense.cost_custom_fields : [])
     .map((field) => [String(field.field_code || ''), field.detail]));
   const departmentAttributionAmount = expenseDepartmentAttributionAmount(expense);
-  const splitTaxAmount = roundMoney((Array.isArray(expense.invoices) ? expense.invoices : [])
-    .reduce((total, invoice) => total + invoiceSplitTaxAmount(invoice), 0));
-  const splitExcludingTaxAmount = roundMoney(departmentAttributionAmount - splitTaxAmount);
+  const splitResults = (Array.isArray(expense.invoices) ? expense.invoices : [])
+    .map((invoice) => invoiceSplitTaxAmount(invoice));
+  const taxMappingComplete = splitResults.every(Number.isFinite);
+  const splitTaxAmount = taxMappingComplete
+    ? roundMoney(splitResults.reduce((total, amount) => total + amount, 0))
+    : null;
+  const splitExcludingTaxAmount = taxMappingComplete
+    ? roundMoney(departmentAttributionAmount - splitTaxAmount)
+    : null;
   return {
     id: String(expense.id || ''),
     categoryName: expense.cost_category?.name || expense.cost_category?.code || '',
@@ -1590,6 +1633,7 @@ function sourceLedgerExpense(expense) {
     expenseDate: dateOnly(customFields.get('date_of_expense')),
     splitTaxAmount,
     splitExcludingTaxAmount,
+    taxMappingComplete,
     departmentAttributionAmount,
     startLocation: sourceLocationName(customFields.get('start_location')),
     arrivalLocation: sourceLocationName(customFields.get('arrival_location')),
@@ -1614,19 +1658,28 @@ function sourceExpenseDepartment(expense) {
 function fenbeitongSplitAmounts(expenses) {
   let splitTaxAmount = 0;
   let departmentAttributionAmount = 0;
+  let taxMappingComplete = true;
   for (const expense of Array.isArray(expenses) ? expenses : []) {
     const departmentAmount = expenseDepartmentAttributionAmount(expense);
     departmentAttributionAmount += departmentAmount;
-    const invoiceTax = (Array.isArray(expense?.invoices) ? expense.invoices : [])
-      .reduce((total, invoice) => total + invoiceSplitTaxAmount(invoice), 0);
-    splitTaxAmount += Math.min(departmentAmount, Math.max(0, invoiceTax));
+    const splitResults = (Array.isArray(expense?.invoices) ? expense.invoices : [])
+      .map((invoice) => invoiceSplitTaxAmount(invoice));
+    const expenseComplete = splitResults.every(Number.isFinite);
+    taxMappingComplete = taxMappingComplete && expenseComplete;
+    if (expenseComplete) {
+      const invoiceTax = splitResults.reduce((total, amount) => total + amount, 0);
+      splitTaxAmount += Math.min(departmentAmount, Math.max(0, invoiceTax));
+    }
   }
   splitTaxAmount = roundMoney(splitTaxAmount);
   departmentAttributionAmount = roundMoney(departmentAttributionAmount);
   return {
     splitTaxAmount,
-    splitExcludingTaxAmount: roundMoney(departmentAttributionAmount - splitTaxAmount),
-    departmentAttributionAmount
+    splitExcludingTaxAmount: taxMappingComplete
+      ? roundMoney(departmentAttributionAmount - splitTaxAmount)
+      : null,
+    departmentAttributionAmount,
+    taxMappingComplete
   };
 }
 
@@ -1643,22 +1696,27 @@ function expenseDepartmentAttributionAmount(expense) {
 
 function invoiceSplitTaxAmount(invoice) {
   for (const field of ['current_split_tax_amount', 'split_tax_amount', 'used_tax_amount', 'allocated_tax_amount']) {
-    const explicit = Number(invoice?.[field]);
-    if (Number.isFinite(explicit)) return roundMoney(explicit);
+    const rawValue = invoice?.[field];
+    const explicit = Number(rawValue);
+    if (rawValue !== undefined && rawValue !== null && rawValue !== '' && Number.isFinite(explicit)) {
+      return roundMoney(explicit);
+    }
   }
   const confirmedOverride = CONFIRMED_INVOICE_SPLIT_TAX_AMOUNTS[String(invoice?.id || '')];
   if (Number.isFinite(confirmedOverride)) return confirmedOverride;
-  const legacyDeductible = Number(invoice?.deductible_tax_amount);
-  if (Number.isFinite(legacyDeductible)) return roundMoney(legacyDeductible);
   const invoiceTax = Number(invoice?.tax_amount || 0);
   const deductibleTax = Number(invoice?.deductible_tax || 0);
   const tax = invoiceTax === 0 && deductibleTax > 0 ? deductibleTax : invoiceTax;
+  if (!Number.isFinite(tax)) return null;
+  if (tax === 0) return 0;
   const total = Number(invoice?.total_amount || 0);
-  const used = Number(invoice?.used_amount);
-  if (total > 0 && Number.isFinite(used) && used >= 0) {
-    return roundMoney(tax * Math.min(used, total) / total);
+  const used = Number(invoice?.used_amount ?? invoice?.standard_trade_amt);
+  if (Number.isFinite(used) && Math.round(used * 100) === 0) return 0;
+  if (total > 0 && Number.isFinite(used)
+    && Math.round(used * 100) === Math.round(total * 100)) {
+    return roundMoney(tax);
   }
-  return roundMoney(tax);
+  return null;
 }
 
 const CONFIRMED_INVOICE_SPLIT_TAX_AMOUNTS = Object.freeze({
@@ -1769,6 +1827,9 @@ function buildExpenseReimbursementRequest() {
 }
 
 function buildExpenseReimbursementRequestForRecord(record, options = {}) {
+  if (buildSourceSummary(record).documentTaxMappingComplete === false) {
+    throw new Error('该单据存在部分使用发票，但分贝通接口未返回本次拆分税额；已停止生成，未使用整票税额按比例反算。');
+  }
   const timing = expenseReimbursementTimingForRecord(record);
   return {
     fixedJson: record.fixedJson || undefined,
@@ -1915,6 +1976,10 @@ function run(fn) {
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatSplitMoney(summary, field) {
+  return summary.taxMappingComplete === false ? '待核对' : formatMoney(summary[field]);
 }
 
 function formatOptionalMoney(value) {

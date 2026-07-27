@@ -1220,6 +1220,7 @@ function buildMockReimbursements(baseDocument, count) {
           {
             id: `INV-${pad(sequence)}-01`,
             total_amount: primaryAmount.toFixed(2),
+            used_amount: primaryAmount.toFixed(2),
             tax_amount: taxAmount.toFixed(2),
             deductible_tax_amount: taxAmount.toFixed(2)
           }

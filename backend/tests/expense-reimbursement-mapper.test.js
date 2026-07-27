@@ -369,3 +369,38 @@ test('maps the Fenbeitong personal flight subcategory to the Kingdee transport e
 
   assert.equal(preview.payload.Model.FEntity[0].FExpID.FNumber, 'CI008');
 });
+
+test('blocks ERP generation instead of prorating a partially used invoice tax', () => {
+  const fixedJson = JSON.stringify({
+    code: 0,
+    data: {
+      reimb_id: 'PARTIAL-TAX-BLOCK-ID',
+      reimb_code: 'PARTIAL-TAX-BLOCK-CODE',
+      currency_code: 'CNY',
+      total_amount: 101,
+      payment_amount: 101,
+      user: { code: 'X001', name: 'Tester' },
+      expenses: [{
+        id: 'PARTIAL-TAX-BLOCK-EXPENSE',
+        cost_category: { code: 'CI020', name: 'Hospitality' },
+        total_amount: 101,
+        cost_attributions: [],
+        invoices: [{
+          id: 'PARTIAL-TAX-BLOCK-INVOICE',
+          total_amount: 394,
+          used_amount: 101,
+          tax_amount: 3.9,
+          exclude_tax_amount: 390.1
+        }],
+        cost_custom_fields: [
+          { field_code: 'date_of_expense', detail: '2026-06-14 00:00:00' }
+        ]
+      }]
+    }
+  });
+
+  assert.throws(
+    () => buildExpenseReimbursementPreview({ fixedJson, config: {} }),
+    /未使用整票税额按比例反算/
+  );
+});

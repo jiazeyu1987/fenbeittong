@@ -443,6 +443,7 @@ function mapFenbeitongSyncFields(data) {
     splitExcludingTaxAmount: splitAmounts.departmentAttributionAmount > 0
       ? splitAmounts.splitExcludingTaxAmount
       : fallbackAmount,
+    taxMappingComplete: splitAmounts.taxMappingComplete,
     departmentAttributionAmount,
     requesterName: firstText(
       data.submitter_name,
@@ -503,40 +504,55 @@ function fenbeitongSplitAmounts(data) {
   const expenses = Array.isArray(data.expenses) ? data.expenses : [];
   let splitTaxAmount = 0;
   let departmentAttributionAmount = 0;
+  let taxMappingComplete = true;
   for (const expense of expenses) {
     const departmentAmount = expenseDepartmentAttributionAmount(expense)
       ?? numericAmount(expense.total_amount);
     departmentAttributionAmount += departmentAmount;
-    const invoiceTax = (Array.isArray(expense?.invoices) ? expense.invoices : [])
-      .reduce((total, invoice) => total + invoiceSplitTaxAmount(invoice), 0);
-    splitTaxAmount += Math.min(departmentAmount, Math.max(0, invoiceTax));
+    const splitResults = (Array.isArray(expense?.invoices) ? expense.invoices : [])
+      .map((invoice) => invoiceSplitTaxAmount(invoice));
+    const expenseComplete = splitResults.every(Number.isFinite);
+    taxMappingComplete = taxMappingComplete && expenseComplete;
+    if (expenseComplete) {
+      const invoiceTax = splitResults.reduce((total, amount) => total + amount, 0);
+      splitTaxAmount += Math.min(departmentAmount, Math.max(0, invoiceTax));
+    }
   }
   splitTaxAmount = Math.round(splitTaxAmount * 100) / 100;
   departmentAttributionAmount = Math.round(departmentAttributionAmount * 100) / 100;
   return {
     splitTaxAmount,
-    splitExcludingTaxAmount: Math.round((departmentAttributionAmount - splitTaxAmount) * 100) / 100,
-    departmentAttributionAmount
+    splitExcludingTaxAmount: taxMappingComplete
+      ? Math.round((departmentAttributionAmount - splitTaxAmount) * 100) / 100
+      : 0,
+    departmentAttributionAmount,
+    taxMappingComplete
   };
 }
 
 function invoiceSplitTaxAmount(invoice) {
   for (const field of ['current_split_tax_amount', 'split_tax_amount', 'used_tax_amount', 'allocated_tax_amount']) {
-    const explicit = Number(invoice?.[field]);
-    if (Number.isFinite(explicit)) return Math.round(explicit * 100) / 100;
+    const rawValue = invoice?.[field];
+    const explicit = Number(rawValue);
+    if (rawValue !== undefined && rawValue !== null && rawValue !== '' && Number.isFinite(explicit)) {
+      return Math.round(explicit * 100) / 100;
+    }
   }
   const confirmedOverride = CONFIRMED_INVOICE_SPLIT_TAX_AMOUNTS[String(invoice?.id || '')];
   if (Number.isFinite(confirmedOverride)) return confirmedOverride;
-  const legacyDeductible = Number(invoice?.deductible_tax_amount);
-  if (Number.isFinite(legacyDeductible)) return Math.round(legacyDeductible * 100) / 100;
-  const tax = Number(invoice?.tax_amount);
-  if (!Number.isFinite(tax) || tax <= 0) return 0;
+  const invoiceTax = Number(invoice?.tax_amount || 0);
+  const deductibleTax = Number(invoice?.deductible_tax || 0);
+  const tax = invoiceTax === 0 && deductibleTax > 0 ? deductibleTax : invoiceTax;
+  if (!Number.isFinite(tax)) return null;
+  if (tax === 0) return 0;
   const total = Number(invoice?.total_amount);
-  const used = Number(invoice?.used_amount);
-  if (Number.isFinite(total) && total > 0 && Number.isFinite(used) && used >= 0) {
-    return Math.round((tax * Math.min(used, total) / total) * 100) / 100;
+  const used = Number(invoice?.used_amount ?? invoice?.standard_trade_amt);
+  if (Number.isFinite(used) && Math.round(used * 100) === 0) return 0;
+  if (Number.isFinite(total) && total > 0 && Number.isFinite(used)
+    && Math.round(used * 100) === Math.round(total * 100)) {
+    return Math.round(tax * 100) / 100;
   }
-  return Math.round(tax * 100) / 100;
+  return null;
 }
 
 const CONFIRMED_INVOICE_SPLIT_TAX_AMOUNTS = Object.freeze({
