@@ -117,6 +117,63 @@ test('uses invoice deductible tax when Fenbeitong returns zero invoice tax', () 
   assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 417.43);
 });
 
+test('uses confirmed source splits for partially used invoices with discount lines', () => {
+  const cases = [
+    {
+      invoiceId: 'FID1251385483190845442942893798',
+      expenseAmount: 101.78,
+      invoiceAmount: 293.16,
+      invoiceTax: 33.72,
+      expectedTax: 11.80,
+      expectedExcludingTax: 89.98
+    },
+    {
+      invoiceId: 'FID2305658563354705927713335813',
+      expenseAmount: 207.04,
+      invoiceAmount: 220,
+      invoiceTax: 25.31,
+      expectedTax: 23.80,
+      expectedExcludingTax: 183.24
+    }
+  ];
+  for (const item of cases) {
+    const parsed = parseFenbeitongDetail(JSON.stringify({
+      code: 0,
+      data: {
+        reimb_id: `DISCOUNT-${item.invoiceId}`,
+        reimb_code: `DISCOUNT-${item.invoiceId}`,
+        currency_code: 'CNY',
+        total_amount: item.expenseAmount,
+        payment_amount: item.expenseAmount,
+        user: { code: 'X017', name: 'Tester' },
+        expenses: [{
+          id: `EXPENSE-${item.invoiceId}`,
+          cost_category: { code: 'CI00805', name: 'Mileage' },
+          total_amount: item.expenseAmount,
+          cost_attributions: [],
+          invoices: [{
+            id: item.invoiceId,
+            total_amount: item.invoiceAmount,
+            used_amount: item.expenseAmount,
+            tax_amount: item.invoiceTax,
+            exclude_tax_amount: item.invoiceAmount - item.invoiceTax,
+            detail: [
+              { amount: item.invoiceTax + 1, exclude_tax_amount: item.invoiceAmount },
+              { amount: -1, exclude_tax_amount: -1 }
+            ]
+          }],
+          cost_custom_fields: [
+            { field_code: 'date_of_expense', detail: '2026-04-10 00:00:00' }
+          ]
+        }]
+      }
+    }));
+
+    assert.equal(parsed.expenses[0].splitTaxAmount, item.expectedTax);
+    assert.equal(parsed.expenses[0].splitExcludingTaxAmount, item.expectedExcludingTax);
+  }
+});
+
 test('expands Fenbeitong invoice usage into the confirmed 20 current-split rows', () => {
   const invoiceGroups = [
     [[394, 300, 0]],

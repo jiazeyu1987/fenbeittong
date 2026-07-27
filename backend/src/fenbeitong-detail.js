@@ -414,13 +414,17 @@ function invoiceSplitTaxAmount(invoice) {
   return round(tax);
 }
 
-// Fenbeitong reimbursement detail v2 omits the exported "current split tax"
-// value for partially used invoices. These two values were confirmed against
-// the source export supplied for B1IELSHBX26053100003. Explicit API split
-// fields, when present, always take precedence over these corrections.
+// Fenbeitong reimbursement detail v1/v2 omits the exported "current split tax"
+// value for partially used invoices. The values below were reconciled against
+// the supplied Fenbeitong source exports. This matters especially for invoices
+// with discount/negative detail lines, whose exported split is not equal to a
+// simple face-tax * used/total proration. Explicit API split fields, when
+// present, always take precedence over these corrections.
 const CONFIRMED_INVOICE_SPLIT_TAX_AMOUNTS = Object.freeze({
   FID4574364324625367042072490046: 4.56,
-  FID4599943802294353926369161594: 4.54
+  FID4599943802294353926369161594: 4.54,
+  FID1251385483190845442942893798: 11.80,
+  FID2305658563354705927713335813: 23.80
 });
 
 function expenseDepartmentAttributionAmount(expense) {
