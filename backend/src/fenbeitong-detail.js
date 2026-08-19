@@ -22,14 +22,15 @@ export function parseFenbeitongDetail(fixedJson) {
   if (reportedPaymentAmount < 0) throw new Error('data.payment_amount must not be negative');
 
   const invoiceIds = new Set();
-  const expenses = sourceExpenses.flatMap((expense, index) => (
-    expandExpenseByInvoiceSplits(parseExpense(expense, index, invoiceIds))
+  const expenses = sourceExpenses.map((expense, index) => (
+    parseExpense(expense, index, invoiceIds)
   ));
-  const latestExpenseDate = expenses
-    .map((expense) => expense.expenseDate)
-    .filter(Boolean)
-    .sort()
-    .at(-1) || '';
+  const submissionDate = dateOnly(firstText(
+    data.submit_time,
+    data.reimburse_time,
+    data.create_time,
+    data.apply_time
+  ));
   const expenseTotalAmount = round(expenses.reduce((sum, expense) => sum + expense.amount, 0));
   const departmentAttributionAmount = round(expenses.reduce((sum, expense) => sum + expense.departmentAttributionAmount, 0));
   const requestDepartment = expenses.find((expense) => expense.attributionDepartmentCode || expense.attributionDepartmentName);
@@ -53,7 +54,8 @@ export function parseFenbeitongDetail(fixedJson) {
     departmentAttributionAmount,
     paymentAmount: reportedPaymentAmount,
     reason: reimbursementReason || data.apply_reason || data.apply_remark || data.reimb_code,
-    applicationDate: latestExpenseDate || dateOnly(firstText(data.submit_time, data.create_time, data.apply_time)),
+    applicationDate: submissionDate,
+    applicationDateSource: 'FENBEITONG_SUBMISSION_DATE',
     userCode: String(person.code || ''),
     userName: String(person.name || person.code || ''),
     departmentCode: String(approvalDepartment.code || person.department_code || requestDepartment?.attributionDepartmentCode || ''),
@@ -88,7 +90,7 @@ function parseOnlineMonthlyBill(data) {
   const splitTaxAmount = round(parsedExpenses.reduce((sum, item) => sum + item.expense.splitTaxAmount, 0));
   const splitExcludingTaxAmount = round(parsedExpenses.reduce((sum, item) => sum + item.expense.splitExcludingTaxAmount, 0));
   const latestDate = parsedExpenses.map((item) => item.expense.expenseDate).filter(Boolean).sort().at(-1) || '';
-  const billDate = dateOnly(data.bill_date);
+  const billDate = monthlySettlementDate(data);
   const businessLines = [...new Set(parsedExpenses.map((item) => item.expense.businessLine).filter(Boolean))];
   const businessLine = businessLines.length === 1 ? businessLines[0] : businessLines.join(' / ');
   const settlementMonth = firstText(data.settlement_month, data.end_month, data.start_month, row.settlement_month, latestDate);
@@ -119,7 +121,8 @@ function parseOnlineMonthlyBill(data) {
     paymentAmount: totalAmount,
     requestPaymentAmount: null,
     reason: reason || firstText(row.reason, billNumber),
-    applicationDate: billDate || latestDate,
+    applicationDate: billDate,
+    applicationDateSource: 'FENBEITONG_MONTHLY_SETTLEMENT_DATE',
     userCode: onlineEmployeeCode(row),
     userName: applicantName,
     departmentCode: directDepartment.code,
@@ -220,14 +223,10 @@ function parseOnlineExpense(row) {
     row.business_purpose,
     row.public_payment_use
   );
-  const expenseDateTime = firstText(
-    row.reimbursement_date_time,
-    row.booking_refund_order_time,
-    row.booking_time,
-    row.refund_time,
-    row.order_time,
-    row.order_create_time
-  );
+  // For settlement-posting enterprise bills, Fenbeitong's order_create_time
+  // is the displayed "线上预订/退票/下单日期时间". Do not substitute travel,
+  // stay, delivery, or reimbursement dates when the source field is empty.
+  const expenseDateTime = firstText(row.order_create_time);
 
   return {
     sourceDetailId,
@@ -269,7 +268,7 @@ function parseOnlineExpense(row) {
       businessLine,
       attributionDepartmentCode: departmentCode,
       attributionDepartmentName: departmentName,
-      expenseDate: dateOnly(firstText(row.reimbursement_date, row.expense_date, expenseDateTime)),
+      expenseDate: dateOnly(expenseDateTime),
       expenseDateTime,
       startLocation,
       arrivalLocation,
@@ -291,10 +290,25 @@ function confirmedSplit(totalAmount, taxAmount, source) {
 }
 
 function parseExpense(expense, index, invoiceIds) {
+  const invoiceDetails = expenseInvoiceDetailMap(expense);
   const invoices = (Array.isArray(expense.invoices) ? expense.invoices : []).map((invoice, invoiceIndex) => {
     const split = invoiceSplitAmounts(invoice);
+    const invoiceId = String(invoice.id || `INV-${index + 1}-${invoiceIndex + 1}`);
+    const detail = invoiceDetails.get(invoiceId) || {};
     const parsed = {
-      id: String(invoice.id || `INV-${index + 1}-${invoiceIndex + 1}`),
+      id: invoiceId,
+      typeCode: firstText(invoice.type, detail.invType),
+      typeName: firstText(detail.invTypeName, invoice.invoice_type_name, invoice.type_name, invoice.type),
+      code: firstText(invoice.code, detail.invCode),
+      number: firstText(invoice.number, detail.invNo),
+      issuedDate: dateOnly(firstText(invoice.issued_time, detail.issuedDate)),
+      sellerName: firstText(invoice.seller_name, detail.seller, detail.invTitle),
+      sellerTaxNumber: firstText(invoice.seller_tax_code, detail.sellerTaxNum),
+      buyerName: firstText(invoice.buyer_name, detail.buyer),
+      buyerTaxNumber: firstText(invoice.buyer_tax_code, detail.buyTaxNum),
+      exactTaxAmount: optionalMoney([invoice.tax_amount]),
+      exactExcludingTaxAmount: optionalMoney([invoice.exclude_tax_amount]),
+      exactTotalAmount: optionalMoney([invoice.total_amount]),
       totalAmount: money(invoice.total_amount || 0, 'invoice.total_amount'),
       taxAmount: money(invoice.tax_amount || 0, 'invoice.tax_amount'),
       excludingTaxAmount: money(invoice.exclude_tax_amount ?? Math.max(0, Number(invoice.total_amount || 0) - Number(invoice.tax_amount || 0)), 'invoice.exclude_tax_amount'),
@@ -314,31 +328,16 @@ function parseExpense(expense, index, invoiceIds) {
   });
   const amount = money(expense.total_amount, `data.expenses[${index}].total_amount`);
   const departmentAttributionAmount = expenseDepartmentAttributionAmount(expense) ?? amount;
-  const directSplit = directExpenseSplitAmounts(expense, amount);
-  if (directSplit.resolved && invoices.length === 1) {
-    invoices[0].splitTaxAmount = directSplit.taxAmount;
-    invoices[0].splitExcludingTaxAmount = directSplit.excludingTaxAmount;
-    invoices[0].taxSplitResolved = true;
-    invoices[0].taxSplitSource = directSplit.source;
-  }
-  const taxMappingComplete = invoices.every((invoice) => invoice.taxSplitResolved);
-  const directExpenseOnly = invoices.length === 0 && directSplit.resolved;
-  const noInvoice = invoices.length === 0;
-  const splitTaxAmount = directExpenseOnly
-    ? directSplit.taxAmount
-    : noInvoice
-      ? 0
-      : taxMappingComplete
-      ? round(invoices.reduce((sum, invoice) => sum + invoice.splitTaxAmount, 0))
-      : null;
-  const splitExcludingTaxAmount = directExpenseOnly
-    ? directSplit.excludingTaxAmount
-    : noInvoice
-      ? amount
-      : taxMappingComplete
-      ? round(invoices.reduce((sum, invoice) => sum + invoice.splitExcludingTaxAmount, 0))
-      : null;
-  const splitComplete = noInvoice || taxMappingComplete;
+  const directSplit = directExpenseSplitAmounts(expense);
+  const directSplitBalances = directSplit.resolved
+    && round(directSplit.taxAmount + directSplit.excludingTaxAmount) === amount;
+  const invoiceFallback = directSplit.resolved && !directSplitBalances
+    ? aggregateFullInvoiceSplit(invoices, amount)
+    : unresolvedSplit();
+  const effectiveSplit = directSplitBalances ? directSplit : invoiceFallback;
+  const splitComplete = effectiveSplit.resolved;
+  const splitTaxAmount = splitComplete ? effectiveSplit.taxAmount : null;
+  const splitExcludingTaxAmount = splitComplete ? effectiveSplit.excludingTaxAmount : null;
   const department = expenseAttributionDepartment(expense);
   return {
     id: requiredText(expense.id || `EXP-${index + 1}`, `data.expenses[${index}].id`),
@@ -348,13 +347,12 @@ function parseExpense(expense, index, invoiceIds) {
     departmentAttributionAmount,
     splitTaxAmount,
     splitExcludingTaxAmount,
-    taxSplitProvided: invoices.length > 0 && splitComplete,
+    taxSplitProvided: splitComplete,
     taxMappingComplete: splitComplete,
-    taxSplitSource: directExpenseOnly
-      ? directSplit.source
-      : noInvoice
-        ? 'FENBEITONG_NO_INVOICE_ZERO_TAX'
-        : invoices[0]?.taxSplitSource || '',
+    taxSplitSource: effectiveSplit.source,
+    sourceSplitTaxAmount: directSplit.resolved ? directSplit.taxAmount : null,
+    sourceSplitExcludingTaxAmount: directSplit.resolved ? directSplit.excludingTaxAmount : null,
+    correctedInvalidSourceSplitFromInvoice: invoiceFallback.resolved,
     reason: String(expense.reason || ''),
     purpose: String(expense.reason || ''),
     trafficType: '',
@@ -370,6 +368,17 @@ function parseExpense(expense, index, invoiceIds) {
     taxAmount: round(invoices.reduce((sum, invoice) => sum + invoice.taxAmount, 0)),
     deductibleTaxAmount: round(invoices.reduce((sum, invoice) => sum + invoice.deductibleTaxAmount, 0))
   };
+}
+
+function expenseInvoiceDetailMap(expense) {
+  const invoiceField = (Array.isArray(expense?.cost_custom_fields) ? expense.cost_custom_fields : [])
+    .find((field) => field?.field_code === 'invoice_info');
+  const details = Array.isArray(invoiceField?.detail?.invoiceList)
+    ? invoiceField.detail.invoiceList
+    : [];
+  return new Map(details
+    .map((detail) => [String(detail?.fbInvId || ''), detail])
+    .filter(([id]) => id));
 }
 
 function expandExpenseByInvoiceSplits(expense) {
@@ -456,22 +465,50 @@ function invoiceSplitAmounts(invoice) {
   };
 }
 
-function directExpenseSplitAmounts(expense, totalAmount) {
+function aggregateFullInvoiceSplit(invoices, expenseAmount) {
+  if (invoices.length === 0 || invoices.some((invoice) => !invoice.taxSplitResolved)) {
+    return unresolvedSplit();
+  }
+  const usedAmount = round(invoices.reduce((sum, invoice) => sum + invoice.usedAmount, 0));
+  const taxAmount = round(invoices.reduce((sum, invoice) => sum + invoice.splitTaxAmount, 0));
+  const excludingTaxAmount = round(invoices.reduce(
+    (sum, invoice) => sum + invoice.splitExcludingTaxAmount,
+    0
+  ));
+  if (
+    usedAmount !== expenseAmount
+    || round(taxAmount + excludingTaxAmount) !== expenseAmount
+  ) {
+    return unresolvedSplit();
+  }
+  return {
+    taxAmount,
+    excludingTaxAmount,
+    resolved: true,
+    source: 'FENBEITONG_FULL_INVOICE_FIELDS_AFTER_INVALID_SPLIT'
+  };
+}
+
+function directExpenseSplitAmounts(expense) {
   const fields = Array.isArray(expense?.cost_custom_fields) ? expense.cost_custom_fields : [];
-  const tax = explicitCustomAmount(fields, ['税额'], ['tax_amount']);
+  const tax = explicitCustomAmount(
+    fields,
+    ['\u53ef\u62b5\u6263\u7a0e\u989d'],
+    ['deductible_tax']
+  );
   const excludingTax = explicitCustomAmount(
     fields,
-    ['未税金额', '不含税金额'],
-    ['untaxed_amount', 'exclude_tax_amount']
+    ['\u672a\u7a0e\u91d1\u989d'],
+    ['untaxed_amount']
   );
-  if (tax === null || excludingTax === null || round(tax + excludingTax) !== round(totalAmount)) {
+  if (tax === null || excludingTax === null) {
     return unresolvedSplit();
   }
   return {
     taxAmount: tax,
     excludingTaxAmount: excludingTax,
     resolved: true,
-    source: 'FENBEITONG_EXPLICIT_EXPENSE_SPLIT_FIELDS'
+    source: 'FENBEITONG_DEDUCTIBLE_TAX_AND_UNTAXED_AMOUNT'
   };
 }
 
@@ -774,6 +811,41 @@ function dateOnly(value) {
   const matched = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/.exec(String(value || '').trim());
   if (!matched) return '';
   return `${matched[1]}-${matched[2].padStart(2, '0')}-${matched[3].padStart(2, '0')}`;
+}
+
+function monthlySettlementDate(data) {
+  const cycleDates = [...String(data.bill_cycle || '').matchAll(
+    /(20\d{2})[/-](\d{1,2})[/-](\d{1,2})/g
+  )];
+  const cycleStart = cycleDates.at(0);
+  if (cycleStart) {
+    return utcDate(
+      Number(cycleStart[1]),
+      Number(cycleStart[2]),
+      Number(cycleStart[3])
+    );
+  }
+
+  const explicitDate = dateOnly(firstText(
+    data.bill_date,
+    data.billing_date,
+    data.account_date,
+    data.bookkeeping_date
+  ));
+  if (explicitDate) return explicitDate;
+
+  const month = /^(20\d{2})[-/]?(\d{2})/.exec(String(
+    data.settlement_month || data.end_month || data.start_month || ''
+  ).trim());
+  if (!month) return '';
+  const date = new Date(Date.UTC(Number(month[1]), Number(month[2]) - 1, 1));
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+}
+
+function utcDate(year, month, day) {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toISOString().slice(0, 10);
 }
 
 function firstText(...values) {

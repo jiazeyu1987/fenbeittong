@@ -215,6 +215,24 @@ function stubKingdeeFetch() {
         }
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
+    if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.ExecuteBillQuery.common.kdsvc')) {
+      const body = JSON.parse(String(options.body));
+      const query = JSON.parse(body.data);
+      let rows;
+      if (query.FormId === 'BD_Empinfo') {
+        rows = [[5093315, 'PH022', '吴立珠', '886']];
+      } else if (query.FormId === 'BD_Department') {
+        rows = [[6001, 'BM000006', query.FilterString?.[0]?.Value || '销售部', '886']];
+      } else if (query.FormId === 'ER_ExpReimbursement') {
+        rows = [];
+      } else {
+        throw new Error(`unexpected Kingdee query form: ${query.FormId}`);
+      }
+      return new Response(JSON.stringify(rows), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
     if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.Save.common.kdsvc')) {
       assert.equal(options.headers.Cookie, 'kdservice-sessionid=e2e123');
       const body = JSON.parse(String(options.body));
@@ -233,6 +251,21 @@ function stubKingdeeFetch() {
     }
     if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.View.common.kdsvc')) {
       const body = JSON.parse(String(options.body));
+      if (body.formid === 'BD_Empinfo') {
+        return new Response(JSON.stringify({
+          Result: {
+            ResponseStatus: { IsSuccess: true, Errors: [] },
+            Result: {
+              EmpinfoBank: [{
+                OpenBankName: [{ Key: 2052, Value: '测试银行' }],
+                BankHolder: '吴立珠',
+                BankCode: '6222000000000000',
+                IsDefault: true
+              }]
+            }
+          }
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
       assert.equal(body.formid, 'ER_ExpReimbursement');
       assert.equal(JSON.parse(body.data).Id, '100033');
       return new Response(JSON.stringify({
@@ -246,6 +279,10 @@ function stubKingdeeFetch() {
             FRequestDeptID: savedModel.FRequestDeptID,
             FBillTypeID: savedModel.FBillTypeID,
             FExpAmountSum: savedModel.FExpAmountSum,
+            F_ora_Text_qtr: savedModel.F_ora_Text_qtr,
+            FRequestType: savedModel.FRequestType,
+            FRealPay: savedModel.FRealPay,
+            FEntity: savedModel.FEntity,
             FDocumentStatus: 'Z'
           }
         }

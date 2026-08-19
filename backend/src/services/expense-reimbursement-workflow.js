@@ -1,7 +1,12 @@
 import { pullFenbeitongReimbursements } from '../adapters/fenbeitong-client.js';
 import {
+  deleteKingdeeExpenseReimbursement,
   findKingdeeEmployeeNumberByName,
-  saveKingdeeExpenseReimbursement
+  findKingdeeOtherContactUnitByName,
+  getKingdeeEmployeeBankDetails,
+  saveKingdeeExpenseReimbursement,
+  updateKingdeeExpenseReimbursementContactUnit,
+  updateKingdeeExpenseReimbursementSourceType
 } from '../adapters/kingdee-client.js';
 import { getAppConfig } from '../config.js';
 import { buildExpenseReimbursementPreview } from '../expense-reimbursement-mapper.js';
@@ -13,6 +18,7 @@ import {
   findSyncedDocument,
   finishSyncBatch,
   getIntegrationSelection,
+  getKingdeeAcctIdSelection,
   isRealPushedRecord,
   saveFenbeitongRequesterCatalog,
   listSyncedDocuments,
@@ -24,6 +30,8 @@ import {
 } from '../repository.js';
 
 const REQUIRED_KINGDEE_ACCOUNT_KEY = 'current';
+const ONLINE_CONTACT_UNIT_NAME = '北京分贝国际旅行社有限公司';
+const erpSaveInFlight = new Map();
 
 export async function syncFenbeitongDocuments(options = {}) {
   const tenantKey = options.tenantKey || getIntegrationSelection().tenantKey;
@@ -33,11 +41,13 @@ export async function syncFenbeitongDocuments(options = {}) {
   });
   try {
     const result = await pullFenbeitongReimbursements({ tenantKey });
+    const employeeBankDetailsByRequester = await loadEmployeeBankDetailsForDocuments(result.documents);
     const records = saveSyncedDocuments(result.documents, batch.batchId, {
       sourceMode: result.mode,
       mockReplacement: result.mockReplacement,
       mockReason: result.mockReason,
-      tenantKey: result.tenantKey
+      tenantKey: result.tenantKey,
+      employeeBankDetailsByRequester
     });
     const requesters = saveFenbeitongRequesterCatalog(result.requesters, result.tenantKey);
     const finishedBatch = finishSyncBatch(batch.batchId, {
@@ -73,7 +83,62 @@ export async function prepareExpenseReimbursement(input) {
   return savePreparedRecord(await previewExpenseReimbursement(input));
 }
 
-export async function saveExpenseReimbursementToErp(input) {
+export function saveExpenseReimbursementToErp(input) {
+  const lockKey = requiredText(input.sourceId, 'sourceId');
+  const running = erpSaveInFlight.get(lockKey);
+  if (running) return running;
+  const task = saveExpenseReimbursementToErpUnlocked(input).finally(() => {
+    if (erpSaveInFlight.get(lockKey) === task) {
+      erpSaveInFlight.delete(lockKey);
+    }
+  });
+  erpSaveInFlight.set(lockKey, task);
+  return task;
+}
+
+async function loadEmployeeBankDetailsForDocuments(documents) {
+  if (getAppConfig().kingdee.mode !== 'real') return {};
+  const requesters = new Map();
+  for (const source of Array.isArray(documents) ? documents : []) {
+    try {
+      const document = parseFenbeitongDetail(
+        typeof source === 'string' ? source : JSON.stringify(source)
+      );
+      const key = String(document.userCode || document.userName || '').trim();
+      if (key && !requesters.has(key)) requesters.set(key, document);
+    } catch {
+      // Keep source synchronization available when one malformed document
+      // cannot contribute to the employee-bank catalog.
+    }
+  }
+  const output = {};
+  const entries = [...requesters.values()];
+  for (let index = 0; index < entries.length; index += 5) {
+    await Promise.all(entries.slice(index, index + 5).map(async (document) => {
+      try {
+        const employeeNumber = await findKingdeeEmployeeNumberByName(document.userName, {
+          orgNumber: '886'
+        });
+        if (!employeeNumber) return;
+        const details = await getKingdeeEmployeeBankDetails(employeeNumber, {
+          orgNumber: '886'
+        });
+        const value = {
+          ...details,
+          employeeNumber
+        };
+        if (document.userCode) output[document.userCode] = value;
+        if (document.userName) output[document.userName] = value;
+      } catch {
+        // Bank details improve the interface and save payload but must not
+        // prevent the core Fenbeitong source synchronization from completing.
+      }
+    }));
+  }
+  return output;
+}
+
+async function saveExpenseReimbursementToErpUnlocked(input) {
   const sourceId = requiredText(input.sourceId, 'sourceId');
   const requestedAccountKey = input.kingdeeAccountKey || REQUIRED_KINGDEE_ACCOUNT_KEY;
   if (requestedAccountKey !== REQUIRED_KINGDEE_ACCOUNT_KEY) {
@@ -81,15 +146,22 @@ export async function saveExpenseReimbursementToErp(input) {
   }
   const resolvedInput = resolveInput(input);
   const preview = await buildPreviewWithResolvedEmployee(resolvedInput);
+  const kingdeeAcctIdKey = input.kingdeeAcctIdKey || getKingdeeAcctIdSelection();
   const associatedRecords = [...new Map((preview.sourceIds || [sourceId])
     .map((item) => findPreparedRecord(item))
     .filter(Boolean)
     .map((record) => [record.sourceId, record])).values()];
-  const savedRecords = associatedRecords.filter(isRealPushedRecord);
+  const savedRecords = associatedRecords.filter((record) =>
+    isRealPushedRecord(record) && record.kingdeeAcctIdKey === kingdeeAcctIdKey);
   if (savedRecords.length > 1) {
     throw new Error(`同一员工同月已有 ${savedRecords.length} 张逐单费用报销单，已停止合并以避免重复；请先在金蝶中处理旧暂存单。`);
   }
-  const existingRecord = savedRecords[0] || findPreparedRecord(preview.sourceId) || findPreparedRecord(sourceId);
+  const candidateRecord = savedRecords[0]
+    || findPreparedRecord(preview.sourceId)
+    || findPreparedRecord(sourceId);
+  const existingRecord = candidateRecord?.kingdeeAcctIdKey === kingdeeAcctIdKey
+    ? candidateRecord
+    : null;
   const migratingExistingBill = Boolean(
     isRealPushedRecord(existingRecord) && existingRecord.sourceId !== preview.sourceId
   );
@@ -98,22 +170,89 @@ export async function saveExpenseReimbursementToErp(input) {
   );
   if (isRealPushedRecord(existingRecord) && !forceRetry) {
     const replay = replaySavedExpenseReimbursement(existingRecord, preview);
-    if (replay) return replay;
+    if (replay) {
+      // A historical document may already be marked as saved locally even
+      // though the source-type field was introduced later.  Do not let the
+      // idempotent fast path bypass that required ERP field: fill it only when
+      // ERP is blank, then read it back in the adapter before reporting saved.
+      await updateKingdeeExpenseReimbursementSourceType(
+        existingRecord.erpFid,
+        preview.payload?.Model?.F_ora_Text_qtr,
+        {
+          accountKey: REQUIRED_KINGDEE_ACCOUNT_KEY,
+          acctIdKey: kingdeeAcctIdKey
+        }
+      );
+      if (
+        preview.sourceKind === 'ONLINE_MONTHLY_BILL'
+        && getAppConfig().kingdee.mode === 'real'
+      ) {
+        await updateKingdeeExpenseReimbursementContactUnit(
+          existingRecord.erpFid,
+          {
+            type: preview.documentSummary?.contactUnitType,
+            number: preview.documentSummary?.contactUnitNumber,
+            name: preview.documentSummary?.contactUnitName
+          },
+          {
+            accountKey: REQUIRED_KINGDEE_ACCOUNT_KEY,
+            acctIdKey: kingdeeAcctIdKey,
+            orgNumber: preview.documentSummary?.orgNumber || '886'
+          }
+        );
+      }
+      return replay;
+    }
     throw new Error(
       `费用报销单 ${preview.sourceId} 已保存到 ERP，但当前内容已经变化；请使用“重新保存费用报销单”更新原单，系统不会重复新建。`
     );
   }
   try {
-    if (forceRetry) targetExistingExpenseReimbursement(preview.payload, existingRecord);
+    const replaceOnlineDraft = shouldReplaceOnlineDraft(
+      forceRetry,
+      preview,
+      existingRecord
+    );
+    if (forceRetry && !replaceOnlineDraft) {
+      targetExistingExpenseReimbursement(preview.payload, existingRecord);
+    }
     savePreparedRecord(preview, {
       forceRetry,
+      kingdeeAcctIdKey,
       previousRecord: migratingExistingBill ? existingRecord : undefined
     });
     const erpResult = await saveKingdeeExpenseReimbursement(preview.payload, {
       accountKey: REQUIRED_KINGDEE_ACCOUNT_KEY,
-      acctIdKey: input.kingdeeAcctIdKey
+      acctIdKey: input.kingdeeAcctIdKey,
+      // A previous ERP save can succeed before the local process record is
+      // persisted (for example, when the local state file is temporarily
+      // locked).  In that orphaned-state case there is no existingRecord, but
+      // an explicit retry must still be allowed to update the same bill number
+      // instead of leaving the UI permanently out of sync with Kingdee.
+      allowExistingBillOverwrite: forceRetry || Boolean(input.forceRetry)
     });
+    if (replaceOnlineDraft) {
+      try {
+        await deleteKingdeeExpenseReimbursement(existingRecord.erpFid, {
+          accountKey: REQUIRED_KINGDEE_ACCOUNT_KEY,
+          acctIdKey: input.kingdeeAcctIdKey
+        });
+      } catch (error) {
+        if (isAlreadyDeletedKingdeeDraft(error)) {
+          return markPushedToErp(preview.sourceId, erpResult, {
+            kingdeeAcctIdKey,
+            replacesSourceId: migratingExistingBill ? existingRecord.sourceId : ''
+          });
+        }
+        await deleteKingdeeExpenseReimbursement(erpResult.erpFid, {
+          accountKey: REQUIRED_KINGDEE_ACCOUNT_KEY,
+          acctIdKey: input.kingdeeAcctIdKey
+        }).catch(() => {});
+        throw error;
+      }
+    }
     return markPushedToErp(preview.sourceId, erpResult, {
+      kingdeeAcctIdKey,
       replacesSourceId: migratingExistingBill ? existingRecord.sourceId : ''
     });
   } catch (error) {
@@ -124,6 +263,15 @@ export async function saveExpenseReimbursementToErp(input) {
     }
     throw error;
   }
+}
+
+function isAlreadyDeletedKingdeeDraft(error) {
+  return error?.code === 'KINGDEE_VIEW_FAILED'
+    && /不存在|deleted/i.test(String(error.message || ''));
+}
+
+export function isAlreadyDeletedKingdeeDraftForTest(error) {
+  return isAlreadyDeletedKingdeeDraft(error);
 }
 
 function targetExistingExpenseReimbursement(payload, existingRecord) {
@@ -179,25 +327,37 @@ function resolveInput(input) {
   if (synced?.sourceType === 'ONLINE_MONTHLY_BILL') {
     return buildOnlineMonthlyGroupInput(input, synced);
   }
+  if (synced) {
+    return {
+      ...input,
+      fixedJson: input.fixedJson || synced.fixedJson,
+      // Always overwrite a caller-provided/missing value with the exact
+      // synchronized Fenbeitong interface label. This applies equally to
+      // initial saves, force updates and automatic save recovery.
+      sourceTypeValue: synchronizedSourceTypeValue(synced)
+    };
+  }
   if (input.fixedJson) {
     assertVerifiedOnlineSettlement(input.fixedJson);
     return input;
   }
   if (!sourceId) requiredText(input.sourceId, 'sourceId');
-  if (!synced) throw new Error(`synced Fenbeitong document is missing for ${sourceId}`);
-  return { ...input, fixedJson: synced.fixedJson };
+  throw new Error(`synced Fenbeitong document is missing for ${sourceId}`);
 }
 
 function buildOnlineMonthlyGroupInput(input, selected) {
   const month = sourceMonthKey(selected.settlementMonth);
   const requesterKey = String(selected.requesterCode || selected.requesterName || '').trim();
-  if (!month || !requesterKey) return { ...input, fixedJson: selected.fixedJson };
+  const selectedBillNumber = onlineOriginalBillNumber(selected);
+  if (!month || !requesterKey || !selectedBillNumber) {
+    return { ...input, fixedJson: selected.fixedJson };
+  }
   const tenantKey = selected.tenantKey || getIntegrationSelection().tenantKey || 'puhui';
   const syncedDocuments = listSyncedDocuments();
   const records = syncedDocuments
     .filter((record) => record.sourceType === 'ONLINE_MONTHLY_BILL')
     .filter((record) => (record.tenantKey || 'puhui') === tenantKey)
-    .filter((record) => sourceMonthKey(record.settlementMonth) === month)
+    .filter((record) => onlineOriginalBillNumber(record) === selectedBillNumber)
     .filter((record) => sameRequester(record, selected))
     .sort((left, right) => {
       const byDate = String(left.paymentDate || '').localeCompare(String(right.paymentDate || ''));
@@ -205,11 +365,10 @@ function buildOnlineMonthlyGroupInput(input, selected) {
     });
   if (records.length === 0) return { ...input, fixedJson: selected.fixedJson };
 
-  const compactMonth = month.replace('-', '');
-  const groupId = `ONLINE-MONTH:${tenantKey}:${requesterKey}:${compactMonth}`;
   const applicationPurposes = buildApplicationPurposeIndex(syncedDocuments, tenantKey);
   const orders = records.map((record) => sourceOnlineOrder(record, applicationPurposes));
   const groupBillNo = requiredOriginalBillNumber(orders);
+  const groupId = `ONLINE-BILL:${tenantKey}:${requesterKey}:${groupBillNo}`;
   const latestDate = records.map((record) => record.paymentDate || record.applicationDate)
     .filter(Boolean).sort().at(-1);
   const billDate = onlineBillPostingDate(records);
@@ -217,6 +376,7 @@ function buildOnlineMonthlyGroupInput(input, selected) {
     ...input,
     sourceId: groupId,
     sourceIds: records.map((record) => record.sourceId),
+    sourceTypeValue: synchronizedSourceTypeValue(selected),
     documentDate: billDate || latestDate || input.documentDate,
     fixedJson: JSON.stringify({
       code: 0,
@@ -234,15 +394,30 @@ function buildOnlineMonthlyGroupInput(input, selected) {
   };
 }
 
+function synchronizedSourceTypeValue(record) {
+  const synchronizedLabel = [record?.sourceKindName, record?.sourceForm]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(' · ');
+  if (synchronizedLabel) return synchronizedLabel;
+  if (record?.sourceType === 'OFFLINE_REIMBURSEMENT') return '线下报销 · 费用明细';
+  if (record?.sourceType === 'ONLINE_MONTHLY_BILL') return '线上月结 · 企业账单';
+  return '';
+}
+
+export function synchronizedSourceTypeValueForTest(record) {
+  return synchronizedSourceTypeValue(record);
+}
+
 function requiredOriginalBillNumber(orders) {
   const billNumbers = [...new Set(orders
     .map((order) => String(order?.bill_no || '').trim())
     .filter(Boolean))];
   if (billNumbers.length === 0) {
-    throw new Error('Fenbeitong online orders do not contain an original bill number');
+    throw new Error('分贝通线上订单缺少原始账单编号');
   }
   if (billNumbers.length > 1) {
-    throw new Error(`Fenbeitong online orders belong to multiple original bills: ${billNumbers.join(', ')}`);
+    throw new Error(`分贝通线上订单错误地混入多个原始账单：${billNumbers.join('、')}`);
   }
   return billNumbers[0];
 }
@@ -260,29 +435,68 @@ function onlineBillPostingDate(records) {
     } catch {
       continue;
     }
+    const cycleStartDate = firstDayOfBillCycle(data.bill_cycle);
     const explicitDate = normalizedDate(
       data.bill_date
       || data.billing_date
       || data.account_date
       || data.bookkeeping_date
     );
-    const postingDate = explicitDate || dayAfterBillCycle(data.bill_cycle);
+    const postingDate = cycleStartDate
+      || explicitDate
+      || firstDayOfSettlementMonth(data.settlement_month || data.end_month || data.start_month);
     if (postingDate) dates.add(postingDate);
   }
   if (dates.size > 1) {
-    throw new Error(`Fenbeitong online monthly group contains multiple bill dates: ${[...dates].join(', ')}`);
+    throw new Error(`分贝通线上账单组内存在多个申请日期：${[...dates].join('、')}`);
   }
   return [...dates][0] || '';
 }
 
-function dayAfterBillCycle(value) {
+function firstDayOfBillCycle(value) {
   const matches = [...String(value || '').matchAll(/(20\d{2})[/-](\d{2})[/-](\d{2})/g)];
-  const end = matches.at(-1);
-  if (!end) return '';
-  const date = new Date(Date.UTC(Number(end[1]), Number(end[2]) - 1, Number(end[3])));
+  const start = matches.at(0);
+  if (!start) return '';
+  const date = new Date(Date.UTC(Number(start[1]), Number(start[2]) - 1, Number(start[3])));
   if (Number.isNaN(date.getTime())) return '';
-  date.setUTCDate(date.getUTCDate() + 1);
   return date.toISOString().slice(0, 10);
+}
+
+function onlineOriginalBillNumber(record) {
+  const direct = String(record?.sourceCode || '').trim();
+  if (direct) return direct;
+  try {
+    return String(JSON.parse(record?.fixedJson || '{}')?.data?.bill_no || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+export function onlineOriginalBillNumberForTest(record) {
+  return onlineOriginalBillNumber(record);
+}
+
+function shouldReplaceOnlineDraft(forceRetry, preview, existingRecord) {
+  const targetBillNumber = String(preview?.payload?.Model?.FBillNo || '').trim();
+  const existingBillNumber = String(existingRecord?.erpNumber || '').trim();
+  return Boolean(
+    forceRetry
+    && preview?.sourceKind === 'ONLINE_MONTHLY_BILL'
+    && ['A', 'Z'].includes(String(existingRecord?.erpDocumentStatus || ''))
+    && targetBillNumber
+    && targetBillNumber !== existingBillNumber
+  );
+}
+
+export function shouldReplaceOnlineDraftForTest(forceRetry, preview, existingRecord) {
+  return shouldReplaceOnlineDraft(forceRetry, preview, existingRecord);
+}
+
+function firstDayOfSettlementMonth(value) {
+  const match = /^(20\d{2})[-/]?(\d{2})/.exec(String(value || '').trim());
+  if (!match) return '';
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1));
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
 }
 
 function normalizedDate(value) {
@@ -404,19 +618,94 @@ export function resolveExpenseReimbursementInputForTest(input) {
 }
 
 async function buildPreviewWithResolvedEmployee(input) {
+  const document = parseFenbeitongDetail(input.fixedJson);
+  if (getAppConfig().kingdee.mode === 'real') {
+    const orgNumber = input.config?.expenseReimbursementOrgNumber || '886';
+    let onlineContactUnit;
+    if (document.sourceKind === 'ONLINE_MONTHLY_BILL') {
+      const matched = await findKingdeeOtherContactUnitByName(ONLINE_CONTACT_UNIT_NAME, {
+        accountKey: input.kingdeeAccountKey,
+        acctIdKey: input.kingdeeAcctIdKey,
+        orgNumber
+      });
+      if (!matched || matched.useOrgNumber !== orgNumber) {
+        const error = new Error(
+          `金蝶组织 ${orgNumber} 尚未分配往来单位“${ONLINE_CONTACT_UNIT_NAME}”，已停止保存，避免写入同编号的错误单位。请管理员分配后重试。`
+        );
+        error.code = 'KINGDEE_ONLINE_CONTACT_UNIT_NOT_ALLOCATED';
+        throw error;
+      }
+      onlineContactUnit = {
+        type: 'FIN_OTHERS',
+        number: matched.number,
+        name: matched.name
+      };
+    }
+    // Employee numbers are account-set specific. Always resolve the employee
+    // from the selected live account set so mappings copied from an older
+    // account set cannot silently target the wrong staff record.
+    const employeeNumber = await findKingdeeEmployeeNumberByName(document.userName, {
+      accountKey: input.kingdeeAccountKey,
+      acctIdKey: input.kingdeeAcctIdKey,
+      orgNumber: input.config?.expenseReimbursementOrgNumber || '886'
+    });
+    if (employeeNumber) {
+      const employeeBankDetails = await getKingdeeEmployeeBankDetails(employeeNumber, {
+        accountKey: input.kingdeeAccountKey,
+        acctIdKey: input.kingdeeAcctIdKey,
+        orgNumber: input.config?.expenseReimbursementOrgNumber || '886'
+      });
+      return buildExpenseReimbursementPreview({
+        ...input,
+        onlineContactUnit,
+        employeeBankDetails,
+        config: {
+          ...(input.config || {}),
+          disableRequiredEmployeeNumberMappings: true,
+          employeeDetailNumberMappings: {
+            ...(input.config?.employeeDetailNumberMappings || {}),
+            [document.userCode]: employeeNumber,
+            [document.userName]: employeeNumber
+          }
+        }
+      });
+    }
+    // Remove stale configured values and let the mapper raise the standard
+    // missing-employee error used by the batch business-skip workflow.
+    const employeeMappings = {
+      ...(input.config?.employeeDetailNumberMappings || {})
+    };
+    delete employeeMappings[document.userCode];
+    delete employeeMappings[document.userName];
+    return buildExpenseReimbursementPreview({
+      ...input,
+      onlineContactUnit,
+      config: {
+        ...(input.config || {}),
+        disableRequiredEmployeeNumberMappings: true,
+        employeeDetailNumberMappings: employeeMappings
+      }
+    });
+  }
+
   try {
     return buildExpenseReimbursementPreview(input);
   } catch (error) {
     if (error.code !== 'KINGDEE_EMPLOYEE_MAPPING_MISSING') throw error;
-    const document = parseFenbeitongDetail(input.fixedJson);
     const employeeNumber = await findKingdeeEmployeeNumberByName(document.userName, {
       accountKey: input.kingdeeAccountKey,
       acctIdKey: input.kingdeeAcctIdKey,
       orgNumber: input.config?.expenseReimbursementOrgNumber || '886'
     });
     if (!employeeNumber) throw error;
+    const employeeBankDetails = await getKingdeeEmployeeBankDetails(employeeNumber, {
+      accountKey: input.kingdeeAccountKey,
+      acctIdKey: input.kingdeeAcctIdKey,
+      orgNumber: input.config?.expenseReimbursementOrgNumber || '886'
+    });
     return buildExpenseReimbursementPreview({
       ...input,
+      employeeBankDetails,
       config: {
         ...(input.config || {}),
         employeeDetailNumberMappings: {

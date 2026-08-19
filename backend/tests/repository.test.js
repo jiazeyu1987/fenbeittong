@@ -24,15 +24,43 @@ import {
   isRealPushedRecord,
   hasFenbeitongPaymentTime,
   markPushedToErp,
+  markPaymentStatusSyncBatch,
   recordOperation,
+  renameStateFileWithRetryForTest,
   resetRepository,
   restoreErpPushAfterRetryFailure,
   saveFenbeitongRequesterCatalog,
   savePreparedRecord,
   saveIntegrationSelection,
   saveSyncedDocument,
-  saveSyncedDocuments
+  saveSyncedDocuments,
+  settlementCycleMonthForTest
 } from '../src/repository.js';
+
+test('repository validates a cross-month settlement against its end month', () => {
+  assert.equal(settlementCycleMonthForTest('2026/03/20-2026/04/19'), '202604');
+});
+
+test('retries a transient Windows state-file rename lock', () => {
+  let attempts = 0;
+  const delays = [];
+  renameStateFileWithRetryForTest(
+    'state.tmp',
+    'state.json',
+    () => {
+      attempts += 1;
+      if (attempts < 3) {
+        const error = new Error('operation not permitted');
+        error.code = 'EPERM';
+        throw error;
+      }
+    },
+    (milliseconds) => delays.push(milliseconds)
+  );
+
+  assert.equal(attempts, 3);
+  assert.deepEqual(delays, [25, 50]);
+});
 
 test('a source without a prepared record is not treated as pushed to ERP', () => {
   assert.equal(isRealPushedRecord(null), false);
@@ -163,6 +191,9 @@ test('sync stores the five ERP detail columns for an online bill', () => {
   assert.equal(synced.trafficType, '用车');
   assert.equal(synced.purpose, '商务洽谈');
   assert.equal(synced.expenseDepartment, '技术部');
+  assert.equal(synced.applicationDate, '2026-07-01');
+  assert.equal(synced.paymentDate, '2026-07-15');
+  assert.equal(synced.expenseDateTime, '2026-07-15 09:30:00');
 });
 
 test('sync maps Fenbeitong payment, amount, submitter, expense type, and reimbursement number', () => {
@@ -316,6 +347,46 @@ test('real full sync removes every stale online row not returned by issued bills
   assert.equal(findSyncedDocument('OTHER-BILL'), null);
 });
 
+test('payment status fields from one monthly ERP voucher are copied to every source row', () => {
+  resetRepository();
+  const template = buildMockTemplate();
+  const sourceDocument = JSON.parse(template.mockFixedJson);
+  sourceDocument.data.reimb_id = 'ORDER-SOURCE-1';
+  saveSyncedDocument(sourceDocument);
+  const secondDocument = structuredClone(sourceDocument);
+  secondDocument.data.id = 'ORDER-SOURCE-2';
+  secondDocument.data.reimb_id = 'ORDER-SOURCE-2';
+  saveSyncedDocument(secondDocument);
+
+  const preview = buildVoucherPreview({
+    fixedJson: template.mockFixedJson,
+    voucherDate: template.mockDocumentDate,
+    config: template
+  });
+  preview.sourceId = 'ONLINE-MONTH:puhui:X001:202607';
+  preview.sourceIds = ['ORDER-SOURCE-1', 'ORDER-SOURCE-2'];
+  preview.sourceCode = 'FBT202607X001';
+  savePreparedRecord(preview);
+
+  markPaymentStatusSyncBatch([{
+    sourceId: preview.sourceId,
+    patch: {
+      erpPaymentBillType: '费用报销付款单（手工）',
+      erpPaymentBillNumber: 'FKD001',
+      erpPaymentDate: '2026-07-10',
+      erpBankProcessingStatus: '银行交易成功',
+      erpBankProcessingStatusCode: 'C'
+    }
+  }]);
+
+  for (const sourceId of preview.sourceIds) {
+    const record = findSyncedDocument(sourceId);
+    assert.equal(record.erpPaymentBillType, '费用报销付款单（手工）');
+    assert.equal(record.erpPaymentDate, '2026-07-10');
+    assert.equal(record.erpBankProcessingStatus, '银行交易成功');
+  }
+});
+
 test('real full sync removes stale offline rows that no longer pass source filters', () => {
   resetRepository();
   const offlineDocument = (id, code) => {
@@ -383,7 +454,9 @@ test('real sync uses submit date and accepts reimbursement without payment_time'
 
   assert.equal(hasFenbeitongPaymentTime(document), false);
   const synced = saveSyncedDocument(document, '', { sourceMode: 'real' });
-  assert.equal(synced.paymentDate, '2026-07-11');
+  assert.equal(synced.applicationDate, '2026-07-16');
+  assert.equal(synced.paymentDate, '2026-07-16');
+  assert.equal(synced.applicationDateSource, 'FENBEITONG_SUBMISSION_DATE');
   assert.equal(findSyncedDocument('REAL-UNPAID-ID').sourceCode, 'REAL-UNPAID-CODE');
 });
 
@@ -427,6 +500,39 @@ test('ERP push marks prepared record with real ERP identifiers', () => {
   assert.equal(pushed.erpFid, '100033');
   assert.equal(pushed.simulatedErp, false);
   assert.equal(pushed.erpMode, 'real');
+});
+
+test('switching ERP account sets archives the old push instead of retrying its FID', () => {
+  resetRepository();
+  const template = buildMockTemplate();
+  const preview = buildVoucherPreview({
+    fixedJson: template.mockFixedJson,
+    voucherDate: template.mockDocumentDate,
+    year: template.mockYear,
+    period: template.mockPeriod,
+    config: template
+  });
+  savePreparedRecord(preview, { kingdeeAcctIdKey: 'old-acct-id' });
+  markPushedToErp('MOCK-REIMB-001', {
+    simulated: false,
+    mode: 'real',
+    mockReplacement: false,
+    erpFid: '100033',
+    erpNumber: '23',
+    documentStatus: 'Z'
+  }, { kingdeeAcctIdKey: 'old-acct-id' });
+
+  const preparedForNewAccountSet = savePreparedRecord(preview, {
+    kingdeeAcctIdKey: 'new-acct-id'
+  });
+
+  assert.equal(preparedForNewAccountSet.processStage, 'EXPENSE_REIMBURSEMENT_PREPARED');
+  assert.equal(preparedForNewAccountSet.kingdeeAcctIdKey, 'new-acct-id');
+  assert.equal(preparedForNewAccountSet.erpFid, undefined);
+  assert.equal(preparedForNewAccountSet.erpNumber, undefined);
+  assert.equal(preparedForNewAccountSet.previousErpPushes.at(-1).kingdeeAcctIdKey, 'old-acct-id');
+  assert.equal(preparedForNewAccountSet.previousErpPushes.at(-1).erpFid, '100033');
+  assert.equal(preparedForNewAccountSet.previousErpPushes.at(-1).erpRawResponse, undefined);
 });
 
 test('ERP push rejects simulated Kingdee save results', () => {
@@ -500,6 +606,11 @@ test('repeated ERP confirmation with the same FID and number is idempotent', () 
     erpNumber: '23',
     documentStatus: 'Z'
   });
+  const restored = restoreErpPushAfterRetryFailure('MOCK-REIMB-001', findPreparedRecord('MOCK-REIMB-001'), {
+    code: 'KINGDEE_SAVE_FAILED',
+    message: 'retry rejected'
+  });
+  assert.equal(restored.lastErpRetryErrorCode, 'KINGDEE_SAVE_FAILED');
 
   const replay = markPushedToErp('MOCK-REIMB-001', {
     simulated: false,
@@ -513,6 +624,7 @@ test('repeated ERP confirmation with the same FID and number is idempotent', () 
   assert.equal(replay.idempotentReplay, true);
   assert.equal(replay.erpFid, '100033');
   assert.equal(replay.erpNumber, '23');
+  assert.equal(replay.lastErpRetryErrorCode, '');
 });
 
 test('failed forced regeneration restores the previous ERP voucher', () => {
@@ -538,6 +650,7 @@ test('failed forced regeneration restores the previous ERP voucher', () => {
   const retry = savePreparedRecord(preview, { forceRetry: true });
   assert.equal(retry.erpFid, '');
   assert.equal(retry.previousErpPushes.at(-1).erpFid, '100033');
+  assert.equal(retry.previousErpPushes.at(-1).erpRawResponse, undefined);
 
   const restored = restoreErpPushAfterRetryFailure('MOCK-REIMB-001', pushed, {
     code: 'KINGDEE_SAVE_FAILED',

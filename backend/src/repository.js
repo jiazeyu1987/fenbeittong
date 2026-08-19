@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -155,10 +162,18 @@ export function finishSyncBatch(batchId, patch) {
 export function savePreparedRecord(preview, options = {}) {
   const state = loadState();
   const stored = state.voucherRecords[preview.sourceId] || {};
+  const kingdeeAcctIdKey = options.kingdeeAcctIdKey
+    || state.integrationSelection.kingdeeAcctIdKey;
+  const storedForAnotherAcctId = stored.targetFormId === 'ER_ExpReimbursement'
+    && stored.kingdeeAcctIdKey
+    && stored.kingdeeAcctIdKey !== kingdeeAcctIdKey;
   const suppliedPrevious = options.previousRecord?.targetFormId === 'ER_ExpReimbursement'
+    && options.previousRecord.kingdeeAcctIdKey === kingdeeAcctIdKey
     ? options.previousRecord
     : null;
-  const previous = suppliedPrevious || (stored.targetFormId === 'ER_ExpReimbursement' ? stored : {});
+  const previous = suppliedPrevious || (
+    stored.targetFormId === 'ER_ExpReimbursement' && !storedForAnotherAcctId ? stored : {}
+  );
   const forceRetry = Boolean(options.forceRetry && isRealPushedRecord(previous));
   const record = {
     ...previous,
@@ -174,13 +189,16 @@ export function savePreparedRecord(preview, options = {}) {
     processStatus: 15,
     processStage: 'EXPENSE_REIMBURSEMENT_PREPARED',
     targetFormId: 'ER_ExpReimbursement',
+    kingdeeAcctIdKey,
     marker: preview.marker,
     erpDocumentStatus: 'Z',
     erpFid: forceRetry ? '' : previous.erpFid,
     erpNumber: forceRetry ? '' : previous.erpNumber,
     erpMode: forceRetry ? '' : previous.erpMode,
     erpRawResponse: forceRetry ? '' : previous.erpRawResponse,
-    previousErpPushes: forceRetry
+    previousErpPushes: storedForAnotherAcctId && isRealPushedRecord(stored)
+      ? [...(stored.previousErpPushes || []), previousErpPushesEntry(stored)]
+      : forceRetry
       ? [...(previous.previousErpPushes || []), previousErpPushesEntry(previous)]
       : previous.previousErpPushes,
     expenseReimbursementPayload: JSON.stringify(preview.payload),
@@ -188,15 +206,17 @@ export function savePreparedRecord(preview, options = {}) {
     updateTime: now()
   };
   state.voucherRecords[record.sourceId] = record;
-  persistState(state);
   if (forceRetry) {
-    recordOperation('ERP_EXPENSE_REIMBURSEMENT_RETRY_PREPARE', 'SUCCESS', {
+    appendOperation(state, 'ERP_EXPENSE_REIMBURSEMENT_RETRY_PREPARE', 'SUCCESS', {
       sourceId: record.sourceId,
       previousErpFid: previous.erpFid,
       previousErpNumber: previous.erpNumber
     });
   }
-  recordOperation('EXPENSE_REIMBURSEMENT_PREPARE', 'SUCCESS', { sourceId: record.sourceId });
+  appendOperation(state, 'EXPENSE_REIMBURSEMENT_PREPARE', 'SUCCESS', {
+    sourceId: record.sourceId
+  });
+  persistState(state);
   return structuredClone(record);
 }
 
@@ -299,8 +319,17 @@ function pruneStaleOnlineDocuments(state, incomingRecords, options) {
 function buildSyncedRecord(state, document, batchId, options) {
   const normalized = normalizeSyncedDocument(document);
   const expenseDetails = summarizeExpenseDetails(normalized);
+  const onlineExpenseDateTime = normalized.sourceKind === 'ONLINE_MONTHLY_BILL'
+    ? firstText(normalized.expenses?.[0]?.expenseDateTime)
+    : '';
+  const onlineExpenseDate = normalized.sourceKind === 'ONLINE_MONTHLY_BILL'
+    ? dateOnly(onlineExpenseDateTime)
+    : '';
   const sourceId = normalized.reimbursementId;
   const previous = state.syncedDocuments[sourceId] || {};
+  const employeeBankDetails = options.employeeBankDetailsByRequester?.[normalized.userCode]
+    || options.employeeBankDetailsByRequester?.[normalized.userName]
+    || {};
   const record = {
     ...previous,
     sourceSystem: 'FENBEITONG',
@@ -313,7 +342,13 @@ function buildSyncedRecord(state, document, batchId, options) {
     documentType: normalized.documentType,
     reason: normalized.reason,
     applicationDate: normalized.applicationDate,
-    paymentDate: normalized.applicationDate,
+    applicationDateSource: normalized.applicationDateSource || '',
+    paymentDate: normalized.sourceKind === 'ONLINE_MONTHLY_BILL'
+      ? onlineExpenseDate
+      : normalized.applicationDate,
+    ...(normalized.sourceKind === 'ONLINE_MONTHLY_BILL'
+      ? { expenseDateTime: onlineExpenseDateTime }
+      : {}),
     settlementMonth: normalized.settlementMonth || '',
     totalAmount: normalized.totalAmount,
     reimbursementAmount: normalized.totalAmount,
@@ -324,6 +359,10 @@ function buildSyncedRecord(state, document, batchId, options) {
     departmentAttributionAmount: normalized.departmentAttributionAmount,
     requesterName: normalized.userName,
     requesterCode: normalized.userCode,
+    employeeNumber: String(employeeBankDetails.employeeNumber || previous.employeeNumber || '').trim(),
+    employeeOpenBank: String(employeeBankDetails.openBank || previous.employeeOpenBank || '').trim(),
+    employeeAccountName: String(employeeBankDetails.accountName || previous.employeeAccountName || '').trim(),
+    employeeBankAccount: String(employeeBankDetails.bankAccount || previous.employeeBankAccount || '').trim(),
     departmentName: normalized.departmentName,
     departmentCode: normalized.departmentCode,
     requestOrganizationName: normalized.requestOrganizationName,
@@ -529,27 +568,7 @@ function fenbeitongSplitAmounts(data) {
 }
 
 function expenseSplitAmounts(expense) {
-  const amount = numericAmount(expense?.total_amount);
-  const direct = directExpenseSplitAmounts(expense, amount);
-  if (direct.resolved) return direct;
-  const invoices = Array.isArray(expense?.invoices) ? expense.invoices : [];
-  if (invoices.length === 0) {
-    return { taxAmount: 0, excludingTaxAmount: amount, resolved: true };
-  }
-  let taxAmount = 0;
-  let excludingTaxAmount = 0;
-  for (const invoice of invoices) {
-    const split = invoiceSplitAmounts(invoice);
-    if (!split.resolved) return split;
-    taxAmount += split.taxAmount;
-    excludingTaxAmount += split.excludingTaxAmount;
-  }
-  if (roundMoney(taxAmount + excludingTaxAmount) !== amount) return unresolvedSplit();
-  return {
-    taxAmount: roundMoney(taxAmount),
-    excludingTaxAmount: roundMoney(excludingTaxAmount),
-    resolved: true
-  };
+  return directExpenseSplitAmounts(expense);
 }
 
 function invoiceSplitAmounts(invoice) {
@@ -568,16 +587,19 @@ function invoiceSplitAmounts(invoice) {
   return { taxAmount, excludingTaxAmount, resolved: true };
 }
 
-function directExpenseSplitAmounts(expense, totalAmount) {
+function directExpenseSplitAmounts(expense) {
   const fields = Array.isArray(expense?.cost_custom_fields) ? expense.cost_custom_fields : [];
-  const taxAmount = explicitCustomAmount(fields, ['税额'], ['tax_amount']);
+  const taxAmount = explicitCustomAmount(
+    fields,
+    ['\u53ef\u62b5\u6263\u7a0e\u989d'],
+    ['deductible_tax']
+  );
   const excludingTaxAmount = explicitCustomAmount(
     fields,
-    ['未税金额', '不含税金额'],
-    ['untaxed_amount', 'exclude_tax_amount']
+    ['\u672a\u7a0e\u91d1\u989d'],
+    ['untaxed_amount']
   );
-  if (taxAmount === null || excludingTaxAmount === null
-    || roundMoney(taxAmount + excludingTaxAmount) !== roundMoney(totalAmount)) {
+  if (taxAmount === null || excludingTaxAmount === null) {
     return unresolvedSplit();
   }
   return { taxAmount, excludingTaxAmount, resolved: true };
@@ -686,8 +708,13 @@ function recordHasVerifiedSettlementOrigin(record) {
 }
 
 function settlementCycleMonth(value) {
-  const match = /(20\d{2})[-/]?(0[1-9]|1[0-2])/.exec(String(value || ''));
+  const matches = [...String(value || '').matchAll(/(20\d{2})[-/]?(0[1-9]|1[0-2])/g)];
+  const match = matches.at(-1);
   return match ? `${match[1]}${match[2]}` : '';
+}
+
+export function settlementCycleMonthForTest(value) {
+  return settlementCycleMonth(value);
 }
 
 function recordHasFenbeitongPaymentTime(record) {
@@ -713,6 +740,61 @@ export function listProcessRecords() {
     .map((record) => structuredClone(record));
 }
 
+export function markPaymentStatusSync(sourceId, patch = {}) {
+  return markPaymentStatusSyncBatch([{ sourceId, patch }])[0];
+}
+
+export function markPaymentStatusSyncBatch(updates = []) {
+  const state = loadState();
+  const records = [];
+  for (const update of updates) {
+    const sourceId = String(update?.sourceId || '').trim();
+    const patch = update?.patch || {};
+    const processRecord = state.voucherRecords[sourceId];
+    if (!processRecord) {
+      throw new Error(`prepared record is missing for ${sourceId}`);
+    }
+    const updateTime = now();
+    const reverseFields = {
+      erpPaymentBillType: String(patch.erpPaymentBillType || ''),
+      erpPaymentBillNumber: String(patch.erpPaymentBillNumber || ''),
+      erpPaymentDate: String(patch.erpPaymentDate || ''),
+      erpBankProcessingStatus: String(patch.erpBankProcessingStatus || ''),
+      erpBankProcessingStatusCode: String(patch.erpBankProcessingStatusCode || ''),
+      fenbeitongPaymentState: String(patch.fenbeitongPaymentState || ''),
+      reversePaymentSyncStatus: String(patch.reversePaymentSyncStatus || ''),
+      reversePaymentSyncMessage: String(patch.reversePaymentSyncMessage || ''),
+      reversePaymentSyncedAt: String(patch.reversePaymentSyncedAt || updateTime),
+      updateTime
+    };
+    state.voucherRecords[sourceId] = { ...processRecord, ...reverseFields };
+    const relatedSourceIds = [...new Set([
+      sourceId,
+      ...(Array.isArray(processRecord.sourceIds) ? processRecord.sourceIds : [])
+    ].filter(Boolean))];
+    for (const relatedSourceId of relatedSourceIds) {
+      if (!state.syncedDocuments[relatedSourceId]) continue;
+      state.syncedDocuments[relatedSourceId] = {
+        ...state.syncedDocuments[relatedSourceId],
+        ...reverseFields
+      };
+    }
+    appendOperation(
+      state,
+      'ERP_PAYMENT_STATUS_TO_FENBEITONG',
+      reverseFields.reversePaymentSyncStatus === 'FAILED' ? 'FAILED' : 'SUCCESS',
+      {
+        sourceId,
+        sourceCode: processRecord.sourceCode,
+        ...reverseFields
+      }
+    );
+    records.push(state.voucherRecords[sourceId]);
+  }
+  persistState(state);
+  return structuredClone(records);
+}
+
 export function markPushedToErp(sourceId, erpResult, options = {}) {
   const state = loadState();
   const record = state.voucherRecords[sourceId];
@@ -727,8 +809,21 @@ export function markPushedToErp(sourceId, erpResult, options = {}) {
       String(record.erpFid) === String(erpResult.erpFid)
       && String(record.erpNumber) === String(erpResult.erpNumber)
     ) {
+      const replayedRecord = {
+        ...record,
+        erpDocumentStatus: erpResult.documentStatus || record.erpDocumentStatus,
+        erpRawResponse: erpResult.rawResponse
+          ? JSON.stringify(erpResult.rawResponse)
+          : record.erpRawResponse,
+        lastErpRetryErrorCode: '',
+        lastErpRetryErrorMessage: '',
+        lastErpRetryErrorAt: '',
+        updateTime: now()
+      };
+      state.voucherRecords[sourceId] = replayedRecord;
+      persistState(state);
       return {
-        ...structuredClone(record),
+        ...structuredClone(replayedRecord),
         idempotentReplay: true
       };
     }
@@ -738,6 +833,8 @@ export function markPushedToErp(sourceId, erpResult, options = {}) {
     ...record,
     processStatus: 30,
     processStage: 'ERP_EXPENSE_REIMBURSEMENT_SAVED',
+    kingdeeAcctIdKey: options.kingdeeAcctIdKey
+      || state.integrationSelection.kingdeeAcctIdKey,
     erpFid: erpResult.erpFid,
     erpNumber: erpResult.erpNumber,
     erpDocumentStatus: erpResult.documentStatus,
@@ -755,8 +852,7 @@ export function markPushedToErp(sourceId, erpResult, options = {}) {
   if (options.replacesSourceId && options.replacesSourceId !== sourceId) {
     delete state.voucherRecords[options.replacesSourceId];
   }
-  persistState(state);
-  recordOperation('ERP_EXPENSE_REIMBURSEMENT_SAVE', 'SUCCESS', {
+  appendOperation(state, 'ERP_EXPENSE_REIMBURSEMENT_SAVE', 'SUCCESS', {
     sourceId,
     simulated: Boolean(erpResult.simulated),
     erpMode: nextRecord.erpMode,
@@ -765,6 +861,7 @@ export function markPushedToErp(sourceId, erpResult, options = {}) {
     erpFid: erpResult.erpFid,
     erpNumber: erpResult.erpNumber
   });
+  persistState(state);
   return structuredClone(nextRecord);
 }
 
@@ -781,14 +878,14 @@ export function restoreErpPushAfterRetryFailure(sourceId, previousRecord, error)
     updateTime: now()
   };
   state.voucherRecords[sourceId] = nextRecord;
-  persistState(state);
-  recordOperation('ERP_EXPENSE_REIMBURSEMENT_RETRY', 'FAILED', {
+  appendOperation(state, 'ERP_EXPENSE_REIMBURSEMENT_RETRY', 'FAILED', {
     sourceId,
     erpFid: nextRecord.erpFid,
     erpNumber: nextRecord.erpNumber,
     code: nextRecord.lastErpRetryErrorCode,
     message: nextRecord.lastErpRetryErrorMessage
   });
+  persistState(state);
   return structuredClone(nextRecord);
 }
 
@@ -803,6 +900,12 @@ export function discardPreparedRecord(sourceId) {
 
 export function recordOperation(action, status, detail = {}) {
   const state = loadState();
+  const entry = appendOperation(state, action, status, detail);
+  persistState(state);
+  return structuredClone(entry);
+}
+
+function appendOperation(state, action, status, detail = {}) {
   const entry = {
     id: nextId('LOG'),
     action,
@@ -812,8 +915,7 @@ export function recordOperation(action, status, detail = {}) {
   };
   state.operationLogs.unshift(entry);
   state.operationLogs = state.operationLogs.slice(0, 200);
-  persistState(state);
-  return structuredClone(entry);
+  return entry;
 }
 
 export function clearStateCacheForTest() {
@@ -877,7 +979,45 @@ function loadState() {
 function persistState(state) {
   const file = getStateFile();
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify(state, null, 2), 'utf8');
+  const temporaryFile = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  try {
+    writeFileSync(temporaryFile, JSON.stringify(state, null, 2), 'utf8');
+    renameStateFileWithRetry(temporaryFile, file);
+  } finally {
+    if (existsSync(temporaryFile)) {
+      rmSync(temporaryFile, { force: true });
+    }
+  }
+}
+
+const STATE_RENAME_RETRY_DELAYS_MS = [25, 50, 100, 200, 400, 800, 1000, 1500];
+
+function renameStateFileWithRetry(
+  temporaryFile,
+  targetFile,
+  renameFile = renameSync,
+  wait = sleepSync
+) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      renameFile(temporaryFile, targetFile);
+      return;
+    } catch (error) {
+      const retryable = ['EPERM', 'EBUSY', 'EACCES'].includes(error?.code);
+      if (!retryable || attempt >= STATE_RENAME_RETRY_DELAYS_MS.length) {
+        throw error;
+      }
+      wait(STATE_RENAME_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
+
+function sleepSync(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+export function renameStateFileWithRetryForTest(temporaryFile, targetFile, renameFile, wait) {
+  return renameStateFileWithRetry(temporaryFile, targetFile, renameFile, wait);
 }
 
 function getStateFile() {
@@ -921,6 +1061,13 @@ function normalizeState(rawState = {}) {
   };
   state.kingdee.selectedAccountKey = state.integrationSelection.kingdeeAccountKey;
   state.kingdee.selectedAcctIdKey = state.integrationSelection.kingdeeAcctIdKey;
+  state.voucherRecords = Object.fromEntries(Object.entries(state.voucherRecords || {}).map(
+    ([sourceId, record]) => [sourceId, {
+      ...record,
+      kingdeeAcctIdKey: record.kingdeeAcctIdKey || DEFAULT_KINGDEE_ACCT_ID_KEY,
+      previousErpPushes: compactPreviousErpPushes(record.previousErpPushes)
+    }]
+  ));
   return state;
 }
 
@@ -976,12 +1123,23 @@ export function isRealPushedRecord(record) {
 
 function previousErpPushesEntry(record) {
   return {
+    kingdeeAcctIdKey: record.kingdeeAcctIdKey || DEFAULT_KINGDEE_ACCT_ID_KEY,
     erpFid: record.erpFid,
     erpNumber: record.erpNumber,
     erpDocumentStatus: record.erpDocumentStatus,
-    erpRawResponse: record.erpRawResponse,
     replacedAt: now()
   };
+}
+
+function compactPreviousErpPushes(entries) {
+  if (!Array.isArray(entries)) return entries;
+  return entries.map((entry) => ({
+    kingdeeAcctIdKey: entry.kingdeeAcctIdKey || DEFAULT_KINGDEE_ACCT_ID_KEY,
+    erpFid: entry.erpFid,
+    erpNumber: entry.erpNumber,
+    erpDocumentStatus: entry.erpDocumentStatus,
+    replacedAt: entry.replacedAt
+  }));
 }
 
 function nextId(prefix) {

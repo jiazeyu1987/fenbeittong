@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseFenbeitongDetail } from '../src/fenbeitong-detail.js';
 
-test('uses the latest expense occurrence date instead of the approval date', () => {
+test('uses the Fenbeitong submission date as the offline application date', () => {
   const parsed = parseFenbeitongDetail(JSON.stringify({
     code: 0,
     data: {
@@ -39,7 +39,8 @@ test('uses the latest expense occurrence date instead of the approval date', () 
     }
   }));
 
-  assert.equal(parsed.applicationDate, '2026-06-18');
+  assert.equal(parsed.applicationDate, '2026-07-20');
+  assert.equal(parsed.applicationDateSource, 'FENBEITONG_SUBMISSION_DATE');
   assert.equal(parsed.sourceDocumentStatus, '已审核');
   assert.deepEqual(parsed.expenses.map((expense) => expense.expenseDate), [
     '2026-06-03',
@@ -47,7 +48,7 @@ test('uses the latest expense occurrence date instead of the approval date', () 
   ]);
 });
 
-test('uses invoice tax and excluding-tax amounts instead of deductible custom fields', () => {
+test('uses exact full-invoice values when Fenbeitong custom split fields do not balance', () => {
   const parsed = parseFenbeitongDetail(JSON.stringify({
     code: 0,
     data: {
@@ -64,23 +65,75 @@ test('uses invoice tax and excluding-tax amounts instead of deductible custom fi
         cost_attributions: [],
         invoices: [{
           id: 'SOURCE-SPLIT-INVOICE',
+          type: 10130,
+          code: '0123456789',
+          number: '9876543210',
+          issued_time: '2026-04-01',
+          seller_name: '销售方公司',
+          seller_tax_code: 'SELLER-TAX-ID',
+          buyer_name: '购买方公司',
+          buyer_tax_code: 'BUYER-TAX-ID',
           total_amount: 47.7,
           used_amount: 47.7,
-          tax_amount: 9.99,
-          exclude_tax_amount: 37.71
+          tax_amount: 1.39,
+          exclude_tax_amount: 46.31
         }],
         cost_custom_fields: [
           { field_code: 'date_of_expense', detail: '2026-04-02 00:00:00' },
           { field_code: 'deductible_tax', detail: '1.39' },
-          { field_code: 'untaxed_amount', detail: '47.70' }
+          { field_code: 'untaxed_amount', detail: '47.70' },
+          {
+            field_code: 'invoice_info',
+            detail: {
+              invoiceList: [{
+                fbInvId: 'SOURCE-SPLIT-INVOICE',
+                invTypeName: '电子发票（增值税普通发票）'
+              }]
+            }
+          }
         ]
       }]
     }
   }));
 
   assert.equal(parsed.expenses[0].expenseDate, '2026-04-02');
-  assert.equal(parsed.expenses[0].splitTaxAmount, 9.99);
-  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 37.71);
+  assert.equal(parsed.expenses[0].splitTaxAmount, 1.39);
+  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 46.31);
+  assert.equal(
+    parsed.expenses[0].taxSplitSource,
+    'FENBEITONG_FULL_INVOICE_FIELDS_AFTER_INVALID_SPLIT'
+  );
+  assert.equal(parsed.expenses[0].correctedInvalidSourceSplitFromInvoice, true);
+  assert.equal(parsed.expenses[0].sourceSplitTaxAmount, 1.39);
+  assert.equal(parsed.expenses[0].sourceSplitExcludingTaxAmount, 47.7);
+  const invoice = parsed.expenses[0].invoices[0];
+  assert.deepEqual({
+    typeCode: invoice.typeCode,
+    typeName: invoice.typeName,
+    code: invoice.code,
+    number: invoice.number,
+    issuedDate: invoice.issuedDate,
+    sellerName: invoice.sellerName,
+    sellerTaxNumber: invoice.sellerTaxNumber,
+    buyerName: invoice.buyerName,
+    buyerTaxNumber: invoice.buyerTaxNumber,
+    exactTaxAmount: invoice.exactTaxAmount,
+    exactExcludingTaxAmount: invoice.exactExcludingTaxAmount,
+    exactTotalAmount: invoice.exactTotalAmount
+  }, {
+    typeCode: '10130',
+    typeName: '电子发票（增值税普通发票）',
+    code: '0123456789',
+    number: '9876543210',
+    issuedDate: '2026-04-01',
+    sellerName: '销售方公司',
+    sellerTaxNumber: 'SELLER-TAX-ID',
+    buyerName: '购买方公司',
+    buyerTaxNumber: 'BUYER-TAX-ID',
+    exactTaxAmount: 1.39,
+    exactExcludingTaxAmount: 46.31,
+    exactTotalAmount: 47.7
+  });
 });
 
 test('does not substitute deductible tax for a missing exact tax and net pair', () => {
@@ -118,7 +171,7 @@ test('does not substitute deductible tax for a missing exact tax and net pair', 
   assert.equal(parsed.expenses[0].taxMappingComplete, false);
 });
 
-test('uses an explicit expense tax and net pair returned by Fenbeitong', () => {
+test('does not use generic tax fields in place of Fenbeitong deductible tax', () => {
   const parsed = parseFenbeitongDetail(JSON.stringify({
     code: 0,
     data: {
@@ -149,12 +202,12 @@ test('uses an explicit expense tax and net pair returned by Fenbeitong', () => {
     }
   }));
 
-  assert.equal(parsed.expenses[0].splitTaxAmount, 11.8);
-  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 89.98);
-  assert.equal(parsed.expenses[0].taxMappingComplete, true);
+  assert.equal(parsed.expenses[0].splitTaxAmount, null);
+  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, null);
+  assert.equal(parsed.expenses[0].taxMappingComplete, false);
 });
 
-test('does not treat deductible tax plus untaxed amount as total tax and net', () => {
+test('uses Fenbeitong deductible tax and untaxed amount exactly', () => {
   const parsed = parseFenbeitongDetail(JSON.stringify({
     code: 0,
     data: {
@@ -184,9 +237,9 @@ test('does not treat deductible tax plus untaxed amount as total tax and net', (
     }
   }));
 
-  assert.equal(parsed.expenses[0].splitTaxAmount, null);
-  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, null);
-  assert.equal(parsed.expenses[0].taxMappingComplete, false);
+  assert.equal(parsed.expenses[0].splitTaxAmount, 0);
+  assert.equal(parsed.expenses[0].splitExcludingTaxAmount, 101);
+  assert.equal(parsed.expenses[0].taxMappingComplete, true);
 });
 
 test('leaves partially used invoice splits empty even when an old override id is present', () => {
@@ -282,7 +335,7 @@ test('does not invent 1.01 and 99.99 when Fenbeitong only returns whole-invoice 
   assert.equal(parsed.expenses[0].taxMappingComplete, false);
 });
 
-test('uses exact full-invoice fields and leaves every partial invoice split empty', () => {
+test('leaves tax fields empty when deductible tax and untaxed amount are absent', () => {
   const invoiceGroups = [
     [[394, 300, 0]],
     [[498, 498, 28.19]],
@@ -332,11 +385,9 @@ test('uses exact full-invoice fields and leaves every partial invoice split empt
     }
   }));
 
-  assert.equal(parsed.expenses.length, 20);
-  assert.deepEqual(parsed.expenses.map((expense) => expense.splitTaxAmount), [
-    null, 28.19, 0.77, 0.03, 3.17, 0.19, 12.23, 4.53, 0.42, 0.12,
-    5.66, 19.24, null, 0.77, 0.03, 0.74, 0.45, null, null, null
-  ]);
+  assert.equal(parsed.expenses.length, 16);
+  assert.ok(parsed.expenses.every((expense) => expense.splitTaxAmount === null));
+  assert.ok(parsed.expenses.every((expense) => expense.splitExcludingTaxAmount === null));
   assert.equal(parsed.totalAmount, 3188.76);
   assert.equal(parsed.splitTaxAmount, null);
   assert.equal(parsed.splitExcludingTaxAmount, null);
@@ -418,6 +469,33 @@ test('normalizes online route, purpose, traffic type and direct department field
   assert.equal(parsed.expenses[0].trafficType, '\u7528\u8f66');
   assert.equal(parsed.expenses[0].purpose, '\u5546\u52a1\u6d3d\u8c08');
   assert.equal(parsed.expenses[0].businessLine, '\u7528\u8f66');
+});
+
+test('online expense date uses the issued-bill order creation time only', () => {
+  const parsed = parseFenbeitongDetail(JSON.stringify({
+    code: 0,
+    data: {
+      source_kind: 'ONLINE_MONTHLY_BILL',
+      bill_no: 'BILL-DATE-001',
+      settlement_month: '202607',
+      order: {
+        order_category: 3,
+        order_id: 'ORDER-DATE-001',
+        order_create_time: '2026-06-30 15:20:26',
+        reimbursement_date_time: '2026-07-01 00:00:00',
+        start_time: '2026-07-03 08:00:00',
+        end_time: '2026-07-03 09:00:00',
+        employee_name: 'Tester',
+        business_line_name: '\u7528\u8f66',
+        repayment_total_amount: 100,
+        reference_deductible_total_amount: 0,
+        reference_non_deductible_amount: 100
+      }
+    }
+  }));
+
+  assert.equal(parsed.expenses[0].expenseDateTime, '2026-06-30 15:20:26');
+  assert.equal(parsed.expenses[0].expenseDate, '2026-06-30');
 });
 
 test('uses source-native hotel, dining, and express locations without inventing cities', () => {
@@ -582,6 +660,7 @@ test('combines one employee month into one online document with one detail per o
       group_bill_no: 'FBT202607X001',
       bill_no: 'FBT202607X001',
       settlement_month: '2026-07',
+      bill_cycle: '2026/07/01-2026/07/31',
       orders: [
         {
           ...common,
@@ -604,7 +683,8 @@ test('combines one employee month into one online document with one detail per o
   assert.equal(parsed.reimbursementId, 'ONLINE-MONTH:puhui:X001:202607');
   assert.equal(parsed.reimbursementCode, 'FBT202607X001');
   assert.equal(parsed.userCode, 'X001');
-  assert.equal(parsed.applicationDate, '2026-07-22');
+  assert.equal(parsed.applicationDate, '2026-07-01');
+  assert.equal(parsed.applicationDateSource, 'FENBEITONG_MONTHLY_SETTLEMENT_DATE');
   assert.equal(parsed.expenses.length, 2);
   assert.equal(parsed.totalAmount, 257.72);
   assert.equal(parsed.splitExcludingTaxAmount, 257.72);

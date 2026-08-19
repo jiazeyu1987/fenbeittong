@@ -27,10 +27,6 @@ export function startScheduler() {
   schedulerState.autoPushErp = config.autoPushErp;
 
   if (!config.enabled) {
-    recordOperation('SCHEDULER_DISABLED', 'SUCCESS', {
-      intervalSeconds: config.intervalSeconds,
-      autoPushErp: config.autoPushErp
-    });
     return getSchedulerStatus();
   }
 
@@ -43,10 +39,6 @@ export function startScheduler() {
     });
   }, config.intervalSeconds * 1000);
   timer.unref?.();
-  recordOperation('SCHEDULER_STARTED', 'SUCCESS', {
-    intervalSeconds: config.intervalSeconds,
-    autoPushErp: config.autoPushErp
-  });
   return getSchedulerStatus();
 }
 

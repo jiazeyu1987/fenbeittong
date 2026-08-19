@@ -9,6 +9,7 @@ import {
 } from '../tenant-store.js';
 
 const APPROVED_REIMBURSEMENT_STATE = 4;
+const REIMBURSEMENT_PAYMENT_UPDATE_PATH = '/openapi/reimbursement/v1/update_state';
 
 export function clearFenbeitongTokenCacheForTest() {
   const tenant = getFenbeitongTenant('puhui', { includeSecrets: true });
@@ -61,7 +62,22 @@ export async function pullFenbeitongReimbursements(options = {}) {
       document: validateDetailDocument(detailBody)
     };
   });
-  const eligibleReimbursements = detailedReimbursements.filter(({ document }) => (
+  const filteredReimbursements = detailedReimbursements.map(({ summary, document }) => {
+    const filtered = filterExpensesWithoutDepartmentAttributionAmount(document);
+    return {
+      summary,
+      document: filtered.document,
+      skippedExpenseCount: filtered.skippedExpenseCount
+    };
+  });
+  const skippedExpenseCount = filteredReimbursements.reduce(
+    (total, item) => total + item.skippedExpenseCount,
+    0
+  );
+  const expenseFilterWarnings = skippedExpenseCount > 0
+    ? [`Fenbeitong returned ${skippedExpenseCount} expense row(s) without a department attribution amount; those rows were skipped.`]
+    : [];
+  const eligibleReimbursements = filteredReimbursements.filter(({ document }) => (
     hasOfflineExpenseType(document)
   ));
   const requesters = reimbursementRequesterCatalog(eligibleReimbursements.map(({ summary }) => summary));
@@ -76,7 +92,7 @@ export async function pullFenbeitongReimbursements(options = {}) {
       mockReason: '',
       documents,
       requesters,
-      sourceWarnings: []
+      sourceWarnings: expenseFilterWarnings
     };
   }
   const onlineResult = await pullSettlementBillDocuments(tenant, accessToken);
@@ -88,8 +104,142 @@ export async function pullFenbeitongReimbursements(options = {}) {
     mockReason: '',
     documents,
     requesters,
-    sourceWarnings: onlineResult.warnings
+    sourceWarnings: [...expenseFilterWarnings, ...onlineResult.warnings]
   };
+}
+
+export async function listFenbeitongReimbursementPaymentStates(options = {}) {
+  const config = getAppConfig().fenbeitong;
+  if (config.mode !== 'real') {
+    throw dependencyError(
+      'FENBEITONG_REAL_MODE_REQUIRED',
+      'Fenbeitong payment status query requires FENBEITONG_MODE=real'
+    );
+  }
+  const tenant = resolveTenant(config.defaultTenantKey, options.tenantKey);
+  validateFenbeitongConfig(tenant);
+  const accessToken = await resolveAccessToken(tenant);
+  const summaries = await pullAllReimbursementSummaries(tenant, accessToken, {
+    ...tenant.listPayload,
+    ...config.listPayloadOverrides,
+    page_index: 1,
+    page_size: Math.min(20, Math.max(1, Number(options.pageSize) || 20))
+  });
+  return summaries.map(normalizeReimbursementPaymentState).filter((item) => item.code);
+}
+
+export async function getFenbeitongReimbursementPaymentDetail(code, options = {}) {
+  const reimbursementCode = String(code || '').trim();
+  if (!reimbursementCode) {
+    throw dependencyError('FENBEITONG_REIMBURSEMENT_CODE_REQUIRED', 'Fenbeitong reimbursement code is required');
+  }
+  const config = getAppConfig().fenbeitong;
+  if (config.mode !== 'real') {
+    throw dependencyError(
+      'FENBEITONG_REAL_MODE_REQUIRED',
+      'Fenbeitong payment detail query requires FENBEITONG_MODE=real'
+    );
+  }
+  const tenant = resolveTenant(config.defaultTenantKey, options.tenantKey);
+  validateFenbeitongConfig(tenant);
+  const accessToken = await resolveAccessToken(tenant);
+  const body = await postFenbeitongApi(tenant, tenant.detailPath, accessToken, {
+    reimb_code: reimbursementCode
+  });
+  const data = body?.data && typeof body.data === 'object' ? body.data : {};
+  return {
+    ...normalizeReimbursementPaymentState(data),
+    paymentTime: firstOrderText(data.payment_time, data.pay_time),
+    paymentRecords: Array.isArray(data.payment_records) ? data.payment_records : [],
+    raw: data
+  };
+}
+
+export async function markFenbeitongReimbursementsPaid(items, options = {}) {
+  const reimbursements = normalizePaymentUpdates(Array.isArray(items) ? items : [items]);
+  if (reimbursements.length === 0) {
+    return { requested: 0, succeeded: [], failed: [] };
+  }
+  const config = getAppConfig().fenbeitong;
+  if (config.mode !== 'real') {
+    throw dependencyError(
+      'FENBEITONG_REAL_MODE_REQUIRED',
+      'Fenbeitong payment status update requires FENBEITONG_MODE=real'
+    );
+  }
+  const tenant = resolveTenant(config.defaultTenantKey, options.tenantKey);
+  validateFenbeitongConfig(tenant);
+  const accessToken = await resolveAccessToken(tenant);
+  const succeeded = [];
+  const failed = [];
+  for (const batch of chunk(reimbursements, 20)) {
+    const body = await postFenbeitongApiRaw(
+      tenant,
+      REIMBURSEMENT_PAYMENT_UPDATE_PATH,
+      accessToken,
+      {
+        reimbursements: batch.map((item) => ({
+          code: item.code,
+          payment_time: item.paymentTime
+        }))
+      }
+    );
+    if (String(body.code) === '0') {
+      succeeded.push(...batch.map((item) => item.code));
+      continue;
+    }
+    if (String(body.code) !== '1' || !Array.isArray(body.data)) {
+      throw dependencyError(
+        'FENBEITONG_PAYMENT_UPDATE_FAILED',
+        `Fenbeitong payment status update failed: code=${body.code}, msg=${body.msg || ''}`,
+        { code: body.code, msg: body.msg || '' }
+      );
+    }
+    const errorsByCode = new Map(body.data.map((item) => [
+      String(item?.no || item?.code || item?.id || '').trim(),
+      String(item?.error_msg || item?.msg || body.msg || '付款状态更新失败').trim()
+    ]));
+    for (const { code } of batch) {
+      const message = errorsByCode.get(code);
+      if (message) failed.push({ code, message });
+      else succeeded.push(code);
+    }
+  }
+  return { requested: reimbursements.length, succeeded, failed };
+}
+
+function normalizePaymentUpdates(items) {
+  const byCode = new Map();
+  for (const item of items) {
+    const code = String(item?.code || '').trim();
+    const paymentTime = fenbeitongPaymentTime(item?.paymentTime);
+    if (!code) continue;
+    if (!paymentTime) {
+      throw dependencyError(
+        'FENBEITONG_PAYMENT_TIME_REQUIRED',
+        `Fenbeitong payment status update requires the ERP payment business date: ${code}`
+      );
+    }
+    const existing = byCode.get(code);
+    if (existing && existing.paymentTime !== paymentTime) {
+      throw dependencyError(
+        'FENBEITONG_PAYMENT_TIME_CONFLICT',
+        `Fenbeitong payment status update received conflicting ERP payment dates: ${code}`
+      );
+    }
+    byCode.set(code, { code, paymentTime });
+  }
+  return [...byCode.values()];
+}
+
+function fenbeitongPaymentTime(value) {
+  const match = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/.exec(
+    String(value || '').trim()
+  );
+  if (!match) return '';
+  const date = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+  if (!match[4]) return `${date} 00:00:00`;
+  return `${date} ${match[4].padStart(2, '0')}:${match[5].padStart(2, '0')}:${String(match[6] || '00').padStart(2, '0')}`;
 }
 
 async function pullSettlementBillDocuments(tenant, accessToken) {
@@ -247,6 +397,11 @@ function buildSettlementBillDocument(bill, row, rowIndex, resolvedSourceDetailId
     `${billNumber}:${rowIndex + 1}`
   );
   const sourceDetailId = resolvedSourceDetailId || settlementSourceDetailId(row, orderId, rowIndex);
+  // The issued enterprise-bill detail field order_create_time is labelled
+  // "线上预订/退票/下单日期时间" in Fenbeitong. It is the authoritative
+  // expense occurrence time for every online booking, refund, and order row.
+  // Travel start/end times describe service usage and must never replace it.
+  const orderDateTime = firstOrderText(row.order_create_time);
   return {
     code: '0',
     msg: 'success',
@@ -268,7 +423,7 @@ function buildSettlementBillDocument(bill, row, rowIndex, resolvedSourceDetailId
         order_id: orderId,
         source_order_id: firstOrderText(row.root_order_id, row.source_order_id, orderId),
         source_detail_id: sourceDetailId,
-        order_create_time: firstOrderText(row.order_create_time, row.start_time, row.end_time),
+        order_create_time: orderDateTime,
         employee_name: booker.name,
         third_employee_id: booker.employeeCode,
         department_name: booker.departmentName,
@@ -290,7 +445,7 @@ function buildSettlementBillDocument(bill, row, rowIndex, resolvedSourceDetailId
         from_station_name: firstOrderText(row.start_address_name, row.start_adress_name, row.from_station_name),
         arrival_name: firstOrderText(row.end_city_name, row.arrival_name, row.arrival_city),
         to_station_name: firstOrderText(row.end_address_name, row.end_adress_name, row.to_station_name),
-        reimbursement_date_time: firstOrderText(row.order_create_time, row.start_time, row.end_time)
+        reimbursement_date_time: orderDateTime
       }
     }
   };
@@ -430,7 +585,11 @@ function settlementBillMonth(bill) {
   // bill_cycle is the accounting period shown in “结算入账 → 已出账单”.
   // start_time/end_time can be the month in which the bill was issued, so they
   // must not be used to guess the accounting period.
-  return monthText(firstOrderText(bill?.bill_cycle, bill?.cycle));
+  return lastMonthText(firstOrderText(bill?.bill_cycle, bill?.cycle));
+}
+
+export function settlementBillMonthForTest(bill) {
+  return settlementBillMonth(bill);
 }
 
 function settlementEnterprisePaymentAmount(row) {
@@ -506,9 +665,8 @@ async function postFenbeitongBillApi(tenant, path, accessToken, data) {
   const sign = createHash('md5')
     .update(`timestamp=${timestamp}&data=${jsonData}&sign_key=${tenant.billSignKey}`, 'utf8')
     .digest('hex');
-  const response = await fetch(new URL(path, tenant.billBaseUrl || tenant.baseUrl), {
+  const { response, body } = await fetchFenbeitongJson(new URL(path, tenant.billBaseUrl || tenant.baseUrl), {
     method: 'POST',
-    signal: AbortSignal.timeout(30_000),
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded'
     },
@@ -519,7 +677,6 @@ async function postFenbeitongBillApi(tenant, path, accessToken, data) {
       data: jsonData
     })
   });
-  const body = await response.json();
   if (!response.ok) {
     throw dependencyError(
       'FENBEITONG_BILL_HTTP_FAILED',
@@ -930,6 +1087,15 @@ function monthText(value) {
   return matched ? `${matched[1]}${matched[2]}` : '';
 }
 
+function lastMonthText(value) {
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return monthText(value);
+  }
+  const matches = [...String(value || '').matchAll(/(20\d{2})[-/]?(0[1-9]|1[0-2])/g)];
+  const matched = matches.at(-1);
+  return matched ? `${matched[1]}${matched[2]}` : '';
+}
+
 async function mapWithConcurrency(items, concurrency, worker) {
   const results = new Array(items.length);
   let nextIndex = 0;
@@ -1020,9 +1186,8 @@ async function resolveAccessToken(tenant) {
     return tenant.accessToken;
   }
   const url = new URL(tenant.authPath, tenant.baseUrl);
-  const response = await fetch(url, {
+  const { response, body } = await fetchFenbeitongJson(url, {
     method: 'POST',
-    signal: AbortSignal.timeout(30_000),
     headers: {
       'Content-Type': 'application/json'
     },
@@ -1031,7 +1196,6 @@ async function resolveAccessToken(tenant) {
       app_key: tenant.appKey
     })
   });
-  const body = await response.json();
   if (!response.ok) {
     throw dependencyError('FENBEITONG_AUTH_HTTP_FAILED', `Fenbeitong auth failed: HTTP ${response.status}`, {
       status: response.status
@@ -1055,22 +1219,7 @@ async function resolveAccessToken(tenant) {
 }
 
 async function postFenbeitongApi(tenant, path, accessToken, payload) {
-  const url = new URL(path, tenant.baseUrl);
-  const response = await fetch(url, {
-    method: 'POST',
-    signal: AbortSignal.timeout(30_000),
-    headers: {
-      'Content-Type': 'application/json',
-      'access-token': accessToken
-    },
-    body: JSON.stringify(payload)
-  });
-  const body = await response.json();
-  if (!response.ok) {
-    throw dependencyError('FENBEITONG_HTTP_FAILED', `Fenbeitong request failed: HTTP ${response.status}`, {
-      status: response.status
-    });
-  }
+  const body = await postFenbeitongApiRaw(tenant, path, accessToken, payload);
   if (String(body.code) !== '0') {
     throw dependencyError('FENBEITONG_RESPONSE_FAILED', `Fenbeitong response failed: code=${body.code}, msg=${body.msg || ''}`, {
       code: body.code,
@@ -1078,6 +1227,89 @@ async function postFenbeitongApi(tenant, path, accessToken, payload) {
     });
   }
   return body;
+}
+
+async function postFenbeitongApiRaw(tenant, path, accessToken, payload) {
+  const url = new URL(path, tenant.baseUrl);
+  const { response, body } = await fetchFenbeitongJson(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'access-token': accessToken
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw dependencyError('FENBEITONG_HTTP_FAILED', `Fenbeitong request failed: HTTP ${response.status}`, {
+      status: response.status
+    });
+  }
+  return body;
+}
+
+async function fetchFenbeitongJson(url, options, maxAttempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: AbortSignal.timeout(30_000)
+      });
+      const body = await response.json();
+      if (isRetryableHttpStatus(response.status) && attempt < maxAttempts) {
+        await retryDelay(attempt);
+        continue;
+      }
+      return { response, body };
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts) {
+        await retryDelay(attempt);
+        continue;
+      }
+    }
+  }
+  throw dependencyError(
+    'FENBEITONG_NETWORK_FAILED',
+    `无法连接分贝通服务，已自动重试 ${maxAttempts} 次。`,
+    { cause: String(lastError?.message || lastError || '') }
+  );
+}
+
+function isRetryableHttpStatus(status) {
+  return [408, 425, 429, 500, 502, 503, 504].includes(Number(status));
+}
+
+function retryDelay(attempt) {
+  return new Promise((resolve) => setTimeout(resolve, attempt * 500));
+}
+
+function normalizeReimbursementPaymentState(summary = {}) {
+  return {
+    id: firstOrderText(summary.reimb_id, summary.id),
+    code: firstOrderText(
+      summary.reimb_code,
+      summary.reimburse_code,
+      summary.code,
+      typeof summary.id === 'string' && /^B/i.test(summary.id) ? summary.id : ''
+    ),
+    applyState: Number(summary.apply_state),
+    applyStateName: firstOrderText(summary.apply_state_name),
+    paymentState: Number(summary.payment_state),
+    paymentStateName: firstOrderText(summary.payment_state_name),
+    paymentAmount: Number(summary.payment_amount || 0),
+    totalAmount: Number(summary.total_amount || 0),
+    proposerName: firstOrderText(summary.proposer_name, summary.user_name, summary.submitter_name),
+    proposerCode: firstOrderText(summary.third_proposer_id, summary.proposer_id, summary.user_code)
+  };
+}
+
+function chunk(values, size) {
+  const groups = [];
+  for (let index = 0; index < values.length; index += size) {
+    groups.push(values.slice(index, index + size));
+  }
+  return groups;
 }
 
 function extractReimbursementSummaries(body) {
@@ -1139,6 +1371,38 @@ function hasOfflineExpenseType(document) {
   ].some((value) => String(value || '').trim()));
 }
 
+function filterExpensesWithoutDepartmentAttributionAmount(document) {
+  const sourceExpenses = Array.isArray(document?.data?.expenses)
+    ? document.data.expenses
+    : [];
+  const expenses = sourceExpenses.filter(hasDepartmentAttributionAmount);
+  return {
+    document: expenses.length === sourceExpenses.length
+      ? document
+      : {
+        ...document,
+        data: {
+          ...document.data,
+          expenses,
+          expense_number: expenses.length
+        }
+      },
+    skippedExpenseCount: sourceExpenses.length - expenses.length
+  };
+}
+
+function hasDepartmentAttributionAmount(expense) {
+  for (const attribution of Array.isArray(expense?.cost_attributions) ? expense.cost_attributions : []) {
+    if (Number(attribution?.type) !== 1) continue;
+    for (const detail of Array.isArray(attribution?.details) ? attribution.details : []) {
+      const rawAmount = detail?.amount;
+      if (rawAmount === undefined || rawAmount === null || String(rawAmount).trim() === '') continue;
+      if (Number.isFinite(Number(rawAmount))) return true;
+    }
+  }
+  return false;
+}
+
 function hasApprovedReimbursementState(summary) {
   return Number(summary?.apply_state) === APPROVED_REIMBURSEMENT_STATE;
 }
@@ -1168,6 +1432,10 @@ function reimbursementRequesterCatalog(summaries) {
 
 export function hasOfflineExpenseTypeForTest(document) {
   return hasOfflineExpenseType(document);
+}
+
+export function filterExpensesWithoutDepartmentAttributionAmountForTest(document) {
+  return filterExpensesWithoutDepartmentAttributionAmount(document);
 }
 
 function buildMockReimbursements(baseDocument, count) {

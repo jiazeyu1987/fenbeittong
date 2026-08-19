@@ -28,7 +28,11 @@ export function buildMockTemplate() {
       CI017: 'CI017',
       CI019: 'CI019',
       CI020: 'CI020',
-      CI021: 'CI021'
+      CI021: 'CI021',
+      CI022: 'CI022',
+      10037: 'FYXM13_SYS',
+      10039: 'FYXM13_SYS',
+      10043: 'FYXM13_SYS'
     },
     currencyNumbers: { CNY: 'PRE001' },
     exchangeRateTypeNumber: 'HLTX01_SYS',

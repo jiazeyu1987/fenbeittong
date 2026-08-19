@@ -61,13 +61,14 @@ test('payload writes only Kingdee ER_ExpReimbursement fields', () => {
   assert.equal(preview.payload.Model.FBillTypeID.FNumber, 'FYBXD001_SYS');
   assert.equal(preview.payload.Model.FProposerID.FStaffNumber, 'PH022');
   assert.equal(preview.payload.Model.FRequestDeptID.FNumber, 'BM000006');
-  assert.equal(preview.payload.Model.FRequestType, '0');
-  assert.equal(preview.payload.Model.FRealPay, false);
+  assert.equal(preview.payload.Model.FRequestType, '1');
+  assert.equal(preview.payload.Model.FRealPay, true);
   assert.equal(preview.payload.Model.FReqAmountSum, 228);
   assert.ok(Object.hasOwn(preview.payload.Model, 'FEntity'));
   assert.equal(preview.payload.Model.FEntity[0].FExpID.FNumber, 'CI011');
   assert.equal(preview.payload.Model.FEntity[0].FExpenseDeptEntryID, null);
   assert.equal(preview.payload.Model.FEntity[0].FExpSubmitAmount, 108);
+  assert.equal(preview.payload.Model.FEntity[0].FTaxSubmitAmt, 101.89);
   assert.equal(preview.payload.Model.FEntity[0].FRequestAmount, 108);
   assert.equal(preview.payload.Model.FEntity[0].FTaxAmt, 6.11);
   assert.doesNotMatch(JSON.stringify(preview.payload), /GL_VOUCHER|FVOUCHERID|FAccountBookID|FVOUCHERGROUPID|FDEBIT|FCREDIT/);
@@ -210,6 +211,7 @@ test('real Fenbeitong app-key mode obtains token from official getToken endpoint
           reimbursements: [
             {
               id: 'REAL-REIMB-001',
+              apply_state: 4,
               proposer_name: 'Real User',
               total_amount: '100.00'
             }
@@ -240,6 +242,9 @@ test('real Fenbeitong app-key mode obtains token from official getToken endpoint
             id: 'EXP-001',
             cost_category: { code: 'TRAVEL', name: 'Travel' },
             total_amount: '100.00',
+            cost_attributions: [
+              { type: 1, details: [{ amount: '100.00' }] }
+            ],
             invoices: []
           }
         ]
@@ -298,6 +303,7 @@ test('real Fenbeitong app-key mode pulls reimbursement detail after list summary
           reimbursements: [
             {
               id: 'REAL-CODE-001',
+              apply_state: 4,
               proposer_name: 'List User',
               total_amount: '100.00'
             }
@@ -336,6 +342,9 @@ test('real Fenbeitong app-key mode pulls reimbursement detail after list summary
             cost_category: { code: 'TRAVEL', name: 'Travel' },
             total_amount: '100.00',
             reason: 'Travel expense',
+            cost_attributions: [
+              { type: 1, details: [{ amount: '100.00' }] }
+            ],
             invoices: []
           }
         ]

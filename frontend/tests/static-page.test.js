@@ -17,6 +17,7 @@ test('frontend page exposes expected workflow controls', () => {
     'matchModeSelect',
     'sourceSearchInput',
     'requesterFilterSelect',
+    'saveStatusFilterSelect',
     'sourceTypeFilterSelect',
     'dateFilterSelect',
     'queryLedgerButton',
@@ -30,6 +31,19 @@ test('frontend page exposes expected workflow controls', () => {
     'resetButton',
     'columnSettingsButton',
     'columnSettingsPanel',
+    'fieldMappingButton',
+    'fieldMappingPanel',
+    'expenseItemNumberMappings',
+    'employeeDetailNumberMappings',
+    'departmentDetailNumberMappings',
+    'organizationNumberMappings',
+    'currencyNumbers',
+    'saveFieldMappingButton',
+    'resetFieldMappingButton',
+    'interfaceFieldSourceFilter',
+    'interfaceFieldQuery',
+    'interfaceFieldCount',
+    'interfaceFieldMappingBody',
     'paginationSummary',
     'pageSizeSelect',
     'previousPageButton',
@@ -73,12 +87,39 @@ test('frontend page exposes expected workflow controls', () => {
     'previewCreditTotal',
     'previewLineCount',
     'resultSummary',
+    'batchProgress',
+    'batchProgressText',
+    'batchProgressPercent',
+    'batchProgressFill',
+    'pauseSaveButton',
+    'retryFailedSaveButton',
     'technicalDetails',
     'recordsTable',
+    'operationLogPanel',
+    'logsUpdatedAt',
+    'refreshLogsButton',
     'logsList'
   ]) {
     assert.match(html, new RegExp(`id="${id}"`), `${id} should exist`);
   }
+  assert.match(html, /<option value="1000">1000\/page<\/option>/);
+  assert.match(html, /href="\/logs\.html"/);
+  assert.match(html, /src="\/assets\/spongebob-avatar-original\.jpg"/);
+});
+
+test('dedicated audit log page supports searchable filters', () => {
+  const html = readFileSync('frontend/src/logs.html', 'utf8');
+  const app = readFileSync('frontend/src/logs.js', 'utf8');
+  for (const id of [
+    'logQueryInput', 'logStatusSelect', 'logActionSelect', 'logStartDate', 'logEndDate',
+    'queryLogsButton', 'resetLogsButton', 'refreshLogCenterButton', 'logQuerySummary', 'logTableBody'
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(app, /api\.listLogs\(200\)/);
+  assert.match(app, /JSON\.stringify\(log\.detail/);
+  assert.match(app, /startDate\.value/);
+  assert.match(app, /endDate\.value/);
 });
 
 test('frontend is centered on a finance source document list', () => {
@@ -97,6 +138,14 @@ test('frontend is centered on a finance source document list', () => {
   assert.match(app, /kingdeeAccountKey: state\.selectedKingdeeAccountKey/);
   assert.match(app, /kingdeeAcctIdKey: state\.selectedKingdeeAcctIdKey/);
   assert.match(app, /api\.saveIntegrationSettings/);
+  assert.match(app, /api\.getConfig/);
+  assert.match(app, /interfaceFieldCatalog/);
+  assert.match(app, /filterInterfaceFieldCatalog/);
+  assert.match(app, /saveCsvToDesktop/);
+  assert.match(app, /parseFieldMapping\(fields\.expenseItemNumberMappings\.value/);
+  assert.match(app, /parseFieldMapping\(fields\.employeeDetailNumberMappings\.value/);
+  assert.match(app, /parseFieldMapping\(fields\.departmentDetailNumberMappings\.value/);
+  assert.match(app, /parseFieldMapping\(fields\.organizationNumberMappings\.value/);
   assert.match(app, /接口等待开发中/);
   assert.match(app, /syncFenbeitong\(\{ tenantKey: state\.selectedTenantKey \}\)/);
   assert.match(html, /生成费用报销单/);
@@ -121,14 +170,24 @@ test('frontend is centered on a finance source document list', () => {
   assert.match(app, /showOperationFeedback/);
   assert.match(app, /saveExpenseReimbursementRowToErp/);
   assert.match(app, /resaveSelectedToErp/);
-  assert.match(app, /重新保存至ERP成功/);
+  assert.match(app, /forceRetry:\s*initiallySavedSourceIds\.has\(record\.sourceId\)/);
+  assert.doesNotMatch(
+    app,
+    /uniqueExpenseReimbursementRecords\(selectedLedgerRecords\(\)\)\s*\.filter/
+  );
+  assert.match(app, /全部处理成功：首次保存/);
+  assert.match(app, /startBatchProgress/);
+  assert.match(app, /updateBatchProgress/);
+  assert.match(app, /finishBatchProgress/);
+  assert.match(app, /未全部完成，不显示保存成功/);
   assert.match(app, /已经保存到金蝶，无需重复保存/);
   assert.doesNotMatch(app, /options\.forceRetry \|\| state\.pushedSourceIds/);
   assert.match(app, /async function generateExpenseReimbursementsFromLedger\(\)[\s\S]*generateExpenseReimbursementForRecord\(record\)/);
   assert.match(app, /BATCH_PARTIAL_FAILURE/);
   assert.match(app, /其他单据已继续处理/);
   assert.match(app, /isMissingKingdeeEmployee/);
-  assert.match(app, /已跳过.*金蝶未建档人员/);
+  assert.match(app, /isSkippableKingdeeBusinessRule/);
+  assert.match(app, /按业务规则跳过/);
   assert.match(app, /controls\.primaryAction\.dataset\.action[\s\S]*'push'/);
   assert.match(app, /api\.saveErp/);
   assert.match(app, /api\.getProcess/);
@@ -138,6 +197,87 @@ test('frontend is centered on a finance source document list', () => {
   assert.doesNotMatch(app, /link\.click\(\)/);
   assert.match(app, /exported\.localPath/);
   assert.match(app, /保存成功/);
+});
+
+test('frontend exposes every requested Fenbeitong invoice column once', () => {
+  const html = readFileSync('frontend/src/index.html', 'utf8');
+  const app = readFileSync('frontend/src/app.js', 'utf8');
+  const columns = [
+    ['invoiceType', '发票类型'],
+    ['invoiceCode', '发票代码'],
+    ['invoiceNumber', '发票号码'],
+    ['invoiceIssueDate', '开票日期'],
+    ['sellerName', '销售方名称'],
+    ['buyerName', '购买方名称'],
+    ['invoiceTaxAmount', '发票税额'],
+    ['invoiceExcludingTaxAmount', '不计税金额'],
+    ['invoiceTotalAmount', '价税合计']
+  ];
+
+  for (const [key, label] of columns) {
+    assert.equal((html.match(new RegExp(`data-column-key="${key}"`, 'g')) || []).length, 1);
+    assert.match(html, new RegExp(`data-column-toggle="${key}"`));
+    assert.match(app, new RegExp(`key: '${key}', label: '${label}'`));
+  }
+  assert.doesNotMatch(html, /纳税人识别号/);
+  assert.doesNotMatch(app, /sellerTaxNumber|buyerTaxNumber/);
+});
+
+test('ledger fields follow the approved interface-field order everywhere', () => {
+  const html = readFileSync('frontend/src/index.html', 'utf8');
+  const app = readFileSync('frontend/src/app.js', 'utf8');
+  const expected = [
+    'status',
+    'sourceType',
+    'documentType',
+    'sourceCode',
+    'applicationDate',
+    'time',
+    'requester',
+    'employeeOpenBank',
+    'employeeAccountName',
+    'employeeBankAccount',
+    'departmentAttributionAmount',
+    'splitTaxAmount',
+    'splitExcludingTaxAmount',
+    'expenseCategories',
+    'businessLine',
+    'reason',
+    'expenseDepartment',
+    'department',
+    'erpPaymentBillType',
+    'erpBankProcessingStatus',
+    'erpPaymentDate',
+    'startLocation',
+    'arrivalLocation',
+    'trafficType',
+    'purpose',
+    'expenseOrganization',
+    'paymentAmount',
+    'invoiceType',
+    'invoiceCode',
+    'invoiceNumber',
+    'invoiceIssueDate',
+    'sellerName',
+    'buyerName',
+    'invoiceTaxAmount',
+    'invoiceExcludingTaxAmount',
+    'invoiceTotalAmount',
+    'requestOrganization',
+    'requestPaymentAmount',
+    'sourceDocumentStatus',
+    'interfaceSource'
+  ];
+  const settings = html.slice(html.indexOf('id="columnSettingsPanel"'), html.indexOf('id="fieldMappingPanel"'));
+  const header = html.slice(html.indexOf('id="financeQueuePanel"'), html.indexOf('<tbody id="sourceQueueBody"'));
+  const definitions = app.slice(app.indexOf('function ledgerColumnDefinitions()'), app.indexOf('function visibleColumnKeys()'));
+
+  assert.deepEqual([...settings.matchAll(/data-column-toggle="([^"]+)"/g)].map((match) => match[1]), expected);
+  assert.deepEqual(
+    [...header.matchAll(/data-column-key="([^"]+)"/g)].map((match) => match[1]),
+    [...expected, 'operationPanel']
+  );
+  assert.deepEqual([...definitions.matchAll(/key: '([^']+)'/g)].map((match) => match[1]), expected);
 });
 
 test('frontend uses fullscreen ledger table layout', () => {
@@ -204,15 +344,21 @@ test('ledger supports requester/source filters and filtered amount totals', () =
   const app = readFileSync('frontend/src/app.js', 'utf8');
   const css = readFileSync('frontend/src/styles.css', 'utf8');
   assert.match(html, /id="requesterFilterSelect"[\s\S]*全部报销人/);
+  assert.match(html, /id="saveStatusFilterSelect"[\s\S]*已保存ERP[\s\S]*未保存/);
+  assert.match(html, /<th data-column-key="status">[\s\S]*id="saveStatusFilterSelect"[\s\S]*<\/th>/);
   assert.match(html, /id="sourceTypeFilterSelect"[\s\S]*全部来源类型/);
+  assert.match(html, /value="OFFLINE_REIMBURSEMENT">线下报销 · 费用明细/);
+  assert.match(html, /value="ONLINE_MONTHLY_BILL">线上月结 · 月度账单/);
   assert.match(html, /id="dateFilterSelect"[\s\S]*全部日期/);
   assert.match(html, /id="sourceQueueTotals"/);
   assert.match(app, /function renderLedgerFilterOptions\(records,\s*requesterCatalog/);
   assert.match(app, /function renderLedgerTotals\(records\)/);
+  assert.match(app, /record\.kingdeeAcctIdKey === state\.selectedKingdeeAcctIdKey/);
   assert.match(app, /requesterFilterSelect\.value/);
   assert.match(app, /sourceTypeFilterSelect\.value/);
+  assert.match(app, /\['ONLINE_MONTHLY_BILL', '线上月结 · 月度账单'\]/);
   assert.match(app, /dateFilterSelect\.value/);
-  assert.match(app, /summary\.paymentDate !== dateFilterSelect\.value/);
+  assert.match(app, /dateOnly\(summary\.paymentDate\) !== dateFilterSelect\.value/);
   assert.match(app, /filterSelect\.addEventListener\('change',[\s\S]*clearLedgerSelection/);
   assert.match(app, /function clearLedgerSelection\(reason\)/);
   assert.match(app, /filteredSourceIds\.has\(record\.sourceId\)/);
@@ -269,12 +415,15 @@ test('Fenbeitong columns use canonical synchronized business fields', () => {
   assert.match(html, /data-column-key="splitTaxAmount"[^>]*>[\s\S]*?税额/);
   assert.match(html, /data-column-key="splitExcludingTaxAmount"[^>]*>[\s\S]*?不含税金额/);
   assert.match(html, /data-column-key="departmentAttributionAmount"[^>]*>[\s\S]*?报销金额/);
-  assert.match(html, /title="对应分贝通本次拆分税额"/);
-  assert.match(html, /title="对应分贝通本次拆分不含税金额"/);
+  assert.match(html, /title="对应分贝通可抵扣税额"/);
+  assert.match(html, /title="对应分贝通未税金额"/);
   assert.match(html, /title="对应分贝通费用归属部门金额"/);
-  assert.match(html, /data-column-key="time"[^>]*>[\s\S]*?日期/);
+  assert.match(html, /data-column-key="applicationDate"[^>]*>[\s\S]*?申请日期/);
+  assert.match(html, /data-column-key="time"[^>]*>[\s\S]*?费用发生日期/);
   assert.doesNotMatch(html, /更新时间/);
   assert.match(app, /record\.paymentDate/);
+  assert.match(app, /record\.expenseDateTime \|\| record\.paymentDate/);
+  assert.match(app, /dateOnly\(summary\.paymentDate\) !== dateFilterSelect\.value/);
   assert.match(app, /record\.totalAmount/);
   assert.match(app, /record\.splitTaxAmount/);
   assert.match(app, /record\.splitExcludingTaxAmount/);
@@ -287,7 +436,8 @@ test('Fenbeitong columns use canonical synchronized business fields', () => {
   assert.match(app, /record\.purpose/);
   assert.match(app, /record\.expenseDepartment/);
   assert.match(app, /function expenseReimbursementTimingForRecord\(record\)/);
-  assert.match(app, /documentDate: paymentDate/);
+  assert.match(app, /documentDate: applicationDate/);
+  assert.match(app, /sourceApplicationDate/);
   assert.match(app, /period: Number\(matched\[2\]\)/);
   assert.match(app, /buildExpenseReimbursementRequestForRecord\(sourceRecord\)/);
 });
@@ -337,9 +487,9 @@ test('frontend visible copy is production finance copy', () => {
 
 test('frontend api points only to local mock backend', () => {
   const api = readFileSync('frontend/src/api.js', 'utf8');
-  assert.match(api, /127\.0\.0\.1:3001/);
-  assert.match(api, /127\.0\.0\.1:3101/);
-  assert.match(api, /location\?\.port === '5273'/);
+  assert.match(api, /const baseUrl = ''/);
+  assert.doesNotMatch(api, /127\.0\.0\.1:3001/);
+  assert.doesNotMatch(api, /127\.0\.0\.1:3101/);
   assert.doesNotMatch(api, /openpf\.fenbeitong\.com/);
   assert.doesNotMatch(api, new RegExp(['k3', 'cloud'].join('')));
 });
@@ -357,4 +507,5 @@ test('frontend api exposes formal product workflow endpoints', () => {
   assert.match(contract, /fenbeitong-expense-reimbursement\/synced-documents/);
   assert.match(api, /fenbeitong-expense-reimbursement\/save-erp/);
   assert.match(api, /operations\/logs/);
+  assert.match(api, /getConfig: \(\) => request\('\/api\/fenbeitong-expense-reimbursement\/config'\)/);
 });

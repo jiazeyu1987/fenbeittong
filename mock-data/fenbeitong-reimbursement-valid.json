@@ -28,6 +28,10 @@
         "cost_category": { "code": "TRAVEL", "name": "Travel" },
         "total_amount": "108.00",
         "reason": "Mock travel expense",
+        "cost_custom_fields": [
+          { "field_code": "deductible_tax", "title": "可抵扣税额", "detail": "6.11" },
+          { "field_code": "untaxed_amount", "title": "未税金额", "detail": "101.89" }
+        ],
         "invoices": [
           { "id": "INV-001", "total_amount": "108.00", "used_amount": "108.00", "tax_amount": "6.11", "exclude_tax_amount": "101.89", "deductible_tax_amount": "6.11" }
         ]
@@ -37,6 +41,10 @@
         "cost_category": { "code": "OFFICE", "name": "Office" },
         "total_amount": "120.00",
         "reason": "Mock office expense",
+        "cost_custom_fields": [
+          { "field_code": "deductible_tax", "title": "可抵扣税额", "detail": "0.00" },
+          { "field_code": "untaxed_amount", "title": "未税金额", "detail": "120.00" }
+        ],
         "invoices": []
       }
     ]

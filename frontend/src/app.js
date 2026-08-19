@@ -2,16 +2,30 @@
 
 import {
   expenseReimbursementSelectionKey,
+  formatBatchFailureDetails,
+  isConfirmedErpSave,
   isMissingKingdeeEmployee,
+  isSkippableKingdeeBusinessRule,
   runBatchOperation
 } from './batch-operation.js';
+
 import { encodeCsvCell } from './csv-export.js';
+import { summarizeExpenseInvoices } from './invoice-fields.js';
 import { calculatePagination, visiblePageNumbers } from './pagination.js';
+import { formatFieldMapping, parseFieldMapping } from './field-mapping.js';
+import { saveCsvToDesktop } from './desktop-export.js';
+import { filterInterfaceFieldCatalog, interfaceFieldCatalog } from './interface-field-catalog.js';
+
+const ERP_BATCH_CONCURRENCY = 3;
 
 const fields = {
   mockDocumentDate: document.querySelector('#mockDocumentDate'),
   mockYear: document.querySelector('#mockYear'),
   mockPeriod: document.querySelector('#mockPeriod'),
+  expenseItemNumberMappings: document.querySelector('#expenseItemNumberMappings'),
+  employeeDetailNumberMappings: document.querySelector('#employeeDetailNumberMappings'),
+  departmentDetailNumberMappings: document.querySelector('#departmentDetailNumberMappings'),
+  organizationNumberMappings: document.querySelector('#organizationNumberMappings'),
   currencyNumbers: document.querySelector('#currencyNumbers'),
   mockFixedJson: document.querySelector('#mockFixedJson')
 };
@@ -23,10 +37,16 @@ const controls = {
   saveErp: document.querySelector('#saveErpButton'),
   resaveErp: document.querySelector('#resaveErpButton'),
   viewVoucher: document.querySelector('#viewVoucherButton'),
+  syncPaymentStatus: document.querySelector('#syncPaymentStatusButton'),
   exportLedger: document.querySelector('#exportButton'),
   queryLedger: document.querySelector('#queryLedgerButton'),
   resetLedger: document.querySelector('#resetButton'),
   columnSettings: document.querySelector('#columnSettingsButton'),
+  fieldMapping: document.querySelector('#fieldMappingButton'),
+  closeFieldMapping: document.querySelector('#closeFieldMappingButton'),
+  resetFieldMapping: document.querySelector('#resetFieldMappingButton'),
+  saveFieldMapping: document.querySelector('#saveFieldMappingButton'),
+  refreshLogs: document.querySelector('#refreshLogsButton'),
   loadTemplate: document.querySelector('#loadTemplateButton'),
   saveConfig: document.querySelector('#saveConfigButton'),
   sync: document.querySelector('#syncButton'),
@@ -45,12 +65,12 @@ const state = {
   currentIntegrationSettings: null,
   selectedTenantKey: 'puhui',
   selectedKingdeeAccountKey: 'current',
-  selectedKingdeeAcctIdKey: 'puhui-6977227150362f',
+  selectedKingdeeAcctIdKey: '',
   selectionDirty: false,
   syncedDocuments: [],
   requesterCatalog: [],
   selectedSourceIds: new Set(),
-  visibleColumnKeys: new Set(['status', 'sourceType', 'sourceCode', 'documentType', 'reason', 'requester', 'department', 'expenseCategories', 'startLocation', 'arrivalLocation', 'trafficType', 'purpose', 'expenseDepartment', 'splitTaxAmount', 'splitExcludingTaxAmount', 'departmentAttributionAmount', 'requestOrganization', 'requestPaymentAmount', 'sourceDocumentStatus', 'expenseOrganization', 'paymentAmount', 'businessLine', 'interfaceSource', 'time']),
+  visibleColumnKeys: new Set(['status', 'sourceType', 'documentType', 'sourceCode', 'applicationDate', 'time', 'requester', 'employeeOpenBank', 'employeeAccountName', 'employeeBankAccount', 'departmentAttributionAmount', 'splitTaxAmount', 'splitExcludingTaxAmount', 'expenseCategories', 'businessLine', 'reason', 'expenseDepartment', 'department', 'erpPaymentBillType', 'erpBankProcessingStatus', 'erpPaymentDate', 'startLocation', 'arrivalLocation', 'trafficType', 'purpose', 'expenseOrganization', 'paymentAmount', 'invoiceType', 'invoiceCode', 'invoiceNumber', 'invoiceIssueDate', 'sellerName', 'buyerName', 'invoiceTaxAmount', 'invoiceExcludingTaxAmount', 'invoiceTotalAmount', 'requestOrganization', 'requestPaymentAmount', 'sourceDocumentStatus', 'interfaceSource']),
   sortField: 'time',
   sortDirection: 'desc',
   lastPreview: null,
@@ -58,6 +78,10 @@ const state = {
   previewInvalidReason: '',
   preparedSourceIds: new Set(),
   pushedSourceIds: new Set(),
+  batchSaveRunning: false,
+  batchSavePaused: false,
+  batchSaveResumeWaiters: [],
+  failedErpSaveRecords: [],
   erpTemplateDefaults: null,
   ledgerPage: 1,
   ledgerPageSize: 20
@@ -70,6 +94,7 @@ const sourceIdInput = document.querySelector('#sourceIdInput');
 const searchFieldSelect = document.querySelector('#searchFieldSelect');
 const matchModeSelect = document.querySelector('#matchModeSelect');
 const sourceSearchInput = document.querySelector('#sourceSearchInput');
+const saveStatusFilterSelect = document.querySelector('#saveStatusFilterSelect');
 const requesterFilterSelect = document.querySelector('#requesterFilterSelect');
 const sourceTypeFilterSelect = document.querySelector('#sourceTypeFilterSelect');
 const dateFilterSelect = document.querySelector('#dateFilterSelect');
@@ -88,12 +113,19 @@ const kingdeeAcctIdSelect = document.querySelector('#kingdeeAcctIdSelect');
 const kingdeeAcctIdStatusText = document.querySelector('#kingdeeAcctIdStatusText');
 const recordsTable = document.querySelector('#recordsTable');
 const logsList = document.querySelector('#logsList');
+const logsUpdatedAt = document.querySelector('#logsUpdatedAt');
 const voucherPreviewBody = document.querySelector('#voucherPreviewBody');
 const sourceQueueBody = document.querySelector('#sourceQueueBody');
 const sourceQueueTotals = document.querySelector('#sourceQueueTotals');
 const selectAllRowsCheckbox = document.querySelector('#selectAllRowsCheckbox');
 const financeQueuePanel = document.querySelector('#financeQueuePanel');
 const columnSettingsPanel = document.querySelector('#columnSettingsPanel');
+const fieldMappingPanel = document.querySelector('#fieldMappingPanel');
+const fieldMappingStatus = document.querySelector('#fieldMappingStatus');
+const interfaceFieldSourceFilter = document.querySelector('#interfaceFieldSourceFilter');
+const interfaceFieldQuery = document.querySelector('#interfaceFieldQuery');
+const interfaceFieldCount = document.querySelector('#interfaceFieldCount');
+const interfaceFieldMappingBody = document.querySelector('#interfaceFieldMappingBody');
 const saveConfirmPanel = document.querySelector('#saveConfirmPanel');
 const saveConfirmSummary = document.querySelector('#saveConfirmSummary');
 const saveRiskNotice = document.querySelector('#saveRiskNotice');
@@ -102,6 +134,13 @@ const voucherValidationList = document.querySelector('#voucherValidationList');
 const previewHashSummary = document.querySelector('#previewHashSummary');
 const financeReviewSummary = document.querySelector('#financeReviewSummary');
 const operationFeedback = document.querySelector('#operationFeedback');
+const operationFeedbackMessage = document.querySelector('#operationFeedbackMessage');
+const batchProgress = document.querySelector('#batchProgress');
+const batchProgressText = document.querySelector('#batchProgressText');
+const batchProgressPercent = document.querySelector('#batchProgressPercent');
+const batchProgressFill = document.querySelector('#batchProgressFill');
+const pauseSaveButton = document.querySelector('#pauseSaveButton');
+const retryFailedSaveButton = document.querySelector('#retryFailedSaveButton');
 
 controls.loadTemplate.addEventListener('click', run(loadTemplate));
 controls.syncFenbeitong.addEventListener('click', run(syncFenbeitong));
@@ -109,6 +148,7 @@ controls.generateVoucher.addEventListener('click', run(generateExpenseReimbursem
 controls.saveErp.addEventListener('click', run(pushSelectedToErp));
 controls.resaveErp.addEventListener('click', run(resaveSelectedToErp));
 controls.viewVoucher.addEventListener('click', run(queryProcess));
+controls.syncPaymentStatus.addEventListener('click', run(syncPaymentStatusesToFenbeitong));
 controls.queryLedger.addEventListener('click', () => {
   clearLedgerSelection('查询条件已变更，请重新选择当前结果中的单据。');
   state.ledgerPage = 1;
@@ -118,6 +158,7 @@ controls.resetLedger.addEventListener('click', () => {
   sourceSearchInput.value = '';
   searchFieldSelect.value = 'sourceCode';
   matchModeSelect.value = 'contains';
+  saveStatusFilterSelect.value = '';
   requesterFilterSelect.value = '';
   sourceTypeFilterSelect.value = '';
   dateFilterSelect.value = '';
@@ -127,6 +168,13 @@ controls.resetLedger.addEventListener('click', () => {
 });
 controls.exportLedger.addEventListener('click', run(exportLedgerCsv));
 controls.columnSettings.addEventListener('click', toggleColumnSettings);
+controls.fieldMapping.addEventListener('click', toggleFieldMappingPanel);
+controls.closeFieldMapping.addEventListener('click', closeFieldMappingPanel);
+controls.resetFieldMapping.addEventListener('click', run(resetFieldMappings));
+controls.saveFieldMapping.addEventListener('click', run(saveFieldMappings));
+controls.refreshLogs.addEventListener('click', run(refreshLogs));
+pauseSaveButton?.addEventListener('click', toggleBatchSavePause);
+retryFailedSaveButton?.addEventListener('click', run(retryFailedErpSaves));
 controls.saveConfig.addEventListener('click', run(saveConfig));
 controls.sync.addEventListener('click', run(syncFenbeitong));
 controls.runScheduler.addEventListener('click', run(runSchedulerOnce));
@@ -137,6 +185,8 @@ controls.query.addEventListener('click', run(queryProcess));
 controls.refresh.addEventListener('click', run(refreshAll));
 controls.listRecords.addEventListener('click', run(refreshRecords));
 controls.primaryAction.addEventListener('click', run(runPrimaryAction));
+interfaceFieldSourceFilter.addEventListener('change', renderInterfaceFieldMappings);
+interfaceFieldQuery.addEventListener('input', renderInterfaceFieldMappings);
 companySelect.addEventListener('change', () => {
   state.selectedTenantKey = companySelect.value;
   markIntegrationSelectionDirty();
@@ -195,7 +245,7 @@ sourceSearchInput.addEventListener('keydown', (event) => {
     renderSourceQueue(state.syncedDocuments);
   }
 });
-for (const filterSelect of [requesterFilterSelect, sourceTypeFilterSelect, dateFilterSelect]) {
+for (const filterSelect of [saveStatusFilterSelect, requesterFilterSelect, sourceTypeFilterSelect, dateFilterSelect]) {
   filterSelect.addEventListener('change', () => {
     clearLedgerSelection('筛选条件已变更，请重新选择当前结果中的单据。');
     state.ledgerPage = 1;
@@ -214,13 +264,15 @@ for (const field of Object.values(fields)) {
 }
 
 setupResizableTables();
+renderInterfaceFieldMappings();
 
 run(async () => {
   await api.health();
   statusBadge.textContent = '后端已连接';
   statusBadge.classList.add('ok');
-  await loadTemplate();
-  await refreshAll();
+  await loadCurrentConfig();
+  await refreshLogs();
+  await refreshAll({ includeLogs: false });
 })();
 
 function setupResizableTables() {
@@ -343,6 +395,36 @@ async function loadTemplate() {
   show(template, '已加载默认费用报销单参数，请保存配置后开始同步。');
 }
 
+async function loadCurrentConfig() {
+  const template = await api.getMockTemplate();
+  try {
+    const saved = await api.getConfig();
+    applyTemplate({ ...template, ...saved });
+    state.configSaved = true;
+    fieldMappingStatus.textContent = '已载入当前生效的字段对应关系。';
+  } catch {
+    applyTemplate(template);
+    state.configSaved = false;
+    fieldMappingStatus.textContent = '尚无已保存配置，当前显示默认字段对应关系。';
+  }
+  renderConfigValidation();
+  renderActionState();
+}
+
+async function resetFieldMappings() {
+  const template = await api.getMockTemplate();
+  applyTemplate(template);
+  state.configSaved = false;
+  fieldMappingStatus.textContent = '已恢复默认映射，点击“保存字段对应关系”后才会生效。';
+  renderConfigValidation();
+  renderActionState();
+}
+
+async function saveFieldMappings() {
+  await saveConfig();
+  fieldMappingStatus.textContent = `字段对应关系已保存并生效 · ${new Date().toLocaleString('zh-CN')}`;
+}
+
 async function saveConfig() {
   const savedSettings = await api.saveIntegrationSettings({
     tenantKey: state.selectedTenantKey,
@@ -350,6 +432,7 @@ async function saveConfig() {
     kingdeeAcctIdKey: state.selectedKingdeeAcctIdKey
   });
   const saved = await api.saveConfig(readConfig());
+  state.erpTemplateDefaults = { ...state.erpTemplateDefaults, ...structuredClone(saved) };
   state.configSaved = true;
   state.selectionDirty = false;
   state.currentIntegrationSettings = savedSettings;
@@ -367,6 +450,20 @@ async function syncFenbeitong() {
   selectFirstRecord(result.records);
   invalidatePreview('预览已失效：同步结果已变更，请重新预览费用报销单。');
   show(result, `同步完成，新增或更新 ${result.records.length} 张来源单据。`);
+  await refreshAll();
+}
+
+async function syncPaymentStatusesToFenbeitong() {
+  showOperationFeedback('正在核对金蝶付款单并回传分贝通付款状态，请勿关闭页面。');
+  const response = await api.runPaymentStatusSync();
+  const result = response.result;
+  const summary = [
+    `已回传 ${result.syncedCount} 张`,
+    `已付款无需重复处理 ${result.alreadyPaidCount} 张`,
+    `安全跳过 ${result.skippedCount} 张`,
+    `失败 ${result.failedCount} 张`
+  ].join('；');
+  show(result, `付款状态同步完成：${summary}。`);
   await refreshAll();
 }
 
@@ -433,9 +530,6 @@ async function generateExpenseReimbursementFromRow(event) {
   const sourceId = button.dataset.sourceId;
   const record = state.syncedDocuments.find((item) => item.sourceId === sourceId);
   if (!record) throw new Error(`待处理单据不存在：${sourceId}`);
-  if (buildSourceSummary(record).documentTaxMappingComplete === false) {
-    throw new Error('该单据缺少分贝通接口明确返回且核对一致的本次拆分税额和本次拆分不含税金额，不能生成或保存到 ERP。');
-  }
   if (state.pushedSourceIds.has(sourceId)) {
     throw new Error('该费用报销单已保存到金蝶，请使用“重新保存费用报销单”。');
   }
@@ -446,17 +540,44 @@ async function generateExpenseReimbursementFromRow(event) {
 
 async function saveExpenseReimbursementRowToErp(record, options = {}) {
   setActiveSourceRecord(record, false);
-  const saved = await api.saveErp(buildExpenseReimbursementRequestForRecord(record, {
-    forceRetry: Boolean(options.forceRetry)
-  }));
-  const queried = await api.getProcess(saved.sourceId);
-  if (!queried || queried.processStage !== 'ERP_EXPENSE_REIMBURSEMENT_SAVED') {
+  const forceRetry = Boolean(options.forceRetry);
+  const requestStartedAt = Date.now();
+  let saved;
+  try {
+    saved = await api.saveErp(buildExpenseReimbursementRequestForRecord(record, {
+      forceRetry
+    }));
+  } catch (error) {
+    if (error?.code !== 'LOCAL_BACKEND_UNREACHABLE') throw error;
+    const recovered = await confirmErpSaveAfterConnectionFailure(
+      record.sourceId,
+      forceRetry ? requestStartedAt : 0
+    );
+    if (isConfirmedErpSave(recovered)
+      && isProcessUpdatedAfter(recovered, forceRetry ? requestStartedAt : 0)) {
+      saved = recovered;
+    } else {
+      const confirmationError = new Error(
+        recovered
+          ? '本地后台连接曾中断；核对后该单据仍停留在“已生成待保存”状态，ERP没有返回保存成功。'
+          : '无法连接本地后台服务，也未能确认该单据是否已保存到ERP；为防止重复保存，请恢复连接后重新查询。'
+      );
+      confirmationError.code = recovered
+        ? 'ERP_SAVE_NOT_CONFIRMED'
+        : 'LOCAL_BACKEND_UNREACHABLE';
+      throw confirmationError;
+    }
+  }
+  const confirmed = isConfirmedErpSave(saved)
+    ? saved
+    : await api.getProcess(saved.sourceId);
+  if (!isConfirmedErpSave(confirmed)) {
     throw new Error(`费用报销单保存后本地状态未确认成功：${record.sourceId}`);
   }
-  addProcessSourceIds(state.pushedSourceIds, queried);
-  deleteProcessSourceIds(state.preparedSourceIds, queried);
+  addProcessSourceIds(state.pushedSourceIds, confirmed);
+  deleteProcessSourceIds(state.preparedSourceIds, confirmed);
   return {
-    ...queried,
+    ...confirmed,
     idempotentReplay: Boolean(saved.idempotentReplay)
   };
 }
@@ -479,19 +600,30 @@ async function pushSelectedToErp() {
     await pushErp();
     return;
   }
-  const batch = await runBatchOperation(records, saveExpenseReimbursementRowToErp);
+  startBatchProgress(records.length, '保存费用报销单');
+  const batch = await runBatchOperation(
+    records,
+    saveExpenseReimbursementRowToErp,
+    (progress) => updateBatchProgress(progress, '保存费用报销单'),
+    {
+      concurrency: ERP_BATCH_CONCURRENCY,
+      waitUntilResumed: waitUntilBatchSaveResumed
+    }
+  );
   const pushed = batch.successes;
   const skipped = batch.failures
-    .filter(({ error }) => isMissingKingdeeEmployee(error))
-    .map(({ item: record }) => ({
+    .filter(({ error }) => isSkippableKingdeeBusinessRule(error))
+    .map(({ item: record, error }) => ({
       sourceId: record.sourceId,
       sourceCode: displaySourceCode(record),
       requesterCode: record.requesterCode || '',
       requesterName: record.requesterName || '',
-      reason: '金蝶员工资料未建档'
+      code: error.code,
+      reason: businessRuleSkipReason(error),
+      message: error.message
     }));
   const failures = batch.failures
-    .filter(({ error }) => !isMissingKingdeeEmployee(error))
+    .filter(({ error }) => !isSkippableKingdeeBusinessRule(error))
     .map(({ item: record, error }) => ({
     sourceId: record.sourceId,
     sourceCode: displaySourceCode(record),
@@ -501,9 +633,14 @@ async function pushSelectedToErp() {
     message: error.message
   }));
   if (failures.length > 0) {
+    setFailedErpSaveRecords(batch.failures.filter(({ error }) => (
+      !isSkippableKingdeeBusinessRule(error)
+    )));
     const failedPeople = [...new Set(failures.map((failure) =>
       `${failure.requesterName || failure.sourceCode}${failure.requesterCode ? `（${failure.requesterCode}）` : ''}`
     ))].join('、');
+    const failureReasons = summarizeBatchFailureReasons(failures);
+    const skippedReasons = summarizeBatchSkippedReasons(skipped);
     show({
       error: `有 ${failures.length} 张费用报销单未能保存`,
       code: 'BATCH_PARTIAL_FAILURE',
@@ -513,48 +650,193 @@ async function pushSelectedToErp() {
       records: pushed,
       skipped,
       failures
-    }, `批量保存完成：成功 ${pushed.length} 张，失败 ${failures.length} 张。失败人员：${failedPeople}；其他单据已继续处理。`);
+    }, `批量处理结束：已保存 ${pushed.length} 张，业务跳过 ${skipped.length} 张，未保存 ${failures.length} 张。失败原因汇总：${failureReasons}。${skipped.length ? `跳过原因：${skippedReasons}。` : ''}失败人员：${failedPeople}；其他单据已继续处理。\n失败明细：\n${formatBatchFailureDetails(failures)}`);
+    finishBatchProgress(records.length, pushed.length, failures.length, true, skipped.length);
     await refreshAll();
     return;
   }
   if (skipped.length > 0) {
-    const skippedPeople = [...new Set(skipped.map((record) =>
-      `${record.requesterName || record.sourceCode}${record.requesterCode ? `（${record.requesterCode}）` : ''}`
-    ))].join('、');
+    setFailedErpSaveRecords([]);
+    const skippedReasons = summarizeBatchSkippedReasons(skipped);
     show({
       successCount: pushed.length,
       skippedCount: skipped.length,
       records: pushed,
       skipped
-    }, `处理完成：成功保存 ${pushed.length} 张；已跳过 ${skipped.length} 张金蝶未建档人员单据：${skippedPeople}。`);
+    }, `批量处理结束：已保存 ${pushed.length} 张，自动跳过 ${skipped.length} 张。跳过原因：${skippedReasons}。`);
+    finishBatchProgress(records.length, pushed.length, 0, false, skipped.length);
     await refreshAll();
     return;
   }
   const message = pushed.every((record) => record.idempotentReplay)
     ? '所选费用报销单已经保存到金蝶，无需重复保存。'
-    : '保存成功';
+    : `全部 ${pushed.length} 张费用报销单保存成功`;
   show({ count: pushed.length, records: pushed }, message);
+  setFailedErpSaveRecords([]);
+  finishBatchProgress(records.length, pushed.length, 0, false);
   await refreshAll();
 }
 
 async function resaveSelectedToErp() {
-  let records = uniqueExpenseReimbursementRecords(selectedLedgerRecords())
-    .filter((record) => state.pushedSourceIds.has(record.sourceId));
+  let records = uniqueExpenseReimbursementRecords(selectedLedgerRecords());
   if (records.length === 0) {
     const sourceId = sourceIdInput.value.trim();
     const record = state.syncedDocuments.find((item) => item.sourceId === sourceId);
-    if (record && state.pushedSourceIds.has(record.sourceId)) {
+    if (record) {
       records = [record];
     }
   }
   if (records.length === 0) {
-    throw new Error('请先选择需要重新保存至ERP的已保存单据。');
+    throw new Error('请先选择需要保存或重新保存至ERP的单据。');
   }
-  const pushed = [];
-  for (const record of records) {
-    pushed.push(await saveExpenseReimbursementRowToErp(record, { forceRetry: true }));
+  const initiallySavedSourceIds = new Set(records
+    .filter((record) => state.pushedSourceIds.has(record.sourceId))
+    .map((record) => record.sourceId));
+  const initiallyUnsavedCount = records.length - initiallySavedSourceIds.size;
+  startBatchProgress(records.length, '保存/重新保存费用报销单');
+  const batch = await runBatchOperation(
+    records,
+    (record) => saveExpenseReimbursementRowToErp(record, {
+      forceRetry: initiallySavedSourceIds.has(record.sourceId)
+    }),
+    (progress) => updateBatchProgress(progress, '保存/重新保存费用报销单'),
+    {
+      concurrency: ERP_BATCH_CONCURRENCY,
+      waitUntilResumed: waitUntilBatchSaveResumed
+    }
+  );
+  const skippedFailures = batch.failures
+    .filter(({ error }) => isSkippableKingdeeBusinessRule(error));
+  const actualFailures = batch.failures
+    .filter(({ error }) => !isSkippableKingdeeBusinessRule(error));
+  const failedNewCount = actualFailures
+    .filter(({ item }) => !initiallySavedSourceIds.has(item.sourceId)).length;
+  const skippedNewCount = skippedFailures
+    .filter(({ item }) => !initiallySavedSourceIds.has(item.sourceId)).length;
+  const failedResaveCount = actualFailures.length - failedNewCount;
+  const skippedResaveCount = skippedFailures.length - skippedNewCount;
+  const savedNewCount = initiallyUnsavedCount - failedNewCount - skippedNewCount;
+  const resavedCount = initiallySavedSourceIds.size - failedResaveCount - skippedResaveCount;
+  if (actualFailures.length > 0) {
+    setFailedErpSaveRecords(actualFailures);
+    const failures = actualFailures.map(({ item: record, error }) => ({
+      sourceId: record.sourceId,
+      sourceCode: displaySourceCode(record),
+      requesterCode: record.requesterCode || '',
+      requesterName: record.requesterName || '',
+      code: error.code || 'ERP_RESAVE_FAILED',
+      message: error.message
+    }));
+    const skipped = skippedFailures.map(({ item: record, error }) => ({
+      sourceId: record.sourceId,
+      sourceCode: displaySourceCode(record),
+      requesterCode: record.requesterCode || '',
+      requesterName: record.requesterName || '',
+      code: error.code,
+      reason: businessRuleSkipReason(error),
+      message: error.message
+    }));
+    show({
+      error: `有 ${failures.length} 张费用报销单未能保存或重新保存`,
+      code: 'BATCH_RESAVE_PARTIAL_FAILURE',
+      successCount: batch.successes.length,
+      savedNewCount,
+      resavedCount,
+      failedCount: failures.length,
+      skippedCount: skipped.length,
+      records: batch.successes,
+      skipped,
+      failures
+    }, `批量保存结束：首次保存 ${savedNewCount} 张，重新保存 ${resavedCount} 张，业务跳过 ${skipped.length} 张，未保存 ${failures.length} 张。未全部完成，不显示保存成功。\n失败明细：\n${formatBatchFailureDetails(failures)}`);
+    finishBatchProgress(records.length, batch.successes.length, failures.length, true, skipped.length);
+    await refreshAll();
+    return;
   }
-  show({ count: pushed.length, records: pushed }, '重新保存至ERP成功');
+  if (skippedFailures.length > 0) {
+    setFailedErpSaveRecords([]);
+    show({
+      successCount: batch.successes.length,
+      savedNewCount,
+      resavedCount,
+      skippedCount: skippedFailures.length,
+      records: batch.successes
+    }, `批量处理完成：首次保存 ${savedNewCount} 张，重新保存 ${resavedCount} 张，自动跳过 ${skippedFailures.length} 张。`);
+    finishBatchProgress(records.length, batch.successes.length, 0, false, skippedFailures.length);
+    await refreshAll();
+    return;
+  }
+  show(
+    {
+      count: batch.successes.length,
+      savedNewCount,
+      resavedCount,
+      records: batch.successes
+    },
+    `全部处理成功：首次保存 ${savedNewCount} 张，重新保存 ${resavedCount} 张`
+  );
+  setFailedErpSaveRecords([]);
+  finishBatchProgress(records.length, batch.successes.length, 0, false);
+  await refreshAll();
+}
+
+async function retryFailedErpSaves() {
+  const records = uniqueExpenseReimbursementRecords(state.failedErpSaveRecords
+    .map((failed) => state.syncedDocuments.find((record) => (
+      record.sourceId === failed.sourceId
+    )) || failed));
+  if (records.length === 0) {
+    throw new Error('当前没有可重试的失败单据。');
+  }
+  startBatchProgress(records.length, '重试失败单据');
+  const batch = await runBatchOperation(
+    records,
+    (record) => saveExpenseReimbursementRowToErp(record, {
+      forceRetry: state.pushedSourceIds.has(record.sourceId)
+    }),
+    (progress) => updateBatchProgress(progress, '重试失败单据'),
+    {
+      concurrency: ERP_BATCH_CONCURRENCY,
+      waitUntilResumed: waitUntilBatchSaveResumed
+    }
+  );
+  const skippedFailures = batch.failures
+    .filter(({ error }) => isSkippableKingdeeBusinessRule(error));
+  const actualFailures = batch.failures
+    .filter(({ error }) => !isSkippableKingdeeBusinessRule(error));
+  setFailedErpSaveRecords(actualFailures);
+  if (actualFailures.length > 0) {
+    const failures = actualFailures.map(({ item: record, error }) => ({
+      sourceId: record.sourceId,
+      sourceCode: displaySourceCode(record),
+      requesterCode: record.requesterCode || '',
+      requesterName: record.requesterName || '',
+      code: error.code || 'ERP_RETRY_FAILED',
+      message: error.message
+    }));
+    show({
+      error: `重试后仍有 ${failures.length} 张未保存`,
+      code: 'BATCH_RETRY_PARTIAL_FAILURE',
+      successCount: batch.successes.length,
+      failedCount: failures.length,
+      records: batch.successes,
+      failures
+    }, `失败单据重试结束：成功 ${batch.successes.length} 张，仍失败 ${failures.length} 张。可再次点击“重试失败单据”。\n失败明细：\n${formatBatchFailureDetails(failures)}`);
+    finishBatchProgress(records.length, batch.successes.length, failures.length, true, skippedFailures.length);
+    await refreshAll();
+    return;
+  }
+  if (skippedFailures.length > 0) {
+    show({
+      successCount: batch.successes.length,
+      skippedCount: skippedFailures.length,
+      records: batch.successes
+    }, `失败单据重试完成：成功 ${batch.successes.length} 张，自动跳过 ${skippedFailures.length} 张。`);
+    finishBatchProgress(records.length, batch.successes.length, 0, false, skippedFailures.length);
+    await refreshAll();
+    return;
+  }
+  show({ count: batch.successes.length, records: batch.successes }, `本次 ${batch.successes.length} 张失败单据已全部重试保存成功`);
+  finishBatchProgress(records.length, batch.successes.length, 0, false);
   await refreshAll();
 }
 
@@ -566,7 +848,7 @@ async function pushErp() {
   try {
     saved = await api.saveErp(buildExpenseReimbursementRequestForRecord(sourceRecord));
   } catch (error) {
-    if (!isMissingKingdeeEmployee(error)) throw error;
+    if (!isSkippableKingdeeBusinessRule(error)) throw error;
     show({
       successCount: 0,
       skippedCount: 1,
@@ -575,13 +857,17 @@ async function pushErp() {
         sourceCode: displaySourceCode(sourceRecord),
         requesterCode: sourceRecord.requesterCode || '',
         requesterName: sourceRecord.requesterName || '',
-        reason: '金蝶员工资料未建档'
+        code: error.code,
+        reason: businessRuleSkipReason(error),
+        message: error.message
       }]
-    }, `已跳过金蝶未建档人员：${sourceRecord.requesterName || displaySourceCode(sourceRecord)}${sourceRecord.requesterCode ? `（${sourceRecord.requesterCode}）` : ''}。`);
+    }, `已按业务规则跳过：${businessRuleSkipReason(error)}。`);
     return;
   }
-  const record = await api.getProcess(saved.sourceId);
-  if (!record || record.processStage !== 'ERP_EXPENSE_REIMBURSEMENT_SAVED') {
+  const record = isConfirmedErpSave(saved)
+    ? saved
+    : await api.getProcess(saved.sourceId);
+  if (!isConfirmedErpSave(record)) {
     throw new Error(`费用报销单保存后本地状态未确认成功：${sourceId}`);
   }
   addProcessSourceIds(state.pushedSourceIds, record);
@@ -601,7 +887,7 @@ async function queryProcess() {
   show({ sourceId }, '该来源单据尚未生成费用报销单，请先点击“生成费用报销单”。');
 }
 
-async function refreshAll() {
+async function refreshAll(options = {}) {
   const [settings, status, documents, requesters] = await Promise.all([
     api.integrationSettings(),
     api.systemStatus(),
@@ -616,7 +902,7 @@ async function refreshAll() {
   renderStatus(status, settings);
   renderSourceQueue(documents);
   await refreshRecords();
-  await refreshLogs();
+  if (options.includeLogs !== false) await refreshLogs();
   renderActionState();
 }
 
@@ -629,10 +915,14 @@ async function updateKingdeeAccountSelection() {
 
 async function refreshRecords() {
   const records = await api.listProcessRecords();
-  state.preparedSourceIds = new Set(records
+  const selectedAcctIdRecords = records.filter((record) =>
+    record.kingdeeAcctIdKey === state.selectedKingdeeAcctIdKey);
+  state.preparedSourceIds = new Set(selectedAcctIdRecords
     .filter((record) => record.processStage === 'EXPENSE_REIMBURSEMENT_PREPARED')
     .flatMap(processSourceIds));
-  state.pushedSourceIds = new Set(records.filter(isRealPushedRecord).flatMap(processSourceIds));
+  state.pushedSourceIds = new Set(selectedAcctIdRecords
+    .filter(isRealPushedRecord)
+    .flatMap(processSourceIds));
   renderSourceQueue(state.syncedDocuments);
   if (records.length === 0) {
     recordsTable.innerHTML = '<tr><td colspan="5">暂无记录，请先同步分贝通数据。</td></tr>';
@@ -653,12 +943,17 @@ async function refreshLogs() {
   const logs = await api.listLogs();
   logsList.innerHTML = logs.length === 0
     ? '暂无日志'
-    : logs.slice(0, 8).map((log) => `
+    : logs.slice(0, 20).map((log) => `
       <div class="log-item">
-        <strong>${escapeHtml(logLabel(log.action))}</strong>
-        <span>${escapeHtml(log.status)} 路 ${escapeHtml(log.createdAt)}</span>
+        <span class="log-status ${log.status === 'FAILED' ? 'failed' : 'success'}">${log.status === 'FAILED' ? '失败' : '成功'}</span>
+        <span class="log-main">
+          <strong>${escapeHtml(logLabel(log.action))}</strong>
+          <small>${escapeHtml(logDetailSummary(log.detail))}</small>
+        </span>
+        <time>${escapeHtml(formatLogTime(log.createdAt))}</time>
       </div>
     `).join('');
+  logsUpdatedAt.textContent = `已自动读取最新 ${Math.min(logs.length, 20)} 条 · 刷新时间 ${new Date().toLocaleString('zh-CN')}`;
 }
 
 async function runPrimaryAction() {
@@ -677,10 +972,6 @@ async function toggleQueuedDocument(event) {
   const sourceId = checkbox.dataset.sourceId;
   const record = state.syncedDocuments.find((item) => item.sourceId === sourceId);
   if (!record) throw new Error(`待处理单据不存在：${sourceId}`);
-  if (buildSourceSummary(record).documentTaxMappingComplete === false) {
-    checkbox.checked = false;
-    throw new Error('该单据缺少分贝通接口明确返回且核对一致的本次拆分税额和本次拆分不含税金额，不能生成或保存到 ERP。');
-  }
   if (checkbox.checked) {
     state.selectedSourceIds.add(sourceId);
     setActiveSourceRecord(record, true);
@@ -701,8 +992,7 @@ async function toggleQueuedDocument(event) {
 
 function toggleAllFilteredDocuments(checked) {
   const filteredRecords = filterLedgerRecords(state.syncedDocuments)
-    .filter((record) => !isLegacyUnverified(record)
-      && buildSourceSummary(record).documentTaxMappingComplete !== false);
+    .filter((record) => !isLegacyUnverified(record));
   for (const record of filteredRecords) {
     if (checked) {
       state.selectedSourceIds.add(record.sourceId);
@@ -784,8 +1074,7 @@ function setActiveSourceRecord(record, invalidate) {
 }
 
 function renderSelectAllState(filteredRecords) {
-  const selectableRecords = filteredRecords.filter((record) => !isLegacyUnverified(record)
-    && buildSourceSummary(record).documentTaxMappingComplete !== false);
+  const selectableRecords = filteredRecords.filter((record) => !isLegacyUnverified(record));
   const selectedCount = selectableRecords.filter((record) => state.selectedSourceIds.has(record.sourceId)).length;
   selectAllRowsCheckbox.checked = selectableRecords.length > 0 && selectedCount === selectableRecords.length;
   selectAllRowsCheckbox.indeterminate = selectedCount > 0 && selectedCount < selectableRecords.length;
@@ -850,22 +1139,20 @@ function renderActionState() {
   const pushed = sourceId ? state.pushedSourceIds.has(sourceId) : false;
   const hasPushedSelection = selectedLedgerRecords()
     .some((record) => state.pushedSourceIds.has(record.sourceId));
-  const hasUnresolvedTaxSelection = selectedLedgerRecords()
-    .some((record) => buildSourceSummary(record).documentTaxMappingComplete === false);
   const viewSourceId = sourceId || selectedLedgerRecords()[0]?.sourceId || '';
   const canViewVoucher = state.preparedSourceIds.has(viewSourceId)
     || state.pushedSourceIds.has(viewSourceId);
   const tenantWaiting = isSelectedTenantWaiting();
   controls.syncFenbeitong.disabled = tenantWaiting;
   controls.sync.disabled = tenantWaiting;
-  controls.generateVoucher.disabled = !hasSource || hasUnresolvedTaxSelection;
-  controls.saveErp.disabled = !hasSource || pushed || hasUnresolvedTaxSelection;
+  controls.generateVoucher.disabled = !hasSource;
+  controls.saveErp.disabled = !hasSource || pushed;
   controls.resaveErp.disabled = !hasPushedSelection && !pushed;
   controls.viewVoucher.disabled = !canViewVoucher;
   controls.viewVoucher.title = canViewVoucher ? '' : '请先生成费用报销单';
-  controls.preview.disabled = !hasSource || hasUnresolvedTaxSelection;
-  controls.prepare.disabled = !hasSource || hasUnresolvedTaxSelection;
-  controls.pushErp.disabled = !hasSource || pushed || hasUnresolvedTaxSelection;
+  controls.preview.disabled = !hasSource;
+  controls.prepare.disabled = !hasSource;
+  controls.pushErp.disabled = !hasSource || pushed;
   controls.primaryAction.dataset.action = !state.configSaved ? 'save-config' : state.syncedDocuments.length === 0 ? 'sync' : 'push';
   controls.primaryAction.textContent = !state.configSaved ? '保存配置' : state.syncedDocuments.length === 0 ? '立即同步分贝通数据' : '保存费用报销单';
   controls.primaryAction.disabled = tenantWaiting && controls.primaryAction.dataset.action === 'sync';
@@ -913,7 +1200,7 @@ function renderKingdeeAcctIdOptions(kingdeeConfig) {
   if (acctIds.length === 0) {
     return;
   }
-  const currentKey = state.selectedKingdeeAcctIdKey || kingdeeConfig.selectedAcctIdKey || 'puhui-6977227150362f';
+  const currentKey = state.selectedKingdeeAcctIdKey || kingdeeConfig.selectedAcctIdKey || acctIds[0].key;
   state.selectedKingdeeAcctIdKey = acctIds.some((acctId) => acctId.key === currentKey)
     ? currentKey
     : acctIds.some((acctId) => acctId.key === kingdeeConfig.selectedAcctIdKey)
@@ -984,10 +1271,10 @@ function renderConfigValidation() {
   const checks = [
     ['目标组织', Boolean(state.erpTemplateDefaults?.expenseReimbursementOrgNumber), '写入费用报销单申请组织和费用承担组织'],
     ['单据日期', Boolean(fields.mockDocumentDate.value), '写入费用报销单日期'],
-    ['费用项目映射', Boolean(state.erpTemplateDefaults?.expenseItemNumberMappings), '分贝通费用类型映射到金蝶费用项目'],
-    ['员工映射', Boolean(state.erpTemplateDefaults?.employeeDetailNumberMappings), '报销人映射到金蝶员工'],
-    ['部门映射', Boolean(state.erpTemplateDefaults?.departmentDetailNumberMappings), '费用归属映射到金蝶部门'],
-    ['币别映射', isJsonObject(fields.currencyNumbers.value), '分贝通币别映射到 ERP 币别']
+    ['费用项目映射', hasFieldMapping(fields.expenseItemNumberMappings.value), '分贝通费用类型映射到金蝶费用项目'],
+    ['员工映射', hasFieldMapping(fields.employeeDetailNumberMappings.value), '报销人映射到金蝶员工'],
+    ['部门映射', hasFieldMapping(fields.departmentDetailNumberMappings.value), '费用归属映射到金蝶部门'],
+    ['币别映射', hasFieldMapping(fields.currencyNumbers.value), '分贝通币别映射到 ERP 币别']
   ];
   document.querySelector('#configValidationList').innerHTML = checks.map(([label, ok, detail]) =>
     `<li class="${ok ? 'ok' : 'pending'}">${escapeHtml(label)}：${ok ? '通过' : '待补齐'}，${escapeHtml(detail)}</li>`
@@ -1011,40 +1298,55 @@ function renderSourceQueue(records) {
   sourceQueueBody.innerHTML = pageRecords.map((record) => {
     const summary = buildSourceSummary(record);
     const legacyUnverified = isLegacyUnverified(record);
-    const taxUnresolved = summary.documentTaxMappingComplete === false;
     const selected = state.selectedSourceIds.has(record.sourceId);
     const prepared = state.preparedSourceIds.has(record.sourceId);
     const pushed = state.pushedSourceIds.has(record.sourceId);
     const actionText = prepared ? '重新生成' : '生成费用报销单';
     return `
       <tr class="${selected ? 'selected' : ''}">
-        <td><input class="row-checkbox" type="checkbox" data-source-id="${escapeHtml(record.sourceId)}" aria-label="选择 ${escapeHtml(displaySourceCode(record))}" ${selected ? 'checked' : ''} ${legacyUnverified || taxUnresolved ? 'disabled' : ''} /></td>
+        <td><input class="row-checkbox" type="checkbox" data-source-id="${escapeHtml(record.sourceId)}" aria-label="选择 ${escapeHtml(displaySourceCode(record))}" ${selected ? 'checked' : ''} ${legacyUnverified ? 'disabled' : ''} /></td>
         ${renderLedgerCell('status', `<span class="status-tag">${escapeHtml(queueStatus(record))}</span>`)}
         ${renderLedgerCell('sourceType', escapeHtml(`${summary.sourceKindName}${summary.sourceForm ? ` · ${summary.sourceForm}` : ''}`))}
-        ${renderLedgerCell('sourceCode', escapeHtml(displaySourceCode(record)))}
         ${renderLedgerCell('documentType', escapeHtml(summary.documentType))}
-        ${renderLedgerCell('reason', escapeHtml(summary.reason))}
+        ${renderLedgerCell('sourceCode', escapeHtml(displaySourceCode(record)))}
+        ${renderLedgerCell('applicationDate', escapeHtml(summary.applicationDate || ''))}
+        ${renderLedgerCell('time', escapeHtml(summary.paymentDate || ''))}
         ${renderLedgerCell('requester', escapeHtml(displayRequester(record, summary.requester)))}
-        ${renderLedgerCell('department', escapeHtml(summary.department))}
+        ${renderLedgerCell('employeeOpenBank', escapeHtml(summary.employeeOpenBank))}
+        ${renderLedgerCell('employeeAccountName', escapeHtml(summary.employeeAccountName))}
+        ${renderLedgerCell('employeeBankAccount', escapeHtml(summary.employeeBankAccount))}
+        ${renderLedgerCell('departmentAttributionAmount', formatMoney(summary.departmentAttributionAmount), 'amount')}
+        ${renderLedgerCell('splitTaxAmount', formatSplitMoney(summary, 'splitTaxAmount'), 'amount')}
+        ${renderLedgerCell('splitExcludingTaxAmount', formatSplitMoney(summary, 'splitExcludingTaxAmount'), 'amount')}
         ${renderLedgerCell('expenseCategories', escapeHtml(displayExpenseCategories(record, summary.expenseCategories)))}
+        ${renderLedgerCell('businessLine', escapeHtml(summary.businessLine))}
+        ${renderLedgerCell('reason', escapeHtml(summary.reason))}
+        ${renderLedgerCell('expenseDepartment', escapeHtml(summary.expenseDepartment))}
+        ${renderLedgerCell('department', escapeHtml(summary.department))}
+        ${renderLedgerCell('erpPaymentBillType', escapeHtml(summary.erpPaymentBillType))}
+        ${renderLedgerCell('erpBankProcessingStatus', escapeHtml(summary.erpBankProcessingStatus))}
+        ${renderLedgerCell('erpPaymentDate', escapeHtml(summary.erpPaymentDate))}
         ${renderLedgerCell('startLocation', escapeHtml(summary.startLocation))}
         ${renderLedgerCell('arrivalLocation', escapeHtml(summary.arrivalLocation))}
         ${renderLedgerCell('trafficType', escapeHtml(summary.trafficType))}
         ${renderLedgerCell('purpose', escapeHtml(summary.purpose))}
-        ${renderLedgerCell('expenseDepartment', escapeHtml(summary.expenseDepartment))}
-        ${renderLedgerCell('splitTaxAmount', formatSplitMoney(summary, 'splitTaxAmount'), 'amount')}
-        ${renderLedgerCell('splitExcludingTaxAmount', formatSplitMoney(summary, 'splitExcludingTaxAmount'), 'amount')}
-        ${renderLedgerCell('departmentAttributionAmount', formatMoney(summary.departmentAttributionAmount), 'amount')}
+        ${renderLedgerCell('expenseOrganization', escapeHtml(summary.expenseOrganization))}
+        ${renderLedgerCell('paymentAmount', formatOptionalMoney(summary.paymentAmount), 'amount')}
+        ${renderLedgerCell('invoiceType', escapeHtml(summary.invoiceType))}
+        ${renderLedgerCell('invoiceCode', escapeHtml(summary.invoiceCode))}
+        ${renderLedgerCell('invoiceNumber', escapeHtml(summary.invoiceNumber))}
+        ${renderLedgerCell('invoiceIssueDate', escapeHtml(summary.invoiceIssueDate))}
+        ${renderLedgerCell('sellerName', escapeHtml(summary.sellerName))}
+        ${renderLedgerCell('buyerName', escapeHtml(summary.buyerName))}
+        ${renderLedgerCell('invoiceTaxAmount', formatOptionalMoney(summary.invoiceTaxAmount), 'amount')}
+        ${renderLedgerCell('invoiceExcludingTaxAmount', formatOptionalMoney(summary.invoiceExcludingTaxAmount), 'amount')}
+        ${renderLedgerCell('invoiceTotalAmount', formatOptionalMoney(summary.invoiceTotalAmount), 'amount')}
         ${renderLedgerCell('requestOrganization', escapeHtml(summary.requestOrganization))}
         ${renderLedgerCell('requestPaymentAmount', formatOptionalMoney(summary.requestPaymentAmount), 'amount')}
         ${renderLedgerCell('sourceDocumentStatus', escapeHtml(summary.sourceDocumentStatus))}
-        ${renderLedgerCell('expenseOrganization', escapeHtml(summary.expenseOrganization))}
-        ${renderLedgerCell('paymentAmount', formatOptionalMoney(summary.paymentAmount), 'amount')}
-        ${renderLedgerCell('businessLine', escapeHtml(summary.businessLine))}
         ${renderLedgerCell('interfaceSource', escapeHtml(legacyUnverified ? '历史数据待核验' : record.mockReplacement ? '接口未启用' : '正式接口'))}
-        ${renderLedgerCell('time', escapeHtml(summary.paymentDate || ''))}
         <td data-column-key="operationPanel" class="operation-panel-cell">
-          <button class="row-action row-generate-expense-reimbursement" type="button" data-source-id="${escapeHtml(record.sourceId)}" aria-label="为 ${escapeHtml(displaySourceCode(record))} ${legacyUnverified ? '禁止保存' : taxUnresolved ? '缺少本次拆分金额，禁止生成' : pushed ? '已保存费用报销单' : '生成待保存费用报销单'}" ${legacyUnverified || taxUnresolved || pushed ? 'disabled' : ''}>${legacyUnverified ? '禁止保存' : pushed ? '已保存' : actionText}</button>
+          <button class="row-action row-generate-expense-reimbursement" type="button" data-source-id="${escapeHtml(record.sourceId)}" aria-label="为 ${escapeHtml(displaySourceCode(record))} ${legacyUnverified ? '禁止保存' : pushed ? '已保存费用报销单' : '生成待保存费用报销单'}" ${legacyUnverified || pushed ? 'disabled' : ''}>${legacyUnverified ? '禁止保存' : pushed ? '已保存' : actionText}</button>
         </td>
       </tr>
     `;
@@ -1089,13 +1391,20 @@ function filterLedgerRecords(records) {
   const keyword = sourceSearchInput.value.trim().toLowerCase();
   return expandLedgerRecords(records).filter((record) => {
     const summary = buildSourceSummary(record);
+    const savedToErp = state.pushedSourceIds.has(record.sourceId);
+    if (saveStatusFilterSelect.value === 'saved' && !savedToErp) {
+      return false;
+    }
+    if (saveStatusFilterSelect.value === 'unsaved' && savedToErp) {
+      return false;
+    }
     if (requesterFilterSelect.value && displayRequester(record, summary.requester) !== requesterFilterSelect.value) {
       return false;
     }
     if (sourceTypeFilterSelect.value && record.sourceType !== sourceTypeFilterSelect.value) {
       return false;
     }
-    if (dateFilterSelect.value && summary.paymentDate !== dateFilterSelect.value) {
+    if (dateFilterSelect.value && dateOnly(summary.paymentDate) !== dateFilterSelect.value) {
       return false;
     }
     return !keyword
@@ -1116,12 +1425,20 @@ function renderLedgerFilterOptions(records, requesterCatalog = []) {
     return displayRequester(record, summary.requester);
   })).filter((value) => value && value !== '-'))]
     .sort((left, right) => left.localeCompare(right, 'zh-CN'));
-  const sourceTypes = new Map();
+  const sourceTypes = new Map([
+    ['OFFLINE_REIMBURSEMENT', '线下报销 · 费用明细'],
+    ['ONLINE_MONTHLY_BILL', '线上月结 · 月度账单']
+  ]);
   const dates = new Set();
   for (const record of records) {
     const summary = buildSourceSummary(record);
-    sourceTypes.set(record.sourceType, `${summary.sourceKindName}${summary.sourceForm ? ` · ${summary.sourceForm}` : ''}`);
-    if (summary.paymentDate) dates.add(summary.paymentDate);
+    if (!sourceTypes.has(record.sourceType)) {
+      sourceTypes.set(
+        record.sourceType,
+        `${summary.sourceKindName}${summary.sourceForm ? ` · ${summary.sourceForm}` : ''}`
+      );
+    }
+    if (summary.paymentDate) dates.add(dateOnly(summary.paymentDate));
   }
   requesterFilterSelect.innerHTML = [
     '<option value="">全部报销人</option>',
@@ -1150,6 +1467,9 @@ function renderLedgerTotals(records) {
     'splitTaxAmount',
     'splitExcludingTaxAmount',
     'departmentAttributionAmount',
+    'invoiceTaxAmount',
+    'invoiceExcludingTaxAmount',
+    'invoiceTotalAmount',
     'requestPaymentAmount',
     'paymentAmount'
   ]);
@@ -1214,6 +1534,7 @@ function ledgerSortValue(record, field) {
   if (field === 'splitExcludingTaxAmount') return Number(summary.splitExcludingTaxAmount || 0);
   if (field === 'departmentAttributionAmount') return Number(summary.departmentAttributionAmount || 0);
   if (field === 'sourceCode') return String(displaySourceCode(record) || '');
+  if (field === 'applicationDate') return Date.parse(summary.applicationDate || '') || 0;
   return Date.parse(summary.paymentDate || '') || 0;
 }
 
@@ -1243,28 +1564,44 @@ function ledgerColumnDefinitions() {
   return [
     { key: 'status', label: '处理状态' },
     { key: 'sourceType', label: '来源类型' },
-    { key: 'sourceCode', label: '来源单号' },
     { key: 'documentType', label: '单据类型' },
-    { key: 'reason', label: '事由' },
+    { key: 'sourceCode', label: '来源单号' },
+    { key: 'applicationDate', label: '申请日期' },
+    { key: 'time', label: '费用发生日期' },
     { key: 'requester', label: '报销人' },
-    { key: 'department', label: '部门' },
+    { key: 'employeeOpenBank', label: '开户银行' },
+    { key: 'employeeAccountName', label: '账户名称' },
+    { key: 'employeeBankAccount', label: '银行账号' },
+    { key: 'departmentAttributionAmount', label: '报销金额' },
+    { key: 'splitTaxAmount', label: '税额' },
+    { key: 'splitExcludingTaxAmount', label: '不含税金额' },
     { key: 'expenseCategories', label: '费用类型' },
+    { key: 'businessLine', label: '业务线' },
+    { key: 'reason', label: '事由' },
+    { key: 'expenseDepartment', label: '费用承担部门' },
+    { key: 'department', label: '部门' },
+    { key: 'erpPaymentBillType', label: 'ERP付款单类型' },
+    { key: 'erpBankProcessingStatus', label: '银行处理状态' },
+    { key: 'erpPaymentDate', label: '付款时间' },
     { key: 'startLocation', label: '出发地' },
     { key: 'arrivalLocation', label: '目的地' },
     { key: 'trafficType', label: '交通类型' },
     { key: 'purpose', label: '用途' },
-    { key: 'expenseDepartment', label: '费用承担部门' },
-    { key: 'splitTaxAmount', label: '税额' },
-    { key: 'splitExcludingTaxAmount', label: '不含税金额' },
-    { key: 'departmentAttributionAmount', label: '报销金额' },
+    { key: 'expenseOrganization', label: '费用承担组织' },
+    { key: 'paymentAmount', label: '付款金额' },
+    { key: 'invoiceType', label: '发票类型' },
+    { key: 'invoiceCode', label: '发票代码' },
+    { key: 'invoiceNumber', label: '发票号码' },
+    { key: 'invoiceIssueDate', label: '开票日期' },
+    { key: 'sellerName', label: '销售方名称' },
+    { key: 'buyerName', label: '购买方名称' },
+    { key: 'invoiceTaxAmount', label: '发票税额' },
+    { key: 'invoiceExcludingTaxAmount', label: '不计税金额' },
+    { key: 'invoiceTotalAmount', label: '价税合计' },
     { key: 'requestOrganization', label: '申请组织' },
     { key: 'requestPaymentAmount', label: '申请退/付款金额' },
     { key: 'sourceDocumentStatus', label: '单据状态' },
-    { key: 'expenseOrganization', label: '费用承担组织' },
-    { key: 'paymentAmount', label: '付款金额' },
-    { key: 'businessLine', label: '业务线' },
-    { key: 'interfaceSource', label: '接口来源' },
-    { key: 'time', label: '日期' }
+    { key: 'interfaceSource', label: '接口来源' }
   ];
 }
 
@@ -1274,6 +1611,36 @@ function visibleColumnKeys() {
 
 function toggleColumnSettings() {
   columnSettingsPanel.hidden = !columnSettingsPanel.hidden;
+}
+
+function toggleFieldMappingPanel() {
+  fieldMappingPanel.hidden = !fieldMappingPanel.hidden;
+  if (!fieldMappingPanel.hidden) {
+    columnSettingsPanel.hidden = true;
+    fieldMappingPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function closeFieldMappingPanel() {
+  fieldMappingPanel.hidden = true;
+}
+
+function renderInterfaceFieldMappings() {
+  const rows = filterInterfaceFieldCatalog(
+    interfaceFieldCatalog,
+    interfaceFieldSourceFilter.value,
+    interfaceFieldQuery.value
+  );
+  interfaceFieldCount.textContent = `${rows.length}项`;
+  interfaceFieldMappingBody.innerHTML = rows.map((item) => `
+    <tr>
+      <td><span class="source-type-tag ${item.sourceType === '线上' ? 'online' : 'offline'}">${escapeHtml(item.sourceType)}</span></td>
+      <td><code>${escapeHtml(item.sourceField)}</code></td>
+      <td>${escapeHtml(item.normalizedField)}</td>
+      <td><code>${escapeHtml(item.erpField)}</code></td>
+      <td>${escapeHtml(item.rule)}</td>
+    </tr>
+  `).join('');
 }
 
 function updateVisibleColumn(event) {
@@ -1317,6 +1684,9 @@ async function exportLedgerCsv() {
         documentType: summary.documentType,
         reason: summary.reason,
         requester: displayRequester(record, summary.requester),
+        employeeOpenBank: summary.employeeOpenBank,
+        employeeAccountName: summary.employeeAccountName,
+        employeeBankAccount: summary.employeeBankAccount,
         department: summary.department,
         expenseCategories: displayExpenseCategories(record, summary.expenseCategories),
         startLocation: summary.startLocation,
@@ -1327,6 +1697,15 @@ async function exportLedgerCsv() {
         splitTaxAmount: formatSplitMoney(summary, 'splitTaxAmount'),
         splitExcludingTaxAmount: formatSplitMoney(summary, 'splitExcludingTaxAmount'),
         departmentAttributionAmount: formatMoney(summary.departmentAttributionAmount),
+        invoiceType: summary.invoiceType,
+        invoiceCode: summary.invoiceCode,
+        invoiceNumber: summary.invoiceNumber,
+        invoiceIssueDate: summary.invoiceIssueDate,
+        sellerName: summary.sellerName,
+        buyerName: summary.buyerName,
+        invoiceTaxAmount: formatOptionalMoney(summary.invoiceTaxAmount),
+        invoiceExcludingTaxAmount: formatOptionalMoney(summary.invoiceExcludingTaxAmount),
+        invoiceTotalAmount: formatOptionalMoney(summary.invoiceTotalAmount),
         requestOrganization: summary.requestOrganization,
         requestPaymentAmount: formatOptionalMoney(summary.requestPaymentAmount),
         sourceDocumentStatus: summary.sourceDocumentStatus,
@@ -1334,6 +1713,7 @@ async function exportLedgerCsv() {
         paymentAmount: formatOptionalMoney(summary.paymentAmount),
         businessLine: summary.businessLine,
         interfaceSource: record.mockReplacement ? '接口未启用' : '正式接口',
+        applicationDate: summary.applicationDate || '',
         time: summary.paymentDate || ''
       };
       return definitions.map((definition) => values[definition.key]);
@@ -1345,10 +1725,18 @@ async function exportLedgerCsv() {
     })
   )).join(',')).join('\n');
   const filename = `报销单列表-${new Date().toISOString().slice(0, 10)}.csv`;
-  const exported = await api.createCsvExport({
-    filename,
-    content: `\uFEFF${csv}`
-  });
+  const content = `\uFEFF${csv}`;
+  let exported;
+  try {
+    exported = await saveCsvToDesktop({ filename, content });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      show({ cancelled: true }, '已取消导出。');
+      return;
+    }
+    throw error;
+  }
+  if (!exported) exported = await api.createCsvExport({ filename, content });
   show(
     { count: rows.length, ...exported },
     `已导出 ${rows.length} 条报销单列表数据，文件位置：${exported.localPath}`
@@ -1413,8 +1801,8 @@ function renderFinanceReview(preview) {
         <div><dt>来源单号</dt><dd>${escapeHtml(displaySourceCode(selectedRecord))}</dd></div>
         <div><dt>报销人</dt><dd>${escapeHtml(displayRequester(selectedRecord, summary.requester))}</dd></div>
         <div><dt>部门</dt><dd>${escapeHtml(summary.department)}</dd></div>
-        <div><dt>本次拆分税额</dt><dd>${formatSplitMoney(summary, 'splitTaxAmount')}</dd></div>
-        <div><dt>本次拆分不含税金额</dt><dd>${formatSplitMoney(summary, 'splitExcludingTaxAmount')}</dd></div>
+        <div><dt>可抵扣税额</dt><dd>${formatSplitMoney(summary, 'splitTaxAmount')}</dd></div>
+        <div><dt>未税金额</dt><dd>${formatSplitMoney(summary, 'splitExcludingTaxAmount')}</dd></div>
         <div><dt>费用归属部门金额</dt><dd>${formatMoney(summary.departmentAttributionAmount)}</dd></div>
       </dl>
     `;
@@ -1504,7 +1892,11 @@ function applyTemplate(template) {
   fields.mockDocumentDate.value = template.mockDocumentDate;
   fields.mockYear.value = template.mockYear;
   fields.mockPeriod.value = template.mockPeriod;
-  fields.currencyNumbers.value = JSON.stringify(template.currencyNumbers, null, 2);
+  fields.expenseItemNumberMappings.value = formatFieldMapping(template.expenseItemNumberMappings);
+  fields.employeeDetailNumberMappings.value = formatFieldMapping(template.employeeDetailNumberMappings);
+  fields.departmentDetailNumberMappings.value = formatFieldMapping(template.departmentDetailNumberMappings);
+  fields.organizationNumberMappings.value = formatFieldMapping(template.organizationNumberMappings);
+  fields.currencyNumbers.value = formatFieldMapping(template.currencyNumbers);
   fields.mockFixedJson.value = template.mockFixedJson;
 }
 
@@ -1559,8 +1951,14 @@ function buildSourceSummary(record) {
       sourceKindName: record.sourceKindName || (record.sourceType === 'ONLINE_MONTHLY_BILL' ? '线上月结' : '线下报销'),
       sourceForm: record.sourceForm || (record.sourceType === 'ONLINE_MONTHLY_BILL' ? '企业账单' : '费用明细'),
       documentType: record.documentType || '',
+      erpPaymentBillType: record.erpPaymentBillType || '',
+      erpBankProcessingStatus: record.erpBankProcessingStatus || '',
+      erpPaymentDate: record.erpPaymentDate || '',
       reason: record.reason || '',
       requester: record.requesterName || record.requesterCode || data.submitter?.name || data.proposer?.name || data.user?.name || '-',
+      employeeOpenBank: record.employeeOpenBank || '',
+      employeeAccountName: record.employeeAccountName || '',
+      employeeBankAccount: record.employeeBankAccount || '',
       department: record.departmentName || record.departmentCode || data.submitter?.department_name || data.proposer?.department_name || data.user?.department_name || '-',
       expenseCategories: expense?.categoryName || record.expenseTypes || expenses.map((expense) => expense.cost_category?.name || expense.cost_category?.code || '未分类').join(' / ') || '-',
       startLocation: expense?.startLocation ?? record.startLocation ?? '',
@@ -1578,19 +1976,70 @@ function buildSourceSummary(record) {
       taxMappingComplete,
       documentTaxMappingComplete,
       departmentAttributionAmount: expense ? expense.departmentAttributionAmount : departmentAttributionAmount,
+      invoiceType: expense?.invoiceType || '',
+      invoiceCode: expense?.invoiceCode || '',
+      invoiceNumber: expense?.invoiceNumber || '',
+      invoiceIssueDate: expense?.invoiceIssueDate || '',
+      sellerName: expense?.sellerName || '',
+      buyerName: expense?.buyerName || '',
+      invoiceTaxAmount: expense?.invoiceTaxAmount ?? null,
+      invoiceExcludingTaxAmount: expense?.invoiceExcludingTaxAmount ?? null,
+      invoiceTotalAmount: expense?.invoiceTotalAmount ?? null,
       requestOrganization: record.requestOrganizationName || record.requestOrganizationCode || '',
       requestPaymentAmount: record.requestPaymentAmount,
       sourceDocumentStatus: record.sourceDocumentStatus || '',
       expenseOrganization: record.expenseOrganizationName || record.expenseOrganizationCode || '',
       paymentAmount: record.paymentAmount,
       businessLine: record.businessLine || '',
+      applicationDate: sourceApplicationDate(record, data),
       paymentDate: expense
         ? expense.expenseDate
-        : record.paymentDate || dateOnly(data.payment_time || data.pay_time || data.payment_date || data.reimburse_time || '')
+        : record.sourceType === 'ONLINE_MONTHLY_BILL'
+          ? record.expenseDateTime || record.paymentDate || ''
+          : record.paymentDate || dateOnly(data.payment_time || data.pay_time || data.payment_date || data.reimburse_time || '')
     };
   } catch {
-    return { sourceKindName: '', sourceForm: '', documentType: '', reason: '', requester: '-', department: '-', expenseCategories: 'JSON解析失败', startLocation: '', arrivalLocation: '', trafficType: '', purpose: '', expenseDepartment: '', totalAmount: 0, splitTaxAmount: null, splitExcludingTaxAmount: null, taxMappingComplete: false, documentTaxMappingComplete: false, departmentAttributionAmount: 0, requestOrganization: '', requestPaymentAmount: null, sourceDocumentStatus: '', expenseOrganization: '', paymentAmount: null, businessLine: '', paymentDate: '' };
+    return { sourceKindName: '', sourceForm: '', documentType: '', erpPaymentBillType: '', erpBankProcessingStatus: '', erpPaymentDate: '', reason: '', requester: '-', employeeOpenBank: '', employeeAccountName: '', employeeBankAccount: '', department: '-', expenseCategories: 'JSON解析失败', startLocation: '', arrivalLocation: '', trafficType: '', purpose: '', expenseDepartment: '', totalAmount: 0, splitTaxAmount: null, splitExcludingTaxAmount: null, taxMappingComplete: false, documentTaxMappingComplete: false, departmentAttributionAmount: 0, invoiceType: '', invoiceCode: '', invoiceNumber: '', invoiceIssueDate: '', sellerName: '', buyerName: '', invoiceTaxAmount: null, invoiceExcludingTaxAmount: null, invoiceTotalAmount: null, requestOrganization: '', requestPaymentAmount: null, sourceDocumentStatus: '', expenseOrganization: '', paymentAmount: null, businessLine: '', applicationDate: '', paymentDate: '' };
   }
+}
+
+function summarizeBatchFailureReasons(failures) {
+  const reasons = new Map();
+  for (const failure of failures) {
+    const message = String(failure.message || failure.code || '未知错误').trim();
+    reasons.set(message, (reasons.get(message) || 0) + 1);
+  }
+  return [...reasons.entries()]
+    .map(([message, count]) => `${count} 张：${message}`)
+    .join('；');
+}
+
+function summarizeBatchSkippedReasons(skipped) {
+  const reasons = new Map();
+  for (const record of skipped) {
+    const reason = String(record.reason || '业务规则跳过').trim();
+    reasons.set(reason, (reasons.get(reason) || 0) + 1);
+  }
+  return [...reasons.entries()]
+    .map(([reason, count]) => `${count} 张：${reason}`)
+    .join('；');
+}
+
+function businessRuleSkipReason(error) {
+  if (isMissingKingdeeEmployee(error)) return '金蝶员工资料未建档';
+  if (error?.code === 'KINGDEE_SAVE_LINE_MISMATCH') {
+    return 'ERP已保存单据与当前接口明细不一致，已跳过';
+  }
+  if (error?.code === 'KINGDEE_SAVE_FAILED' && ['开户银行', '账户名称', '银行账号'].every((field) => (
+    String(error?.message || '').includes(field)
+  ))) {
+    return '员工银行资料未配置完整，已跳过';
+  }
+  if (error?.code === 'KINGDEE_APPLICATION_DATE_BEFORE_ENABLE_DATE') {
+    const enableDate = error?.detail?.enableDate;
+    return `申请日期早于金蝶组织费用管理启用日期${enableDate ? ` ${enableDate}` : ''}（保留分贝通申请日期）`;
+  }
+  return error?.message || '业务规则跳过';
 }
 
 function expandLedgerRecords(records) {
@@ -1617,6 +2066,7 @@ function sourceLedgerExpense(expense) {
     .map((field) => [String(field.field_code || ''), field.detail]));
   const departmentAttributionAmount = expenseDepartmentAttributionAmount(expense);
   const split = expenseSplitAmounts(expense);
+  const invoiceSummary = summarizeExpenseInvoices(expense);
   return {
     id: String(expense.id || ''),
     categoryName: expense.cost_category?.name || expense.cost_category?.code || '',
@@ -1629,8 +2079,36 @@ function sourceLedgerExpense(expense) {
     departmentAttributionAmount,
     startLocation: sourceLocationName(customFields.get('start_location')),
     arrivalLocation: sourceLocationName(customFields.get('arrival_location')),
-    expenseDepartment: sourceExpenseDepartment(expense)
+    expenseDepartment: sourceExpenseDepartment(expense),
+    ...invoiceSummary
   };
+}
+
+async function confirmErpSaveAfterConnectionFailure(sourceId, minimumUpdateTime = 0) {
+  let lastRecord = null;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 750));
+    }
+    try {
+      lastRecord = await api.getProcess(sourceId);
+      if (isConfirmedErpSave(lastRecord)
+        && isProcessUpdatedAfter(lastRecord, minimumUpdateTime)) {
+        return lastRecord;
+      }
+    } catch (error) {
+      if (!['LOCAL_BACKEND_UNREACHABLE', 'HTTP_404'].includes(error?.code)) {
+        throw error;
+      }
+    }
+  }
+  return lastRecord;
+}
+
+function isProcessUpdatedAfter(record, minimumUpdateTime) {
+  if (!minimumUpdateTime) return true;
+  const updateTime = Date.parse(record?.updateTime || '');
+  return Number.isFinite(updateTime) && updateTime >= minimumUpdateTime;
 }
 
 function sourceLocationName(value) {
@@ -1685,27 +2163,7 @@ function expenseDepartmentAttributionAmount(expense) {
 }
 
 function expenseSplitAmounts(expense) {
-  const amount = roundMoney(expense?.total_amount);
-  const direct = directExpenseSplitAmounts(expense, amount);
-  if (direct.resolved) return direct;
-  const invoices = Array.isArray(expense?.invoices) ? expense.invoices : [];
-  if (invoices.length === 0) {
-    return { taxAmount: 0, excludingTaxAmount: amount, resolved: true };
-  }
-  let taxAmount = 0;
-  let excludingTaxAmount = 0;
-  for (const invoice of invoices) {
-    const split = invoiceSplitAmounts(invoice);
-    if (!split.resolved) return split;
-    taxAmount += split.taxAmount;
-    excludingTaxAmount += split.excludingTaxAmount;
-  }
-  if (roundMoney(taxAmount + excludingTaxAmount) !== amount) return unresolvedSplit();
-  return {
-    taxAmount: roundMoney(taxAmount),
-    excludingTaxAmount: roundMoney(excludingTaxAmount),
-    resolved: true
-  };
+  return directExpenseSplitAmounts(expense);
 }
 
 function invoiceSplitAmounts(invoice) {
@@ -1724,16 +2182,19 @@ function invoiceSplitAmounts(invoice) {
   return { taxAmount, excludingTaxAmount, resolved: true };
 }
 
-function directExpenseSplitAmounts(expense, totalAmount) {
+function directExpenseSplitAmounts(expense) {
   const fields = Array.isArray(expense?.cost_custom_fields) ? expense.cost_custom_fields : [];
-  const taxAmount = explicitCustomAmount(fields, ['税额'], ['tax_amount']);
+  const taxAmount = explicitCustomAmount(
+    fields,
+    ['\u53ef\u62b5\u6263\u7a0e\u989d'],
+    ['deductible_tax']
+  );
   const excludingTaxAmount = explicitCustomAmount(
     fields,
-    ['未税金额', '不含税金额'],
-    ['untaxed_amount', 'exclude_tax_amount']
+    ['\u672a\u7a0e\u91d1\u989d'],
+    ['untaxed_amount']
   );
-  if (taxAmount === null || excludingTaxAmount === null
-    || roundMoney(taxAmount + excludingTaxAmount) !== roundMoney(totalAmount)) {
+  if (taxAmount === null || excludingTaxAmount === null) {
     return unresolvedSplit();
   }
   return { taxAmount, excludingTaxAmount, resolved: true };
@@ -1782,6 +2243,44 @@ function dateOnly(value) {
   return `${matched[1]}-${matched[2].padStart(2, '0')}-${matched[3].padStart(2, '0')}`;
 }
 
+function sourceApplicationDate(record, data) {
+  if (record.sourceType === 'ONLINE_MONTHLY_BILL' || data.source_kind === 'ONLINE_MONTHLY_BILL') {
+    const cycleDates = [...String(data.bill_cycle || '').matchAll(
+      /(20\d{2})[/-](\d{1,2})[/-](\d{1,2})/g
+    )];
+    const cycleStart = cycleDates.at(0);
+    if (cycleStart) {
+      const date = new Date(Date.UTC(
+        Number(cycleStart[1]),
+        Number(cycleStart[2]) - 1,
+        Number(cycleStart[3])
+      ));
+      if (!Number.isNaN(date.getTime())) return date.toISOString().slice(0, 10);
+    }
+    const explicit = dateOnly(
+      data.bill_date
+      || data.billing_date
+      || data.account_date
+      || data.bookkeeping_date
+    );
+    if (explicit) return explicit;
+    const month = /^(20\d{2})[-/]?(\d{2})/.exec(String(
+      data.settlement_month || data.end_month || data.start_month || record.settlementMonth || ''
+    ).trim());
+    if (month) {
+      const date = new Date(Date.UTC(Number(month[1]), Number(month[2]) - 1, 1));
+      if (!Number.isNaN(date.getTime())) return date.toISOString().slice(0, 10);
+    }
+    return record.applicationDate || '';
+  }
+  return dateOnly(
+    data.submit_time
+    || data.reimburse_time
+    || data.create_time
+    || data.apply_time
+  ) || record.applicationDate || '';
+}
+
 function queueStatus(record) {
   if (isLegacyUnverified(record)) return '来源待核验';
   const sourceId = record.sourceId;
@@ -1813,11 +2312,11 @@ function readConfig() {
     expenseReimbursementOrgNumber: defaults.expenseReimbursementOrgNumber,
     expenseReimbursementBillTypeNumber: defaults.expenseReimbursementBillTypeNumber,
     expenseReimbursementSettlementTypeNumber: defaults.expenseReimbursementSettlementTypeNumber,
-    expenseItemNumberMappings: cloneObject(defaults.expenseItemNumberMappings),
-    organizationNumberMappings: cloneObject(defaults.organizationNumberMappings || {}),
-    currencyNumbers: parseJson(fields.currencyNumbers.value, '币别映射'),
-    departmentDetailNumberMappings: cloneObject(defaults.departmentDetailNumberMappings),
-    employeeDetailNumberMappings: cloneObject(defaults.employeeDetailNumberMappings),
+    expenseItemNumberMappings: parseFieldMapping(fields.expenseItemNumberMappings.value, '费用类型映射'),
+    organizationNumberMappings: parseFieldMapping(fields.organizationNumberMappings.value, '组织映射'),
+    currencyNumbers: parseFieldMapping(fields.currencyNumbers.value, '币别映射'),
+    departmentDetailNumberMappings: parseFieldMapping(fields.departmentDetailNumberMappings.value, '部门映射'),
+    employeeDetailNumberMappings: parseFieldMapping(fields.employeeDetailNumberMappings.value, '员工映射'),
     exchangeRateTypeNumber: defaults.exchangeRateTypeNumber,
     exchangeRate: defaults.exchangeRate
   };
@@ -1858,9 +2357,6 @@ function buildExpenseReimbursementRequest() {
 }
 
 function buildExpenseReimbursementRequestForRecord(record, options = {}) {
-  if (buildSourceSummary(record).documentTaxMappingComplete === false) {
-    throw new Error('该单据缺少分贝通接口明确返回且核对一致的本次拆分税额和本次拆分不含税金额；缺失值保持为空，已停止生成，未按整票金额反算。');
-  }
   const timing = expenseReimbursementTimingForRecord(record);
   return {
     fixedJson: record.fixedJson || undefined,
@@ -1874,13 +2370,13 @@ function buildExpenseReimbursementRequestForRecord(record, options = {}) {
 }
 
 function expenseReimbursementTimingForRecord(record) {
-  const paymentDate = String(record?.paymentDate || '').trim();
-  const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(paymentDate);
+  const applicationDate = String(buildSourceSummary(record).applicationDate || '').trim();
+  const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(applicationDate);
   if (!matched) {
-    throw new Error(`单据付款日期无效，不能生成费用报销单：${record?.sourceCode || record?.sourceId || '-'}`);
+    throw new Error(`单据申请日期无效，不能生成费用报销单：${record?.sourceCode || record?.sourceId || '-'}`);
   }
   return {
-    documentDate: paymentDate,
+    documentDate: applicationDate,
     year: Number(matched[1]),
     period: Number(matched[2])
   };
@@ -1953,6 +2449,34 @@ function logLabel(action) {
   return labels[action] || action;
 }
 
+function logDetailSummary(detail) {
+  if (!detail || typeof detail !== 'object') return '操作已记录';
+  const preferred = [
+    detail.sourceCode,
+    detail.sourceId,
+    detail.batchId,
+    detail.message,
+    detail.tenantKey,
+    detail.kingdeeAcctIdKey
+  ].filter(Boolean);
+  if (preferred.length > 0) return preferred.join(' · ');
+  const keys = Object.keys(detail);
+  return keys.length > 0 ? `记录字段：${keys.slice(0, 4).join('、')}` : '操作已记录';
+}
+
+function formatLogTime(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value || '') : date.toLocaleString('zh-CN');
+}
+
+function hasFieldMapping(value) {
+  try {
+    return Object.keys(parseFieldMapping(value)).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function show(value, summary = '') {
   const message = summary || summarizeValue(value);
   resultOutput.textContent = JSON.stringify(value, null, 2);
@@ -1962,9 +2486,118 @@ function show(value, summary = '') {
 
 function showOperationFeedback(message, isError = false) {
   if (!operationFeedback) return;
-  operationFeedback.textContent = message;
+  if (operationFeedbackMessage) {
+    operationFeedbackMessage.textContent = message;
+  } else {
+    operationFeedback.textContent = message;
+  }
   operationFeedback.hidden = false;
   operationFeedback.classList.toggle('error', isError);
+  if (batchProgress) batchProgress.hidden = true;
+}
+
+function startBatchProgress(total, action) {
+  resumeBatchSave();
+  state.batchSaveRunning = true;
+  if (retryFailedSaveButton) retryFailedSaveButton.disabled = true;
+  if (pauseSaveButton) {
+    pauseSaveButton.hidden = false;
+    pauseSaveButton.disabled = false;
+    pauseSaveButton.textContent = '暂停保存';
+    pauseSaveButton.setAttribute('aria-pressed', 'false');
+  }
+  showOperationFeedback(`${action}进行中，请勿关闭或刷新页面。`);
+  updateBatchProgress({
+    completed: 0,
+    total,
+    successCount: 0,
+    failureCount: 0
+  }, action);
+}
+
+function setFailedErpSaveRecords(failures) {
+  state.failedErpSaveRecords = (Array.isArray(failures) ? failures : [])
+    .map((failure) => failure?.item || failure)
+    .filter((record) => record?.sourceId);
+  if (!retryFailedSaveButton) return;
+  const count = state.failedErpSaveRecords.length;
+  retryFailedSaveButton.hidden = count === 0;
+  retryFailedSaveButton.disabled = count === 0 || state.batchSaveRunning;
+  retryFailedSaveButton.textContent = count > 0
+    ? `重试失败单据（${count}）`
+    : '重试失败单据';
+}
+
+function updateBatchProgress(progress, action) {
+  if (!operationFeedback || !batchProgress) return;
+  const total = Math.max(0, Number(progress.total) || 0);
+  const completed = Math.min(total, Math.max(0, Number(progress.completed) || 0));
+  const percent = total > 0 ? Math.round(completed / total * 100) : 0;
+  operationFeedback.hidden = false;
+  operationFeedback.classList.toggle('error', Boolean(progress.failureCount));
+  if (progress.error && operationFeedbackMessage) {
+    operationFeedbackMessage.textContent = `${action}进行中，请勿关闭或刷新页面。\n最近失败：\n${formatBatchFailureDetails([{
+      item: progress.item,
+      error: progress.error
+    }])}`;
+  }
+  batchProgress.hidden = false;
+  batchProgress.setAttribute('aria-valuenow', String(percent));
+  const stateText = state.batchSavePaused ? '已暂停' : action;
+  batchProgressText.textContent = `${stateText}：${completed}/${total}；已保存 ${progress.successCount || 0}；未保存 ${progress.failureCount || 0}`;
+  batchProgressPercent.textContent = `${percent}%`;
+  batchProgressFill.style.width = `${percent}%`;
+}
+
+function finishBatchProgress(total, successCount, failureCount, isError, skippedCount = 0) {
+  if (!operationFeedback || !batchProgress) return;
+  operationFeedback.hidden = false;
+  operationFeedback.classList.toggle('error', Boolean(isError));
+  batchProgress.hidden = false;
+  batchProgress.setAttribute('aria-valuenow', '100');
+  batchProgressText.textContent = `处理完成：${total}/${total}；已保存 ${successCount}；已跳过 ${skippedCount}；未保存 ${failureCount}`;
+  batchProgressPercent.textContent = '100%';
+  batchProgressFill.style.width = '100%';
+  state.batchSaveRunning = false;
+  resumeBatchSave();
+  if (pauseSaveButton) {
+    pauseSaveButton.hidden = true;
+    pauseSaveButton.disabled = true;
+  }
+  if (retryFailedSaveButton && state.failedErpSaveRecords.length > 0) {
+    retryFailedSaveButton.hidden = false;
+    retryFailedSaveButton.disabled = false;
+  }
+}
+
+function waitUntilBatchSaveResumed() {
+  if (!state.batchSavePaused) return Promise.resolve();
+  return new Promise((resolve) => state.batchSaveResumeWaiters.push(resolve));
+}
+
+function resumeBatchSave() {
+  state.batchSavePaused = false;
+  const waiters = state.batchSaveResumeWaiters.splice(0);
+  for (const resolve of waiters) resolve();
+}
+
+function toggleBatchSavePause() {
+  if (!state.batchSaveRunning || !pauseSaveButton) return;
+  if (state.batchSavePaused) {
+    resumeBatchSave();
+    pauseSaveButton.textContent = '暂停保存';
+    pauseSaveButton.setAttribute('aria-pressed', 'false');
+    if (batchProgressText) {
+      batchProgressText.textContent = batchProgressText.textContent.replace(/^已暂停/, '继续保存');
+    }
+    return;
+  }
+  state.batchSavePaused = true;
+  pauseSaveButton.textContent = '继续保存';
+  pauseSaveButton.setAttribute('aria-pressed', 'true');
+  if (batchProgressText) {
+    batchProgressText.textContent = batchProgressText.textContent.replace(/^[^：]+/, '已暂停');
+  }
 }
 
 function showError(step, error) {
@@ -1976,7 +2609,7 @@ function operationStepName(fn) {
     generateExpenseReimbursementsFromLedger: '生成费用报销单',
     generateExpenseReimbursementFromRow: '生成费用报销单',
     pushSelectedToErp: '保存费用报销单',
-    resaveSelectedToErp: '重新保存费用报销单',
+    resaveSelectedToErp: '保存/更新费用报销单',
     pushErp: '保存费用报销单',
     syncFenbeitong: '同步分贝通',
     saveConfig: '保存配置',

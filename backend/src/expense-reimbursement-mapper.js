@@ -20,7 +20,14 @@ const KINGDEE_EXPENSE_ITEM_NUMBERS = Object.freeze({
   CI017: 'CI017',
   CI019: 'CI019',
   CI020: 'CI020',
-  CI021: 'CI021'
+  CI021: 'CI021',
+  CI022: 'CI022',
+  // Fenbeitong's team-building subcategories do not have one-to-one Kingdee
+  // expense items in this account set. Kingdee exposes the authoritative
+  // team-activity item FYXM13_SYS for all three.
+  10037: 'FYXM13_SYS',
+  10039: 'FYXM13_SYS',
+  10043: 'FYXM13_SYS'
 });
 
 const REQUIRED_EMPLOYEE_NUMBERS = Object.freeze({
@@ -50,13 +57,25 @@ const REQUIRED_DEPARTMENT_NUMBERS = Object.freeze({
   '销售部': 'BM000006'
 });
 
+const ONLINE_CONTACT_UNIT = Object.freeze({
+  type: 'FIN_OTHERS',
+  number: '01.03.034',
+  name: '北京分贝国际旅行社有限公司'
+});
+
 export function buildExpenseReimbursementPreview(input) {
   const config = input.config || {};
+  const employeeBankDetails = normalizeEmployeeBankDetails(input.employeeBankDetails);
+  const hasCompleteEmployeeBankDetails = Boolean(
+    employeeBankDetails.openBank
+    && employeeBankDetails.accountName
+    && employeeBankDetails.bankAccount
+  );
   const document = parseFenbeitongDetail(input.fixedJson);
+  const onlineContactUnit = document.sourceKind === 'ONLINE_MONTHLY_BILL'
+    ? normalizeOnlineContactUnit(input.onlineContactUnit || ONLINE_CONTACT_UNIT)
+    : null;
   const documentDate = requiredDate(document.applicationDate || input.documentDate, 'documentDate');
-  if (!document.taxMappingComplete) {
-    throw new Error('分贝通接口未返回可直接使用且核对一致的本次拆分税额和本次拆分不含税金额；缺失值保持为空，已停止生成，未使用整票税额按比例反算。');
-  }
   const employeeNumber = resolveEmployeeNumber(config, document);
   const departmentNumber = resolveDepartmentNumber(config, document);
   const requestOrgNumber = resolveOrganizationNumber(config, document.requestOrganizationCode, document.requestOrganizationName);
@@ -87,14 +106,20 @@ export function buildExpenseReimbursementPreview(input) {
     exchangeRate,
     expense
   }));
-  const totalAmount = round(entries.reduce(
-    (sum, entry) => sum + entry.FExpenseAmount + entry.FTaxAmt,
+  const totalAmount = round(entries.reduce((sum, entry) => sum + entry.FExpenseAmount, 0));
+  const taxAmount = round(entries.reduce((sum, entry) => sum + (Number(entry.FTaxAmt) || 0), 0));
+  const excludingTaxAmount = round(entries.reduce(
+    (sum, entry) => sum + (Number(entry.FLOCNOTAXAMOUNT) || 0),
     0
   ));
-  const taxAmount = round(entries.reduce((sum, entry) => sum + entry.FTaxAmt, 0));
-  const excludingTaxAmount = round(entries.reduce((sum, entry) => sum + entry.FTaxSubmitAmt, 0));
-  const hasMissingOnlineLocation = document.sourceKind === 'ONLINE_MONTHLY_BILL'
-    && entries.some((entry) => !entry.F_PAEZ_Text || !entry.F_ora_Text);
+  const requiresSourcePreservingValidationBypass = !hasCompleteEmployeeBankDetails || entries.some(
+    (entry) => (
+      !entry.F_PAEZ_Text
+      || !entry.F_ora_Text
+      || !entry.FRemark
+      || (Number(entry.FTaxAmt) || 0) !== 0
+    )
+  );
   if (totalAmount !== document.totalAmount) {
     throw new Error(`expense reimbursement total ${totalAmount.toFixed(2)} does not match source ${document.totalAmount.toFixed(2)}`);
   }
@@ -106,29 +131,41 @@ export function buildExpenseReimbursementPreview(input) {
     SubSystemId: '',
     IsVerifyBaseDataField: 'true',
     IsEntryBatchFill: 'true',
-    // Fenbeitong legitimately leaves route fields blank for meals, hotels and
-    // value-added services.  The Kingdee form currently marks those custom
-    // fields as globally required.  Keep the source blanks intact and disable
-    // only Kingdee's generic operation validation for affected online bills;
-    // all source, amount and base-data validations above still run.
-    ValidateFlag: hasMissingOnlineLocation ? 'false' : 'true',
+    // Fenbeitong legitimately leaves route/purpose fields blank. This account
+    // set also displays both FExpenseAmount and FExpSubmitAmount as the gross
+    // reimbursement amount while retaining tax in its own column; Kingdee's
+    // stock formula instead assumes a net expense amount and adds tax again.
+    // Preserve the exact source values and bypass only those generic form
+    // validations. Source amount/tax consistency and base-data checks above
+    // still run before the request reaches Kingdee.
+    ValidateFlag: requiresSourcePreservingValidationBypass ? 'false' : 'true',
     NumberSearch: 'true',
-    IsAutoAdjustField: 'false',
+    // Kingdee resolves fields with base-data dependencies (for example,
+    // FRequestDeptID -> FOrgID) in request order unless this is enabled.
+    // New account sets reject an otherwise valid department when its
+    // organization context has not been resolved first.
+    IsAutoAdjustField: 'true',
     InterationFlags: '',
     IgnoreInterationFlag: '',
     IsControlPrecision: 'false',
     ValidateRepeatJson: 'false',
     Model: {
       FID: 0,
-      // A single Fenbeitong enterprise bill is split into one reimbursement
-      // per employee/month, so its original bill number cannot be used as the
-      // unique Kingdee document number for every employee.  Blank tells
-      // Kingdee to allocate its configured number.  The original bill number
-      // remains in FCausa and the process/source metadata below.
+      // Fenbeitong uses one enterprise bill number for many employees, while
+      // Kingdee requires every reimbursement document number to be unique.
+      // Keep the authoritative Fenbeitong bill number verbatim and append the
+      // Fenbeitong employee code as the deterministic uniqueness suffix.
       FBillNo: document.sourceKind === 'ONLINE_MONTHLY_BILL'
-        ? ''
+        ? onlineEnterpriseBillNumber(document)
         : document.reimbursementCode,
       FDocumentStatus: 'Z',
+      // Kingdee resolves departments and employees inside their organization
+      // context. Keep the organization fields before every dependent base-data
+      // field because update/save parsing follows the JSON field order.
+      FOrgID: numberReference(requestOrgNumber),
+      FExpenseOrgId: numberReference(expenseOrgNumber),
+      FPayOrgId: numberReference(expenseOrgNumber),
+      FDate: documentDate,
       // ER_ExpReimbursement.FProposerID references the employee's staff record.
       // Unlike ordinary base-data fields, Kingdee exposes its number as
       // FStaffNumber (confirmed from the form's View response).
@@ -138,15 +175,26 @@ export function buildExpenseReimbursementPreview(input) {
       FExchangeRate: exchangeRate,
       FCurrencyID: numberReference(currencyNumber),
       FExchangeTypeID: numberReference(exchangeTypeNumber),
-      FOrgID: numberReference(requestOrgNumber),
-      FDate: documentDate,
-      FExpenseOrgId: numberReference(expenseOrgNumber),
       FLocCurrencyID: numberReference(currencyNumber),
-      FPayOrgId: numberReference(expenseOrgNumber),
-      FCONTACTUNITTYPE: 'BD_Empinfo',
-      FCONTACTUNIT: numberReference(employeeNumber),
+      // All online monthly enterprise-bill reimbursements are settled with
+      // Fenbeitong's travel-service entity.  This is a real FIN_OTHERS base
+      // record in account set 20260728 (number 01.03.034), not a display-only
+      // default.  Offline reimbursements continue to use the employee as the
+      // contact unit.
+      FCONTACTUNITTYPE: document.sourceKind === 'ONLINE_MONTHLY_BILL'
+        ? onlineContactUnit.type
+        : 'BD_Empinfo',
+      FCONTACTUNIT: numberReference(
+        document.sourceKind === 'ONLINE_MONTHLY_BILL'
+          ? onlineContactUnit.number
+          : employeeNumber
+      ),
       FBillTypeID: numberReference(config.expenseReimbursementBillTypeNumber || 'FYBXD001_SYS'),
-      FRequestType: '0',
+      // Kingdee stores the "申请付款" choice in FRequestType; PayBox is only
+      // the derived UI state returned by View.  Real records in this account
+      // use 1 for an offline reimbursement requesting payment and 0 when no
+      // payment is requested (online monthly bills).
+      FRequestType: document.sourceKind === 'OFFLINE_REIMBURSEMENT' ? '1' : '0',
       FCombinedPay: false,
       FExpAmountSum: totalAmount,
       FLocExpAmountSum: totalAmount,
@@ -155,8 +203,22 @@ export function buildExpenseReimbursementPreview(input) {
       FReqReimbAmountSum: totalAmount,
       FReqPayReFoundAmountSum: document.requestPaymentAmount ?? 0,
       FCausa: reimbursementReason(document),
-      FPaySettlleTypeID: numberReference(config.expenseReimbursementSettlementTypeNumber || '10'),
-      FRealPay: false,
+      // Custom Kingdee header field "来源类型".  Keep the same source label
+      // exposed by the Fenbeitong interface/dashboard instead of deriving a
+      // separate ERP-only value.
+      // Copy the exact 来源类型 value from the synchronized Fenbeitong row.
+      // Do not derive or default this ERP field inside the mapper.
+      F_ora_Text_qtr: String(input.sourceTypeValue || '').trim(),
+      // Account set 20260728: settlement method number 10 is 电汇. The
+      // integration requirement is fixed, so do not let environment-specific
+      // defaults silently change it for individual documents.
+      FPaySettlleTypeID: numberReference('10'),
+      ...(employeeBankDetails.openBank ? {
+        BankBranchT: employeeBankDetails.openBank,
+        BankAccountNameT: employeeBankDetails.accountName,
+        BankAccountT: employeeBankDetails.bankAccount
+      } : {}),
+      FRealPay: true,
       FBUSINESSTYPE: '1',
       FMultiPayee: false,
       FEntity: entries
@@ -174,18 +236,26 @@ export function buildExpenseReimbursementPreview(input) {
     sourceReason: mappedExpenses[index].sourceReason || mappedExpenses[index].reason || '',
     expenseDate: entry.F_PAEZ_Date,
     expenseDateTime: mappedExpenses[index].expenseDateTime || '',
-    startLocation: entry.F_PAEZ_Text,
-    arrivalLocation: entry.F_ora_Text,
-    trafficType: entry.F_PAEZ_Text1,
+    startLocation: mappedExpenses[index].startLocation || '',
+    arrivalLocation: mappedExpenses[index].arrivalLocation || '',
+    trafficType: mappedExpenses[index].trafficType || '',
     purpose: entry.FRemark,
-    businessLine: entry.F_ora_Text_83g,
+    businessLine: mappedExpenses[index].businessLine || document.businessLine || '',
     departmentNumber: entry.FExpenseDeptEntryID?.FNumber || '',
     expenseDepartmentName: mappedExpenses[index].attributionDepartmentName || '',
     employeeNumber,
     amount: round(mappedExpenses[index].amount),
-    excludingTaxAmount: entry.FTaxSubmitAmt,
-    taxAmount: entry.FTaxAmt,
-    taxRate: entry.FTaxRate
+    excludingTaxAmount: mappedExpenses[index].splitExcludingTaxAmount === null
+      ? null
+      : round(mappedExpenses[index].splitExcludingTaxAmount),
+    taxAmount: entry.FTaxAmt ?? null,
+    taxRate: entry.FTaxRate ?? null,
+    taxSplitSource: mappedExpenses[index].taxSplitSource || '',
+    correctedInvalidSourceSplitFromInvoice: Boolean(
+      mappedExpenses[index].correctedInvalidSourceSplitFromInvoice
+    ),
+    sourceSplitTaxAmount: mappedExpenses[index].sourceSplitTaxAmount ?? null,
+    sourceSplitExcludingTaxAmount: mappedExpenses[index].sourceSplitExcludingTaxAmount ?? null
   }));
 
   return {
@@ -253,7 +323,10 @@ export function buildExpenseReimbursementPreview(input) {
       totalAmount,
       entryCount: expenseEntries.length,
       documentStatus: 'Z',
-      documentStatusName: '暂存；不提交、不审核'
+      documentStatusName: '暂存；不提交、不审核',
+      contactUnitType: onlineContactUnit?.type || 'BD_Empinfo',
+      contactUnitNumber: onlineContactUnit?.number || employeeNumber,
+      contactUnitName: onlineContactUnit?.name || document.userName
     },
     payload
   };
@@ -408,7 +481,11 @@ function consolidateExpenseRows(expenses, targetIndices, refundIndices, removed)
     throw new Error(`分贝通退款 ${refundIds} 合并后金额或税额无效，已停止保存`);
   }
   for (const index of indices) removed.add(index);
-  if (amount === 0) return;
+  // A fully offset change/refund group can still carry a signed tax split
+  // (for example +0.01 deductible tax and -0.01 excluding-tax amount).
+  // Drop only a true all-zero helper group; otherwise the document-level
+  // Fenbeitong tax and excluding-tax totals would drift by a cent.
+  if (amount === 0 && taxAmount === 0 && excludingTaxAmount === 0) return;
   const targetIndex = activeTargets[0];
   const target = expenses[targetIndex];
   expenses[targetIndex] = {
@@ -435,55 +512,108 @@ function buildExpenseEntry({ config, document, documentDate, departmentNumber, c
   }
   const amount = round(expense.amount);
   const requestAmount = document.requestPaymentAmount === null ? 0 : round(expense.departmentAttributionAmount);
-  const taxAmount = round(expense.splitTaxAmount);
-  const excludingTaxAmount = round(expense.splitExcludingTaxAmount);
-  if (round(taxAmount + excludingTaxAmount) !== amount) {
-    throw new Error(`expense split tax and excluding-tax amounts do not match gross amount: ${expense.id}`);
+  const hasExactSplit = expense.splitTaxAmount !== null
+    && expense.splitExcludingTaxAmount !== null;
+  const taxAmount = hasExactSplit ? round(expense.splitTaxAmount) : null;
+  const excludingTaxAmount = hasExactSplit ? round(expense.splitExcludingTaxAmount) : null;
+  if (hasExactSplit && round(taxAmount + excludingTaxAmount) !== amount) {
+    const error = new Error(
+      `分贝通费用明细 ${expense.id} 的可抵扣税额与未税金额之和不等于报销金额，已停止保存。`
+    );
+    error.code = 'FENBEITONG_SPLIT_AMOUNT_MISMATCH';
+    error.detail = {
+      expenseId: expense.id,
+      grossAmount: amount,
+      deductibleTaxAmount: taxAmount,
+      excludingTaxAmount
+    };
+    throw error;
   }
+  const exactTaxFields = hasExactSplit
+    ? {
+        FTaxRate: excludingTaxAmount !== 0 ? round(taxAmount / excludingTaxAmount * 100) : 0,
+        FTaxAmt: taxAmount,
+        FLOCNOTAXAMOUNT: excludingTaxAmount,
+        FLOCTAXAMOUNT: taxAmount,
+        // The customer's visible grid uses this custom field for the
+        // Fenbeitong untaxed amount.
+        F_ora_Decimal_qtr: excludingTaxAmount
+      }
+    : {};
   return {
     FExpID: numberReference(expenseItemNumber),
     // Kingdee only renders tax and net-of-tax columns for VAT invoice rows.
     // Fenbeitong invoice-backed expenses therefore use the VAT mode even
     // when an exempt/zero-rate invoice has a zero tax amount.
-    FInvoiceType: expense.invoiceCount > 0 || expense.taxSplitProvided ? '1' : '0',
-    // Kingdee treats the editable expense amount fields as net-of-tax and
-    // adds FTaxAmt during form calculation. Sending the source gross amount
-    // here would add tax twice after Save.
-    FExpenseAmount: excludingTaxAmount,
-    FTaxRate: excludingTaxAmount !== 0 ? round(taxAmount / excludingTaxAmount * 100) : 0,
-    FTaxAmt: taxAmount,
-    FTaxSubmitAmt: excludingTaxAmount,
+    // When Fenbeitong does not return the dedicated deductible-tax and
+    // untaxed-amount fields, keep the ERP tax columns blank. Do not substitute
+    // invoice tax or derive values proportionally.
+    FInvoiceType: hasExactSplit ? '1' : '0',
+    // This account set displays FExpenseAmount as "报销金额" and
+    // FTaxSubmitAmt as "费用金额".  The requested accounting mapping is:
+    //   报销金额 = Fenbeitong gross reimbursement amount
+    //   费用金额 = Fenbeitong excluding-tax amount
+    // Never derive an absent excluding-tax amount from the gross amount or
+    // invoice tax; omit it when Fenbeitong did not return the dedicated value.
+    FExpenseAmount: amount,
+    ...(hasExactSplit ? { FTaxSubmitAmt: excludingTaxAmount } : {}),
     FExpSubmitAmount: amount,
+    // ERP detail field "报销未付款金额". At the time the reimbursement is
+    // created, it must carry the same authoritative Fenbeitong reimbursement
+    // amount; later ERP payment operations may reduce this balance.
+    FReimbNotPayAmount: amount,
     FRequestAmount: requestAmount,
     FReqSubmitAmount: requestAmount,
     FLocExpSubmitAmount: amount,
     FLocReqSubmitAmount: requestAmount,
     FPayedAmount: document.sourceKind === 'ONLINE_MONTHLY_BILL' ? amount : requestAmount,
-    FLOCNOTAXAMOUNT: excludingTaxAmount,
-    FLOCTAXAMOUNT: taxAmount,
+    ...exactTaxFields,
     FExpenseDeptEntryID: optionalNumberReference(departmentNumber),
     FRemark: expense.purpose || '',
     FOriginalCurrencyId: numberReference(currencyNumber),
-    // FOriginalAmount is also net-of-tax on this form; Kingdee derives the
-    // tax-inclusive expense amount from it plus FTaxAmt.
-    FOriginalAmount: excludingTaxAmount,
+    FOriginalAmount: amount,
     FOriginalExRate: exchangeRate,
-    F_PAEZ_Date: expense.expenseDate || (document.sourceKind === 'ONLINE_MONTHLY_BILL' ? '' : documentDate),
-    F_PAEZ_Text: expense.startLocation || '',
-    F_PAEZ_Text1: expense.trafficType || '',
-    F_ora_Text: expense.arrivalLocation || '',
-    // The customer's visible grid uses custom fields for these two columns;
-    // the standard LOCNOTAXAMOUNT value alone is not rendered there.
-    F_ora_Decimal_qtr: excludingTaxAmount,
-    F_ora_Text_83g: expense.businessLine || document.businessLine || ''
+    // This custom field is the Fenbeitong expense-occurrence date. Do not
+    // replace a missing value with the reimbursement submission/application
+    // date because those dates have different accounting meaning.
+    F_PAEZ_Date: expense.expenseDate || '',
+    // The account set's custom route columns are nvarchar(50). Fenbeitong may
+    // return a full courier street address longer than that. Keep the complete
+    // source value in the synchronized document and constrain only the ERP
+    // payload so Kingdee does not reject the entire reimbursement.
+    F_PAEZ_Text: kingdeeCustomText(expense.startLocation, 50),
+    F_PAEZ_Text1: kingdeeCustomText(expense.trafficType, 50),
+    F_ora_Text: kingdeeCustomText(expense.arrivalLocation, 50),
+    F_ora_Text_83g: kingdeeCustomText(
+      expense.businessLine || document.businessLine,
+      50
+    )
   };
 }
 
+function normalizeEmployeeBankDetails(value) {
+  const details = value && typeof value === 'object' ? value : {};
+  const openBank = String(details.openBank || '').trim();
+  const accountName = String(details.accountName || '').trim();
+  const bankAccount = String(details.bankAccount || '').trim();
+  if (!openBank || !accountName || !bankAccount) {
+    return { openBank: '', accountName: '', bankAccount: '' };
+  }
+  return { openBank, accountName, bankAccount };
+}
+
+function kingdeeCustomText(value, maximumLength) {
+  return [...String(value || '')].slice(0, maximumLength).join('');
+}
+
 function resolveEmployeeNumber(config, document) {
-  const number = REQUIRED_EMPLOYEE_NUMBERS[document.userCode]
-    || REQUIRED_EMPLOYEE_NUMBERS[document.userName]
-    || config.employeeDetailNumberMappings?.[document.userCode]
+  const configuredNumber = config.employeeDetailNumberMappings?.[document.userCode]
     || config.employeeDetailNumberMappings?.[document.userName];
+  const legacyNumber = config.disableRequiredEmployeeNumberMappings
+    ? ''
+    : REQUIRED_EMPLOYEE_NUMBERS[document.userCode]
+      || REQUIRED_EMPLOYEE_NUMBERS[document.userName];
+  const number = configuredNumber || legacyNumber;
   if (number) return number;
   if (/^X\d+$/i.test(document.userCode)) {
     const error = new Error(`金蝶员工映射缺失：${document.userName || document.userCode}（分贝通编号 ${document.userCode}），请先在金蝶员工资料中建档并配置员工编码。`);
@@ -553,6 +683,12 @@ function reimbursementReason(document) {
   return value.slice(0, 200);
 }
 
+function onlineEnterpriseBillNumber(document) {
+  const billNumber = requiredText(document.reimbursementCode, 'online enterprise bill number');
+  const employeeCode = requiredText(document.userCode, 'online enterprise bill employee code');
+  return `${billNumber}-${employeeCode}`;
+}
+
 function expenseItemName(number, fallback) {
   const names = {
     CI007: '通讯费-个人',
@@ -577,6 +713,14 @@ function optionalNumberReference(number) {
 
 function staffReference(number) {
   return { FStaffNumber: requiredText(String(number), 'staff number') };
+}
+
+function normalizeOnlineContactUnit(value) {
+  return {
+    type: requiredText(value?.type, 'onlineContactUnit.type'),
+    number: requiredText(value?.number, 'onlineContactUnit.number'),
+    name: requiredText(value?.name, 'onlineContactUnit.name')
+  };
 }
 
 function requiredText(value, field) {

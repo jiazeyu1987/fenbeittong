@@ -3,14 +3,101 @@ import assert from 'node:assert/strict';
 import {
   buildOnlineTravelOrderDocumentForTest,
   clearFenbeitongTokenCacheForTest,
+  filterExpensesWithoutDepartmentAttributionAmountForTest,
   hasOfflineExpenseTypeForTest,
+  markFenbeitongReimbursementsPaid,
   pullFenbeitongReimbursements,
+  settlementBillMonthForTest,
   settlementSourceDetailIdsForTest
 } from '../src/adapters/fenbeitong-client.js';
+
+test('cross-month settlement bill belongs to the cycle end month', () => {
+  assert.equal(settlementBillMonthForTest({ bill_cycle: '2026/03/20-2026/04/19' }), '202604');
+});
 import {
   resetTenantStoreForTest,
   saveFenbeitongTenantCredentials
 } from '../src/tenant-store.js';
+
+test('updates Fenbeitong paid status with the ERP payment business date', async () => {
+  const previousMode = process.env.FENBEITONG_MODE;
+  const previousDataDir = process.env.APP_DATA_DIR;
+  const previousFetch = globalThis.fetch;
+  process.env.FENBEITONG_MODE = 'real';
+  process.env.APP_DATA_DIR = 'runtime-data-test-payment-status-client';
+  resetTenantStoreForTest();
+  saveTenant();
+  let updatePayload;
+  globalThis.fetch = async (url, options = {}) => {
+    const path = new URL(String(url)).pathname;
+    if (path === '/openapi/auth/getToken') return jsonResponse({ code: 0, data: 'payment-token' });
+    if (path === '/openapi/reimbursement/v1/update_state') {
+      updatePayload = JSON.parse(String(options.body));
+      return jsonResponse({ code: 0, msg: 'success', data: [] });
+    }
+    throw new Error(`unexpected Fenbeitong URL: ${url}`);
+  };
+  try {
+    const result = await markFenbeitongReimbursementsPaid([
+      { code: 'B1IELSHBX26070100002', paymentTime: '2026-07-10' },
+      { code: 'B1IELSHBX26070100002', paymentTime: '2026-07-10' }
+    ]);
+    assert.deepEqual(updatePayload, {
+      reimbursements: [{
+        code: 'B1IELSHBX26070100002',
+        payment_time: '2026-07-10 00:00:00'
+      }]
+    });
+    assert.deepEqual(result.succeeded, ['B1IELSHBX26070100002']);
+    assert.deepEqual(result.failed, []);
+  } finally {
+    globalThis.fetch = previousFetch;
+    resetTenantStoreForTest();
+    if (previousMode === undefined) delete process.env.FENBEITONG_MODE;
+    else process.env.FENBEITONG_MODE = previousMode;
+    if (previousDataDir === undefined) delete process.env.APP_DATA_DIR;
+    else process.env.APP_DATA_DIR = previousDataDir;
+  }
+});
+
+test('drops only offline expense rows whose department attribution amount is empty', () => {
+  const source = {
+    code: 0,
+    data: {
+      reimb_id: 'FILTER-DEPARTMENT-AMOUNT',
+      reimb_code: 'B1IELSHBX-FILTER',
+      expense_number: 4,
+      expenses: [
+        {
+          id: 'KEEP-NUMBER',
+          cost_attributions: [{ type: 1, details: [{ amount: 123.86 }] }]
+        },
+        {
+          id: 'KEEP-ZERO',
+          cost_attributions: [{ type: 1, details: [{ amount: '0.00' }] }]
+        },
+        {
+          id: 'DROP-BLANK',
+          cost_attributions: [{ type: 1, details: [{ amount: '' }] }]
+        },
+        {
+          id: 'DROP-MISSING',
+          cost_attributions: []
+        }
+      ]
+    }
+  };
+
+  const result = filterExpensesWithoutDepartmentAttributionAmountForTest(source);
+
+  assert.deepEqual(result.document.data.expenses.map((expense) => expense.id), [
+    'KEEP-NUMBER',
+    'KEEP-ZERO'
+  ]);
+  assert.equal(result.document.data.expense_number, 2);
+  assert.equal(result.skippedExpenseCount, 2);
+  assert.equal(source.data.expenses.length, 4);
+});
 
 test('keeps every train detail when one order and ticket number have multiple ticket ids', () => {
   assert.deepEqual(settlementSourceDetailIdsForTest([{
@@ -205,6 +292,10 @@ test('returns only approved documents while cataloging every eligible employee',
           expenses: [{
             id: 'EXPENSE-1',
             total_amount: 100,
+            cost_attributions: [{
+              type: 1,
+              details: [{ code: 'DEPT-1', name: 'Department 1', amount: 100 }]
+            }],
             cost_category: payload.reimb_code === 'BLANK-TYPE-1'
               ? { code: '', name: '' }
               : { code: 'CI001', name: 'Approved expense' }
@@ -492,7 +583,11 @@ test('uses one access token to pull only posted settlement bill rows', async (t)
   assert.equal(online[0].data.order.department_name, 'Finance');
   assert.equal(online[0].data.order.third_department_id, 'BOOKER-DEPT-1');
   assert.equal(online[0].data.order.source_detail_id, 'SHARED-TICKET-1');
+  assert.equal(online[0].data.order.order_create_time, '2026-06-20 08:00:00');
+  assert.equal(online[0].data.order.reimbursement_date_time, '2026-06-20 08:00:00');
   assert.equal(online[1].data.order.source_detail_id, 'SHARED-TICKET-1:SERVICE-1');
+  assert.equal(online[2].data.order.order_create_time, '2026-05-25 16:56:59');
+  assert.equal(online[2].data.order.reimbursement_date_time, '2026-05-25 16:56:59');
   assert.equal(online[3].data.order.employee_name, '');
   assert.equal(online[3].data.order.third_employee_id, '');
   assert.equal(online[3].data.order.department_name, '');

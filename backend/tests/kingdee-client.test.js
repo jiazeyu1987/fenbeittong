@@ -1,10 +1,142 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  clearKingdeeDepartmentNumberCacheForTest,
   clearKingdeeEmployeeNumberCacheForTest,
+  findKingdeeDepartmentNumberByName,
   findKingdeeEmployeeNumberByName,
+  extractKingdeeEmployeeBankDetails,
+  queryKingdeeSuccessfulExpensePaymentBills,
+  expenseReimbursementWithoutRequestPaymentForTest,
   saveKingdeeExpenseReimbursement
 } from '../src/adapters/kingdee-client.js';
+
+test('extracts the preferred complete bank row from an ERP employee profile', () => {
+  const details = extractKingdeeEmployeeBankDetails({
+    EmpinfoBank: [{
+      OpenBankName: [{ Key: 2052, Value: 'Bank A' }],
+      BankHolder: 'Employee A',
+      BankCode: '111',
+      IsDefault: false
+    }, {
+      OpenBankName: [{ Key: 2052, Value: 'Bank B' }],
+      BankHolder: 'Employee B',
+      BankCode: '222',
+      IsDefault: true
+    }]
+  });
+  assert.deepEqual(details, {
+    openBank: 'Bank B',
+    accountName: 'Employee B',
+    bankAccount: '222',
+    isDefault: true
+  });
+});
+
+test('returns blank bank fields when the ERP employee profile is incomplete', () => {
+  assert.deepEqual(extractKingdeeEmployeeBankDetails({
+    EmpinfoBank: [{ OpenBankName: [], BankHolder: null, BankCode: null }]
+  }), {
+    openBank: '',
+    accountName: '',
+    bankAccount: '',
+    isDefault: false
+  });
+});
+
+test('bank-data fallback disables request payment but keeps real payment', () => {
+  const payload = {
+    Model: {
+      FRequestType: '1',
+      FRealPay: true,
+      FReqAmountSum: 100,
+      FLocReqAmountSum: 100,
+      FReqPayReFoundAmountSum: 100,
+      FEntity: [{
+        FRequestAmount: 100,
+        FReqSubmitAmount: 100,
+        FLocReqSubmitAmount: 100,
+        FExpenseAmount: 100
+      }]
+    }
+  };
+  const adjusted = expenseReimbursementWithoutRequestPaymentForTest(payload);
+  assert.equal(adjusted.Model.FRequestType, '0');
+  assert.equal(adjusted.Model.FRealPay, true);
+  assert.equal(adjusted.Model.FReqAmountSum, 0);
+  assert.equal(adjusted.Model.FEntity[0].FRequestAmount, 0);
+  assert.equal(adjusted.Model.FEntity[0].FExpenseAmount, 100);
+  assert.equal(payload.Model.FRequestType, '1');
+});
+
+test('resolves a Fenbeitong department by exact Kingdee department name', async () => {
+  const restore = forceKingdeeEnv({ KINGDEE_MODE: 'real' });
+  const previousFetch = globalThis.fetch;
+  clearKingdeeDepartmentNumberCacheForTest();
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    if (path.includes('AuthService.ValidateUser')) {
+      return jsonResponse({ LoginResultType: 1 }, { 'Set-Cookie': 'kdservice-sessionid=dept; Path=/' });
+    }
+    if (path.includes('DynamicFormService.SwitchOrg')) {
+      return jsonResponse({ Result: { ResponseStatus: { IsSuccess: true, Errors: [] } } });
+    }
+    if (path.includes('DynamicFormService.ExecuteBillQuery')) {
+      const query = JSON.parse(JSON.parse(String(options.body)).data);
+      assert.equal(query.FormId, 'BD_Department');
+      assert.equal(query.FilterString[0].Value, '质检');
+      return jsonResponse([
+        [6000, 'BM-OTHER', '质检', '892'],
+        [6001, 'BM000118', '质检', '886']
+      ]);
+    }
+    throw new Error(`unexpected Kingdee URL: ${url}`);
+  };
+  try {
+    assert.equal(await findKingdeeDepartmentNumberByName('质检'), 'BM000118');
+  } finally {
+    globalThis.fetch = previousFetch;
+    clearKingdeeDepartmentNumberCacheForTest();
+    restore();
+  }
+});
+
+test('queries only expense payment bills whose every bank entry succeeded', async () => {
+  const restore = forceKingdeeEnv({ KINGDEE_MODE: 'real' });
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    if (path.includes('AuthService.ValidateUser')) {
+      return jsonResponse({ LoginResultType: 1 }, { 'Set-Cookie': 'kdservice-sessionid=pay; Path=/' });
+    }
+    if (path.includes('DynamicFormService.SwitchOrg')) {
+      return jsonResponse({ Result: { ResponseStatus: { IsSuccess: true, Errors: [] } } });
+    }
+    if (path.includes('DynamicFormService.ExecuteBillQuery')) {
+      const query = JSON.parse(JSON.parse(String(options.body)).data);
+      assert.equal(query.FormId, 'AP_PAYBILL');
+      return jsonResponse([
+        [1, 'FKD0001', 'SGBXD', '费用报销付款单', '2026-08-01', 'X001', '测试员工', 100, 100, '', '', '', 'C', '', '', 40, 'R1'],
+        [1, 'FKD0001', 'SGBXD', '费用报销付款单', '2026-08-01', 'X001', '测试员工', 100, 100, '', '', '', 'C', '', '', 60, 'R2'],
+        [2, 'FKD0002', 'SGBXD', '费用报销付款单', '2026-08-01', 'X002', '未成功员工', 50, 50, '', '', '', 'A', '处理中', '', 50, 'R3'],
+        [3, 'FKD0003', 'OTHER', '其他付款单', '2026-08-01', 'X003', '其他员工', 20, 20, '', '', '', 'C', '', '', 20, 'R4']
+      ]);
+    }
+    throw new Error(`unexpected Kingdee URL: ${url}`);
+  };
+  try {
+    const bills = await queryKingdeeSuccessfulExpensePaymentBills({ orgNumber: '892' });
+    assert.equal(bills.length, 1);
+    assert.equal(bills[0].billNumber, 'FKD0001');
+    assert.equal(bills[0].billTypeName, '费用报销付款单');
+    assert.equal(bills[0].bankStatusName, '银行交易成功');
+    assert.equal(bills[0].entryPaymentAmount, 100);
+    assert.equal(bills[0].entries.length, 2);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restore();
+  }
+});
 
 test('Kingdee expense reimbursement save rejects mock mode', async () => {
   const restore = forceKingdeeEnv({ KINGDEE_MODE: 'mock' });
@@ -189,6 +321,219 @@ test('network-control conflict gives an actionable error when ERP values differ'
   }
 });
 
+test('an unchanged existing bill number is accepted without calling save again', async () => {
+  const restore = forceKingdeeEnv({ KINGDEE_MODE: 'real' });
+  const previousFetch = globalThis.fetch;
+  let saveCount = 0;
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    if (path.includes('AuthService.ValidateUser')) {
+      return jsonResponse({ LoginResultType: 1 }, { 'Set-Cookie': 'kdservice-sessionid=abc; Path=/' });
+    }
+    if (path.includes('DynamicFormService.SwitchOrg')) {
+      return jsonResponse({ Result: { ResponseStatus: { IsSuccess: true, Errors: [] } } });
+    }
+    if (path.includes('DynamicFormService.ExecuteBillQuery')) {
+      const query = JSON.parse(JSON.parse(String(options.body)).data);
+      assert.equal(query.FilterString[0].Value, 'B1IELSHBX26070100003');
+      return jsonResponse([[127430, 'B1IELSHBX26070100003']]);
+    }
+    if (path.includes('DynamicFormService.View')) {
+      return jsonResponse({
+        Result: {
+          ResponseStatus: { IsSuccess: true, Errors: [] },
+          Result: {
+            FID: 127430,
+            FBillNo: 'B1IELSHBX26070100003',
+            FDocumentStatus: 'Z',
+            FOrgID: { FNumber: '886' },
+            FProposerID: { FStaffNumber: 'PL-MAO' },
+            FRequestDeptID: { FNumber: 'BM000006' },
+            FBillTypeID: { FNumber: 'FYBXD001_SYS' },
+            FExpAmountSum: 200,
+            FEntity: []
+          }
+        }
+      });
+    }
+    if (path.includes('DynamicFormService.Save')) {
+      saveCount += 1;
+    }
+    throw new Error(`unexpected Kingdee URL: ${url}`);
+  };
+  try {
+    const result = await saveKingdeeExpenseReimbursement({
+      Model: {
+        FID: 0,
+        FBillNo: 'B1IELSHBX26070100003',
+        FOrgID: { FNumber: '886' },
+        FProposerID: { FStaffNumber: 'PL-MAO' },
+        FRequestDeptID: { FNumber: 'BM000006' },
+        FBillTypeID: { FNumber: 'FYBXD001_SYS' },
+        FExpAmountSum: 200,
+        FEntity: []
+      }
+    });
+    assert.equal(result.recoveredExistingBill, true);
+    assert.equal(result.erpFid, '127430');
+    assert.equal(result.erpNumber, 'B1IELSHBX26070100003');
+    assert.equal(saveCount, 0);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restore();
+  }
+});
+
+test('a changed existing bill number is not overwritten by normal save', async () => {
+  const restore = forceKingdeeEnv({ KINGDEE_MODE: 'real' });
+  const previousFetch = globalThis.fetch;
+  let saveCount = 0;
+  globalThis.fetch = async (url) => {
+    const path = String(url);
+    if (path.includes('AuthService.ValidateUser')) {
+      return jsonResponse({ LoginResultType: 1 }, { 'Set-Cookie': 'kdservice-sessionid=abc; Path=/' });
+    }
+    if (path.includes('DynamicFormService.SwitchOrg')) {
+      return jsonResponse({ Result: { ResponseStatus: { IsSuccess: true, Errors: [] } } });
+    }
+    if (path.includes('DynamicFormService.ExecuteBillQuery')) {
+      return jsonResponse([[127429, 'B1IELSHBX26071900003']]);
+    }
+    if (path.includes('DynamicFormService.View')) {
+      return jsonResponse({
+        Result: {
+          ResponseStatus: { IsSuccess: true, Errors: [] },
+          Result: {
+            FID: 127429,
+            FBillNo: 'B1IELSHBX26071900003',
+            FOrgID: { FNumber: '886' },
+            FProposerID: { FStaffNumber: 'PL-WRONG' },
+            FRequestDeptID: { FNumber: 'BM000006' },
+            FBillTypeID: { FNumber: 'FYBXD001_SYS' },
+            FExpAmountSum: 100,
+            FEntity: []
+          }
+        }
+      });
+    }
+    if (path.includes('DynamicFormService.Save')) saveCount += 1;
+    throw new Error(`unexpected Kingdee URL: ${url}`);
+  };
+  try {
+    await assert.rejects(
+      () => saveKingdeeExpenseReimbursement({
+        Model: {
+          FID: 0,
+          FBillNo: 'B1IELSHBX26071900003',
+          FOrgID: { FNumber: '886' },
+          FProposerID: { FStaffNumber: 'PL-CURRENT' },
+          FRequestDeptID: { FNumber: 'BM000006' },
+          FBillTypeID: { FNumber: 'FYBXD001_SYS' },
+          FExpAmountSum: 100,
+          FEntity: []
+        }
+      }),
+      (error) => error.code === 'KINGDEE_EXISTING_BILL_MISMATCH'
+    );
+    assert.equal(saveCount, 0);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restore();
+  }
+});
+
+test('an explicit retry updates a changed existing bill and preserves its prior view', async () => {
+  const restore = forceKingdeeEnv({ KINGDEE_MODE: 'real' });
+  const previousFetch = globalThis.fetch;
+  let savedModel;
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    if (path.includes('AuthService.ValidateUser')) {
+      return jsonResponse({ LoginResultType: 1 }, { 'Set-Cookie': 'kdservice-sessionid=abc; Path=/' });
+    }
+    if (path.includes('DynamicFormService.SwitchOrg')) {
+      return jsonResponse({ Result: { ResponseStatus: { IsSuccess: true, Errors: [] } } });
+    }
+    if (path.includes('DynamicFormService.ExecuteBillQuery')) {
+      return jsonResponse([[127429, 'B1IELSHBX26071900003']]);
+    }
+    if (path.includes('DynamicFormService.View')) {
+      if (savedModel) {
+        return jsonResponse({
+          Result: {
+            ResponseStatus: { IsSuccess: true, Errors: [] },
+            Result: {
+              FID: 127429,
+              FBillNo: 'B1IELSHBX26071900003',
+              FOrgID: { FNumber: '886' },
+              FProposerID: { FStaffNumber: 'PL-CURRENT' },
+              FRequestDeptID: { FNumber: 'BM000006' },
+              FBillTypeID: { FNumber: 'FYBXD001_SYS' },
+              FExpAmountSum: 100,
+              FEntity: []
+            }
+          }
+        });
+      }
+      return jsonResponse({
+        Result: {
+          ResponseStatus: { IsSuccess: true, Errors: [] },
+          Result: {
+            FID: 127429,
+            FBillNo: 'B1IELSHBX26071900003',
+            FOrgID: { FNumber: '886' },
+            FProposerID: { FStaffNumber: 'PL-WRONG' },
+            FRequestDeptID: { FNumber: 'BM000006' },
+            FBillTypeID: { FNumber: 'FYBXD001_SYS' },
+            FExpAmountSum: 100,
+            FEntity: []
+          }
+        }
+      });
+    }
+    if (path.includes('DynamicFormService.Save')) {
+      savedModel = JSON.parse(JSON.parse(String(options.body)).data).Model;
+      return jsonResponse({
+        Result: {
+          ResponseStatus: {
+            IsSuccess: true,
+            SuccessEntitys: [{ Id: 127429, Number: 'B1IELSHBX26071900003' }]
+          }
+        }
+      });
+    }
+    throw new Error(`unexpected Kingdee URL: ${url}`);
+  };
+  const payload = {
+    Model: {
+      FID: 0,
+      FBillNo: 'B1IELSHBX26071900003',
+      FOrgID: { FNumber: '886' },
+      FProposerID: { FStaffNumber: 'PL-CURRENT' },
+      FRequestDeptID: { FNumber: 'BM000006' },
+      FBillTypeID: { FNumber: 'FYBXD001_SYS' },
+      FExpAmountSum: 100,
+      FEntity: []
+    }
+  };
+  try {
+    const result = await saveKingdeeExpenseReimbursement(payload, {
+      allowExistingBillOverwrite: true
+    });
+    assert.equal(savedModel.FID, 127429);
+    assert.equal(result.erpFid, '127429');
+    assert.equal(result.erpNumber, 'B1IELSHBX26071900003');
+    assert.equal(result.overwroteExistingBill, true);
+    assert.equal(
+      result.rawResponse.existingBeforeOverwrite.Result.Result.FProposerID.FStaffNumber,
+      'PL-WRONG'
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+    restore();
+  }
+});
+
 test('verification rejects a different employee target', async () => {
   const restore = forceKingdeeEnv({ KINGDEE_MODE: 'real' });
   const previousFetch = globalThis.fetch;
@@ -345,6 +690,51 @@ test('save reports when the Kingdee organization has not initialized expense man
   }
 });
 
+test('save classifies an application date before the Kingdee organization enable date as a business skip', async () => {
+  const restore = forceKingdeeEnv({ KINGDEE_MODE: 'real' });
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const path = String(url);
+    if (path.includes('AuthService.ValidateUser')) {
+      return jsonResponse({ LoginResultType: 1 }, { 'Set-Cookie': 'kdservice-sessionid=abc; Path=/' });
+    }
+    if (path.includes('DynamicFormService.SwitchOrg')) {
+      return jsonResponse({ Result: { ResponseStatus: { IsSuccess: true, Errors: [] } } });
+    }
+    if (path.includes('DynamicFormService.Save')) {
+      return jsonResponse({
+        Result: {
+          ResponseStatus: {
+            IsSuccess: false,
+            Errors: [{
+              Message: 'ResolveFiled_InnerEx解析字段(Key:FDate,name:申请日期)时发生异常，异常信息:申请日期应大于申请组织启用日期2026-06-01 00:00:00'
+            }]
+          }
+        }
+      });
+    }
+    throw new Error(`unexpected Kingdee URL: ${url}`);
+  };
+  try {
+    await assert.rejects(
+      () => saveKingdeeExpenseReimbursement({
+        Model: {
+          FDate: '2026-05-31',
+          FOrgID: { FNumber: '886' }
+        }
+      }),
+      (error) => error.code === 'KINGDEE_APPLICATION_DATE_BEFORE_ENABLE_DATE'
+        && error.detail.applicationDate === '2026-05-31'
+        && error.detail.enableDate === '2026-06-01'
+        && error.message.includes('程序保留了分贝通申请日期')
+        && !error.message.includes('ResolveFiled_InnerEx')
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+    restore();
+  }
+});
+
 function jsonResponse(body, headers = {}) {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json', ...headers } });
 }
@@ -402,6 +792,7 @@ function networkConflictFetch({ purpose }) {
             Id: 127388,
             BillNo: 'B1IELSHBX26053100003',
             DocumentStatus: 'A',
+            OrgID: { Number: '886' },
             ExpAmountSum: 100,
             ER_ExpenseReimbEntry: [{
               ExpID: { Number: 'CI008' },

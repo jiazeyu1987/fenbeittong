@@ -4,24 +4,30 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>分贝通金蝶费用报销单工作台</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=20260803-save-status-filter-v2" />
   </head>
   <body>
     <main class="ledger-shell">
       <section id="financeWorkbenchHeader" class="ledger-header" aria-label="费用报销单工作台">
         <div class="ledger-brand">
-          <span class="ledger-brand-mark" aria-hidden="true">费</span>
+          <span class="ledger-brand-mark sponge-mark" aria-hidden="true">
+            <img src="/assets/spongebob-avatar-original.jpg" alt="" />
+          </span>
           <div>
-            <p class="ledger-eyebrow">FINANCE OPERATIONS</p>
+            <p class="ledger-eyebrow">BIKINI BOTTOM · FINANCE OPS</p>
             <h1>费用报销工作台</h1>
             <p>统一核对分贝通真实结算数据，并生成金蝶费用报销单</p>
           </div>
         </div>
         <div class="ledger-header-status">
+          <a class="data-scope-chip log-center-link" href="/logs.html" target="_blank">日志中心</a>
           <span class="data-scope-chip">线上仅取结算入账</span>
           <span class="data-scope-chip">ERP仅暂存</span>
           <span id="statusBadge" class="badge">未连接</span>
         </div>
+        <span class="header-bubbles" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+        </span>
       </section>
 
       <section id="ledgerToolbar" class="ledger-toolbar" aria-label="&#x62A5;&#x9500;&#x5355;&#x67E5;&#x8BE2;&#x5DE5;&#x5177;&#x680F;">
@@ -52,12 +58,15 @@
             </select>
             <select id="sourceTypeFilterSelect" class="ledger-quick-filter" aria-label="按来源类型筛选">
               <option value="">全部来源类型</option>
+              <option value="OFFLINE_REIMBURSEMENT">线下报销 · 费用明细</option>
+              <option value="ONLINE_MONTHLY_BILL">线上月结 · 月度账单</option>
             </select>
             <select id="dateFilterSelect" class="ledger-quick-filter" aria-label="按日期筛选">
               <option value="">全部日期</option>
             </select>
             <button id="resetButton" class="secondary">&#x91CD;&#x7F6E;</button>
             <button id="columnSettingsButton" class="secondary">&#x663E;&#x793A;&#x5B57;&#x6BB5;</button>
+            <button id="fieldMappingButton" class="secondary">字段对应关系</button>
           </div>
         </div>
 
@@ -82,7 +91,7 @@
             <span id="kingdeeAccountStatusText" class="tenant-status">ERP账号</span>
             <label class="compact-field"><span>账套</span>
               <select id="kingdeeAcctIdSelect" class="kingdee-acct-id-selector" aria-label="Kingdee acctID">
-                <option value="puhui-6977227150362f">6977227150362f</option>
+                <option value="">加载账套...</option>
               </select>
             </label>
             <span id="kingdeeAcctIdStatusText" class="tenant-status">acctID</span>
@@ -101,41 +110,141 @@
             <button id="generateVoucherButton" class="outline-action">生成费用报销单</button>
             <span class="workflow-arrow" aria-hidden="true">→</span>
             <button id="saveErpButton" class="outline-action workflow-primary">保存费用报销单</button>
-            <button id="resaveErpButton" class="outline-action">重新保存费用报销单</button>
+            <button id="resaveErpButton" class="outline-action">保存/更新费用报销单</button>
             <button id="viewVoucherButton" class="outline-action">查看费用报销单</button>
+            <button id="syncPaymentStatusButton" class="outline-action">回传付款状态</button>
             <span class="toolbar-divider" aria-hidden="true"></span>
             <button id="exportButton" class="success-action">&#x5BFC;&#x51FA;</button>
           </div>
         </div>
       </section>
 
-      <section id="operationFeedback" class="operation-feedback" hidden aria-live="polite"></section>
+      <section id="operationFeedback" class="operation-feedback" hidden aria-live="polite">
+        <div id="operationFeedbackMessage"></div>
+        <div
+          id="batchProgress"
+          class="batch-progress"
+          role="progressbar"
+          aria-label="ERP批量保存进度"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+          hidden
+        >
+          <div class="batch-progress-meta">
+            <span id="batchProgressText">准备保存</span>
+            <span class="batch-progress-actions">
+              <button id="retryFailedSaveButton" class="batch-retry-action" type="button" hidden disabled>重试失败单据</button>
+              <button id="pauseSaveButton" class="batch-pause-action" type="button">暂停保存</button>
+              <span id="batchProgressPercent">0%</span>
+            </span>
+          </div>
+          <div class="batch-progress-track" aria-hidden="true">
+            <div id="batchProgressFill" class="batch-progress-fill"></div>
+          </div>
+        </div>
+      </section>
 
       <section id="columnSettingsPanel" class="column-settings-panel" hidden aria-label="&#x663E;&#x793A;&#x5B57;&#x6BB5;">
         <label><input type="checkbox" data-column-toggle="status" checked />处理状态</label>
         <label><input type="checkbox" data-column-toggle="sourceType" checked />来源类型</label>
-        <label><input type="checkbox" data-column-toggle="sourceCode" checked />&#x6765;&#x6E90;&#x5355;&#x53F7;</label>
         <label><input type="checkbox" data-column-toggle="documentType" checked />单据类型</label>
-        <label><input type="checkbox" data-column-toggle="reason" checked />事由</label>
+        <label><input type="checkbox" data-column-toggle="sourceCode" checked />&#x6765;&#x6E90;&#x5355;&#x53F7;</label>
+        <label><input type="checkbox" data-column-toggle="applicationDate" checked />申请日期</label>
+        <label><input type="checkbox" data-column-toggle="time" checked />费用发生日期</label>
         <label><input type="checkbox" data-column-toggle="requester" checked />&#x62A5;&#x9500;&#x4EBA;</label>
-        <label><input type="checkbox" data-column-toggle="department" checked />&#x90E8;&#x95E8;</label>
+        <label><input type="checkbox" data-column-toggle="employeeOpenBank" checked />开户银行</label>
+        <label><input type="checkbox" data-column-toggle="employeeAccountName" checked />账户名称</label>
+        <label><input type="checkbox" data-column-toggle="employeeBankAccount" checked />银行账号</label>
+        <label><input type="checkbox" data-column-toggle="departmentAttributionAmount" checked />报销金额</label>
+        <label><input type="checkbox" data-column-toggle="splitTaxAmount" checked />税额</label>
+        <label><input type="checkbox" data-column-toggle="splitExcludingTaxAmount" checked />不含税金额</label>
         <label><input type="checkbox" data-column-toggle="expenseCategories" checked />&#x8D39;&#x7528;&#x7C7B;&#x578B;</label>
+        <label><input type="checkbox" data-column-toggle="businessLine" checked />业务线</label>
+        <label><input type="checkbox" data-column-toggle="reason" checked />事由</label>
+        <label><input type="checkbox" data-column-toggle="expenseDepartment" checked />费用承担部门</label>
+        <label><input type="checkbox" data-column-toggle="department" checked />&#x90E8;&#x95E8;</label>
+        <label><input type="checkbox" data-column-toggle="erpPaymentBillType" checked />ERP付款单类型</label>
+        <label><input type="checkbox" data-column-toggle="erpBankProcessingStatus" checked />银行处理状态</label>
+        <label><input type="checkbox" data-column-toggle="erpPaymentDate" checked />付款时间</label>
         <label><input type="checkbox" data-column-toggle="startLocation" checked />出发地</label>
         <label><input type="checkbox" data-column-toggle="arrivalLocation" checked />目的地</label>
         <label><input type="checkbox" data-column-toggle="trafficType" checked />交通类型</label>
         <label><input type="checkbox" data-column-toggle="purpose" checked />用途</label>
-        <label><input type="checkbox" data-column-toggle="expenseDepartment" checked />费用承担部门</label>
-        <label><input type="checkbox" data-column-toggle="splitTaxAmount" checked />税额</label>
-        <label><input type="checkbox" data-column-toggle="splitExcludingTaxAmount" checked />不含税金额</label>
-        <label><input type="checkbox" data-column-toggle="departmentAttributionAmount" checked />报销金额</label>
+        <label><input type="checkbox" data-column-toggle="expenseOrganization" checked />费用承担组织</label>
+        <label><input type="checkbox" data-column-toggle="paymentAmount" checked />付款金额</label>
+        <label><input type="checkbox" data-column-toggle="invoiceType" checked />发票类型</label>
+        <label><input type="checkbox" data-column-toggle="invoiceCode" checked />发票代码</label>
+        <label><input type="checkbox" data-column-toggle="invoiceNumber" checked />发票号码</label>
+        <label><input type="checkbox" data-column-toggle="invoiceIssueDate" checked />开票日期</label>
+        <label><input type="checkbox" data-column-toggle="sellerName" checked />销售方名称</label>
+        <label><input type="checkbox" data-column-toggle="buyerName" checked />购买方名称</label>
+        <label><input type="checkbox" data-column-toggle="invoiceTaxAmount" checked />发票税额</label>
+        <label><input type="checkbox" data-column-toggle="invoiceExcludingTaxAmount" checked />不计税金额</label>
+        <label><input type="checkbox" data-column-toggle="invoiceTotalAmount" checked />价税合计</label>
         <label><input type="checkbox" data-column-toggle="requestOrganization" checked />申请组织</label>
         <label><input type="checkbox" data-column-toggle="requestPaymentAmount" checked />申请退/付款金额</label>
         <label><input type="checkbox" data-column-toggle="sourceDocumentStatus" checked />单据状态</label>
-        <label><input type="checkbox" data-column-toggle="expenseOrganization" checked />费用承担组织</label>
-        <label><input type="checkbox" data-column-toggle="paymentAmount" checked />付款金额</label>
-        <label><input type="checkbox" data-column-toggle="businessLine" checked />业务线</label>
         <label><input type="checkbox" data-column-toggle="interfaceSource" checked />&#x63A5;&#x53E3;&#x6765;&#x6E90;</label>
-        <label><input type="checkbox" data-column-toggle="time" checked />&#x65E5;&#x671F;</label>
+      </section>
+
+      <section id="fieldMappingPanel" class="field-mapping-panel" hidden aria-label="字段对应关系配置">
+        <div class="field-mapping-header">
+          <div>
+            <span class="panel-kicker">FENBEITONG → KINGDEE</span>
+            <h2>字段对应关系</h2>
+            <p>每行填写一组“分贝通值 = ERP编码”。保存后，后续生成和保存费用报销单将立即使用这些配置。</p>
+          </div>
+          <button id="closeFieldMappingButton" class="panel-close" type="button" aria-label="关闭字段对应关系">×</button>
+        </div>
+        <div class="field-mapping-grid">
+          <label class="mapping-card">
+            <span><strong>费用类型</strong><small>分贝通费用类型/编码 → ERP费用项目编码</small></span>
+            <textarea id="expenseItemNumberMappings" spellcheck="false" placeholder="CI00801 = CI008"></textarea>
+          </label>
+          <label class="mapping-card">
+            <span><strong>员工</strong><small>分贝通员工编号或姓名 → ERP员工编码</small></span>
+            <textarea id="employeeDetailNumberMappings" spellcheck="false" placeholder="X020 = PL0145"></textarea>
+          </label>
+          <label class="mapping-card">
+            <span><strong>部门</strong><small>分贝通部门编号或名称 → ERP部门编码</small></span>
+            <textarea id="departmentDetailNumberMappings" spellcheck="false" placeholder="销售部 = BM000006"></textarea>
+          </label>
+          <label class="mapping-card">
+            <span><strong>组织</strong><small>分贝通组织编号或名称 → ERP组织编码</small></span>
+            <textarea id="organizationNumberMappings" spellcheck="false" placeholder="上海璞慧医疗器械 = 886"></textarea>
+          </label>
+          <label class="mapping-card">
+            <span><strong>币别</strong><small>分贝通币种 → ERP币别编码</small></span>
+            <textarea id="currencyNumbers" spellcheck="false" placeholder="CNY = PRE001"></textarea>
+          </label>
+        </div>
+        <section class="interface-field-catalog" aria-label="线上线下接口字段到ERP字段映射">
+          <div class="interface-field-header">
+            <div>
+              <h3>接口字段头 → ERP字段</h3>
+              <p>这里展示程序当前实际使用的全部线上、线下字段路径及ERP去向；“—”表示仅展示或用于校验，不写入ERP。</p>
+            </div>
+            <div class="interface-field-filters">
+              <select id="interfaceFieldSourceFilter" aria-label="接口来源类型">
+                <option value="">全部来源</option><option value="线下">线下报销</option><option value="线上">线上月结</option>
+              </select>
+              <input id="interfaceFieldQuery" placeholder="查询接口字段或ERP字段" />
+              <span id="interfaceFieldCount">0项</span>
+            </div>
+          </div>
+          <div class="interface-field-table-wrap">
+            <table class="interface-field-table">
+              <thead><tr><th>来源</th><th>分贝通接口字段路径</th><th>程序字段/含义</th><th>ERP字段</th><th>取值规则</th></tr></thead>
+              <tbody id="interfaceFieldMappingBody"></tbody>
+            </table>
+          </div>
+        </section>
+        <div class="field-mapping-actions">
+          <span id="fieldMappingStatus">当前显示已保存的有效配置。</span>
+          <button id="resetFieldMappingButton" class="secondary" type="button">恢复默认映射</button>
+          <button id="saveFieldMappingButton" class="primary-action" type="button">保存字段对应关系</button>
+        </div>
       </section>
 
       <section id="environmentWarning" class="ledger-warning">
@@ -155,30 +264,52 @@
           <thead>
             <tr>
               <th><input id="selectAllRowsCheckbox" type="checkbox" aria-label="全选当前筛选单据" /></th>
-              <th data-column-key="status">处理状态</th>
+              <th data-column-key="status">
+                <select id="saveStatusFilterSelect" class="status-header-filter" aria-label="按ERP保存状态筛选">
+                  <option value="">处理状态</option>
+                  <option value="saved">已保存ERP</option>
+                  <option value="unsaved">未保存</option>
+                </select>
+              </th>
               <th data-column-key="sourceType">来源类型</th>
-              <th data-column-key="sourceCode"><button class="sort-header" data-sort-field="sourceCode" type="button">来源单号</button></th>
               <th data-column-key="documentType">单据类型</th>
-              <th data-column-key="reason">事由</th>
+              <th data-column-key="sourceCode"><button class="sort-header" data-sort-field="sourceCode" type="button">来源单号</button></th>
+              <th data-column-key="applicationDate"><button class="sort-header" data-sort-field="applicationDate" type="button">申请日期</button></th>
+              <th data-column-key="time"><button class="sort-header" data-sort-field="time" type="button">费用发生日期</button></th>
               <th data-column-key="requester">报销人</th>
-              <th data-column-key="department">部门</th>
+              <th data-column-key="employeeOpenBank">开户银行</th>
+              <th data-column-key="employeeAccountName">账户名称</th>
+              <th data-column-key="employeeBankAccount">银行账号</th>
+              <th data-column-key="departmentAttributionAmount" class="amount" title="对应分贝通费用归属部门金额"><button class="sort-header" data-sort-field="departmentAttributionAmount" type="button">报销金额</button></th>
+              <th data-column-key="splitTaxAmount" class="amount" title="对应分贝通可抵扣税额"><button class="sort-header" data-sort-field="splitTaxAmount" type="button">税额</button></th>
+              <th data-column-key="splitExcludingTaxAmount" class="amount" title="对应分贝通未税金额"><button class="sort-header" data-sort-field="splitExcludingTaxAmount" type="button">不含税金额</button></th>
               <th data-column-key="expenseCategories">费用类型</th>
+              <th data-column-key="businessLine">业务线</th>
+              <th data-column-key="reason">事由</th>
+              <th data-column-key="expenseDepartment">费用承担部门</th>
+              <th data-column-key="department">部门</th>
+              <th data-column-key="erpPaymentBillType">ERP付款单类型</th>
+              <th data-column-key="erpBankProcessingStatus">银行处理状态</th>
+              <th data-column-key="erpPaymentDate">付款时间</th>
               <th data-column-key="startLocation">出发地</th>
               <th data-column-key="arrivalLocation">目的地</th>
               <th data-column-key="trafficType">交通类型</th>
               <th data-column-key="purpose">用途</th>
-              <th data-column-key="expenseDepartment">费用承担部门</th>
-              <th data-column-key="splitTaxAmount" class="amount" title="对应分贝通本次拆分税额"><button class="sort-header" data-sort-field="splitTaxAmount" type="button">税额</button></th>
-              <th data-column-key="splitExcludingTaxAmount" class="amount" title="对应分贝通本次拆分不含税金额"><button class="sort-header" data-sort-field="splitExcludingTaxAmount" type="button">不含税金额</button></th>
-              <th data-column-key="departmentAttributionAmount" class="amount" title="对应分贝通费用归属部门金额"><button class="sort-header" data-sort-field="departmentAttributionAmount" type="button">报销金额</button></th>
+              <th data-column-key="expenseOrganization">费用承担组织</th>
+              <th data-column-key="paymentAmount" class="amount">付款金额</th>
+              <th data-column-key="invoiceType">发票类型</th>
+              <th data-column-key="invoiceCode">发票代码</th>
+              <th data-column-key="invoiceNumber">发票号码</th>
+              <th data-column-key="invoiceIssueDate">开票日期</th>
+              <th data-column-key="sellerName">销售方名称</th>
+              <th data-column-key="buyerName">购买方名称</th>
+              <th data-column-key="invoiceTaxAmount" class="amount">发票税额</th>
+              <th data-column-key="invoiceExcludingTaxAmount" class="amount">不计税金额</th>
+              <th data-column-key="invoiceTotalAmount" class="amount">价税合计</th>
               <th data-column-key="requestOrganization">申请组织</th>
               <th data-column-key="requestPaymentAmount" class="amount">申请退/付款金额</th>
               <th data-column-key="sourceDocumentStatus">单据状态</th>
-              <th data-column-key="expenseOrganization">费用承担组织</th>
-              <th data-column-key="paymentAmount" class="amount">付款金额</th>
-              <th data-column-key="businessLine">业务线</th>
               <th data-column-key="interfaceSource">接口来源</th>
-              <th data-column-key="time"><button class="sort-header" data-sort-field="time" type="button">日期</button></th>
               <th data-column-key="operationPanel">&#x64CD;&#x4F5C;&#x9762;&#x677F;</th>
             </tr>
           </thead>
@@ -195,6 +326,7 @@
           <option value="20">20/page</option>
           <option value="50">50/page</option>
           <option value="100">100/page</option>
+          <option value="1000">1000/page</option>
         </select>
         <button id="previousPageButton" class="page-button" type="button" disabled aria-label="上一页">‹</button>
         <span id="paginationPageButtons" class="pagination-page-buttons">
@@ -208,6 +340,21 @@
         </label>
         <button id="gotoPageButton" class="goto-page-button" type="button">跳转</button>
       </section>
+      </section>
+
+      <section id="operationLogPanel" class="operation-log-panel" aria-label="程序日志与操作痕迹">
+        <div class="operation-log-header">
+          <div>
+            <span class="panel-kicker">AUDIT TRAIL</span>
+            <h2>程序日志 · 操作痕迹</h2>
+            <p id="logsUpdatedAt">页面打开后自动刷新日志。</p>
+          </div>
+          <div class="operation-log-actions">
+            <a class="secondary toolbar-link" href="/logs.html" target="_blank">打开日志中心查询</a>
+            <button id="refreshLogsButton" class="secondary" type="button">刷新日志</button>
+          </div>
+        </div>
+        <div id="logsList" class="log-list" aria-live="polite">正在读取最新日志…</div>
       </section>
 
       <section id="financeReviewPanel" class="auxiliary-panel" hidden>
@@ -261,7 +408,6 @@
           <input id="mockDocumentDate" type="date" />
           <input id="mockYear" type="number" />
           <input id="mockPeriod" type="number" />
-          <textarea id="currencyNumbers"></textarea>
           <textarea id="mockFixedJson"></textarea>
           <input id="sourceIdInput" />
           <button id="queryButton">查询单条记录</button>
@@ -270,11 +416,10 @@
             <thead><tr><th>来源ID</th><th>来源单号</th><th>处理状态</th><th>ERP FID</th><th>更新日期</th></tr></thead>
             <tbody id="recordsTable"></tbody>
           </table>
-          <div id="logsList"></div>
         </details>
       </section>
     </main>
-    <script type="module" src="/app.js?v=20260727-source-split-tax"></script>
+    <script type="module" src="/app.js?v=20260811-online-original-bill-group-v1"></script>
   </body>
 </html>
 

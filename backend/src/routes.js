@@ -3,6 +3,11 @@ import { readJson, sendError, sendJson } from './http-utils.js';
 import { AppError } from './errors.js';
 import { createCsvDownload } from './export-downloads.js';
 import { getSchedulerStatus, runSchedulerOnce } from './services/scheduler.js';
+import {
+  getPaymentStatusSchedulerStatus,
+  runPaymentStatusSyncOnce
+} from './services/payment-status-scheduler.js';
+import { previewPaymentStatusSync } from './services/payment-status-sync.js';
 import { getReadinessStatus, getSystemStatus } from './services/system-status.js';
 import {
   prepareExpenseReimbursement,
@@ -25,6 +30,10 @@ import {
   saveKingdeeAccountSelection
 } from './repository.js';
 import { getAppConfig, resolveKingdeeAccount, sanitizeKingdeeAccount } from './config.js';
+import {
+  processRecordListResponse,
+  processRecordResponse
+} from './process-record-response.js';
 
 export async function handleApi(request, response) {
   if (request.method === 'OPTIONS') {
@@ -85,6 +94,18 @@ export async function handleApi(request, response) {
     if (request.method === 'POST' && url.pathname === '/api/scheduler/run-once') {
       return sendJson(response, 200, { success: true, data: await runSchedulerOnce('manual') });
     }
+    if (request.method === 'GET' && url.pathname === '/api/payment-status-sync/status') {
+      return sendJson(response, 200, { success: true, data: getPaymentStatusSchedulerStatus() });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/payment-status-sync/preview') {
+      return sendJson(response, 200, { success: true, data: await previewPaymentStatusSync({
+        tenantKey: url.searchParams.get('tenantKey') || undefined,
+        orgNumber: url.searchParams.get('orgNumber') || undefined
+      }) });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/payment-status-sync/run') {
+      return sendJson(response, 200, { success: true, data: await runPaymentStatusSyncOnce('manual') });
+    }
     if (request.method === 'GET' && url.pathname === '/api/fenbeitong-expense-reimbursement/config/mock-template') {
       return sendJson(response, 200, { success: true, data: buildMockTemplate() });
     }
@@ -125,13 +146,18 @@ export async function handleApi(request, response) {
       return sendJson(response, 200, { success: true, data: await previewExpenseReimbursement(await readJson(request)) });
     }
     if (request.method === 'POST' && url.pathname === '/api/fenbeitong-expense-reimbursement/prepare') {
-      return sendJson(response, 200, { success: true, data: await prepareExpenseReimbursement(await readJson(request)) });
+      const record = await prepareExpenseReimbursement(await readJson(request));
+      return sendJson(response, 200, { success: true, data: processRecordResponse(record) });
     }
     if (request.method === 'POST' && url.pathname === '/api/fenbeitong-expense-reimbursement/save-erp') {
-      return sendJson(response, 200, { success: true, data: await saveExpenseReimbursementToErp(await readJson(request)) });
+      const record = await saveExpenseReimbursementToErp(await readJson(request));
+      return sendJson(response, 200, { success: true, data: processRecordResponse(record) });
     }
     if (request.method === 'GET' && url.pathname === '/api/fenbeitong-expense-reimbursement/process') {
-      return sendJson(response, 200, { success: true, data: listProcessRecords() });
+      return sendJson(response, 200, {
+        success: true,
+        data: processRecordListResponse(listProcessRecords())
+      });
     }
     if (request.method === 'GET' && url.pathname.startsWith('/api/fenbeitong-expense-reimbursement/process/')) {
       const sourceId = decodeURIComponent(url.pathname.split('/').pop());
@@ -139,10 +165,14 @@ export async function handleApi(request, response) {
       if (!record) {
         throw new Error(`process record is missing for ${sourceId}`);
       }
-      return sendJson(response, 200, { success: true, data: record });
+      return sendJson(response, 200, { success: true, data: processRecordResponse(record) });
     }
     if (request.method === 'GET' && url.pathname === '/api/operations/logs') {
-      return sendJson(response, 200, { success: true, data: listOperationLogs() });
+      const requestedLimit = Number(url.searchParams.get('limit') || 50);
+      const limit = Number.isFinite(requestedLimit)
+        ? Math.min(200, Math.max(1, Math.trunc(requestedLimit)))
+        : 50;
+      return sendJson(response, 200, { success: true, data: listOperationLogs(limit) });
     }
     return sendJson(response, 404, { success: false, error: { message: 'not found' } });
   } catch (error) {

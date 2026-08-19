@@ -1,0 +1,21 @@
+[Unit]
+Description=Fenbeitong Kingdee Expense Reimbursement Backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=system
+Group=system
+WorkingDirectory=/home/system/fenbeittong-offline
+Environment=NODE_ENV=production
+Environment=BACKEND_PORT=3101
+Environment=APP_DATA_DIR=/home/system/fenbeittong-offline-data
+ExecStart=/home/system/.local/opt/node/bin/node backend/src/server.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

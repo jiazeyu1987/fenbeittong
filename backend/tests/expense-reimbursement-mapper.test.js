@@ -9,6 +9,7 @@ test('maps Fenbeitong detail directly to ER_ExpReimbursement', () => {
   const preview = buildExpenseReimbursementPreview({
     fixedJson: config.mockFixedJson,
     documentDate: '2026-01-26',
+    sourceTypeValue: '线下报销 · 费用明细',
     config
   });
   const model = preview.payload.Model;
@@ -16,22 +17,99 @@ test('maps Fenbeitong detail directly to ER_ExpReimbursement', () => {
   assert.equal(model.FOrgID.FNumber, '886');
   assert.equal(model.FProposerID.FStaffNumber, 'PH022');
   assert.equal(model.FRequestDeptID.FNumber, 'BM000006');
+  const modelKeys = Object.keys(model);
+  assert.ok(modelKeys.indexOf('FOrgID') < modelKeys.indexOf('FProposerID'));
+  assert.ok(modelKeys.indexOf('FOrgID') < modelKeys.indexOf('FRequestDeptID'));
+  assert.ok(modelKeys.indexOf('FExpenseOrgId') < modelKeys.indexOf('FExpenseDeptID'));
   assert.equal(model.FBillTypeID.FNumber, 'FYBXD001_SYS');
-  assert.equal(model.FRequestType, '0');
-  assert.equal(model.FRealPay, false);
+  assert.equal(model.FRequestType, '1');
+  assert.equal(model.FRealPay, true);
+  assert.equal(model.FCONTACTUNITTYPE, 'BD_Empinfo');
+  assert.equal(model.FCONTACTUNIT.FNumber, 'PH022');
+  assert.equal(model.FPaySettlleTypeID.FNumber, '10');
   assert.equal(model.FBillNo, 'MOCK-BX-001');
   assert.equal(model.FDate, '2026-07-11');
   assert.equal(model.FReqAmountSum, 228);
   assert.equal(model.FReqPayReFoundAmountSum, 228);
   assert.equal(model.FEntity.length, 2);
+  assert.equal(model.F_ora_Text_qtr, '线下报销 · 费用明细');
   assert.equal(model.FEntity[0].FInvoiceType, '1');
-  assert.equal(model.FEntity[1].FInvoiceType, '0');
+  assert.equal(model.FEntity[1].FInvoiceType, '1');
   assert.equal(model.FEntity[0].F_ora_Decimal_qtr, 101.89);
+  assert.equal(model.FEntity[0].FExpenseAmount, 108);
+  assert.equal(model.FEntity[0].FReimbNotPayAmount, 108);
+  assert.equal(model.FEntity[0].FTaxSubmitAmt, 101.89);
+  assert.equal(model.FEntity[0].FLOCNOTAXAMOUNT, 101.89);
   assert.deepEqual(model.FEntity.map((entry) => entry.FExpID.FNumber), ['CI011', 'CI032']);
   assert.equal(model.FExpAmountSum, 228);
+  assert.equal(preview.payload.ValidateFlag, 'false');
+  assert.equal(preview.payload.IsAutoAdjustField, 'true');
   assert.ok(model.FEntity.every((entry) => entry.FRequestAmount > 0 && entry.FReqSubmitAmount > 0));
   assert.ok(model.FEntity.every((entry) => entry.F_PAEZ_Text === '' && entry.F_ora_Text === ''));
   assert.doesNotMatch(JSON.stringify(preview.payload), /GL_VOUCHER|FAccountBookID|FVOUCHERGROUPID|FDEBIT|FCREDIT|FVOUCHERID/);
+});
+
+test('maps ERP employee bank details to reimbursement payment header fields', () => {
+  const config = buildMockTemplate();
+  config.expenseReimbursementSettlementTypeNumber = 'OTHER';
+  const preview = buildExpenseReimbursementPreview({
+    fixedJson: config.mockFixedJson,
+    documentDate: '2026-01-26',
+    employeeBankDetails: {
+      openBank: 'Test Bank Branch',
+      accountName: 'Test Employee',
+      bankAccount: '6222000000000000'
+    },
+    config
+  });
+  const model = preview.payload.Model;
+  assert.equal(model.BankBranchT, 'Test Bank Branch');
+  assert.equal(model.BankAccountNameT, 'Test Employee');
+  assert.equal(model.BankAccountT, '6222000000000000');
+  assert.equal(model.FPaySettlleTypeID.FNumber, '10');
+});
+
+test('does not invent incomplete ERP employee bank details', () => {
+  const config = buildMockTemplate();
+  const preview = buildExpenseReimbursementPreview({
+    fixedJson: config.mockFixedJson,
+    documentDate: '2026-01-26',
+    employeeBankDetails: {
+      openBank: 'Test Bank Branch',
+      accountName: '',
+      bankAccount: ''
+    },
+    config
+  });
+  const model = preview.payload.Model;
+  assert.equal(Object.hasOwn(model, 'BankBranchT'), false);
+  assert.equal(preview.payload.ValidateFlag, 'false');
+  assert.equal(Object.hasOwn(model, 'BankAccountNameT'), false);
+  assert.equal(Object.hasOwn(model, 'BankAccountT'), false);
+});
+
+test('uses exact full-invoice values when Fenbeitong split fields do not balance', () => {
+  const config = buildMockTemplate();
+  const source = JSON.parse(config.mockFixedJson);
+  const deductibleTax = source.data.expenses[0].cost_custom_fields
+    .find((field) => field.field_code === 'deductible_tax');
+  deductibleTax.detail = '6.10';
+
+  const preview = buildExpenseReimbursementPreview({
+    fixedJson: JSON.stringify(source),
+    documentDate: '2026-01-26',
+    config
+  });
+  assert.equal(preview.payload.Model.FEntity[0].FTaxAmt, 6.11);
+  assert.equal(preview.payload.Model.FEntity[0].FTaxSubmitAmt, 101.89);
+  assert.equal(preview.payload.Model.FEntity[0].FLOCNOTAXAMOUNT, 101.89);
+  assert.equal(preview.expenseEntries[0].correctedInvalidSourceSplitFromInvoice, true);
+  assert.equal(
+    preview.expenseEntries[0].taxSplitSource,
+    'FENBEITONG_FULL_INVOICE_FIELDS_AFTER_INVALID_SPLIT'
+  );
+  assert.equal(preview.expenseEntries[0].sourceSplitTaxAmount, 6.1);
+  assert.equal(preview.expenseEntries[0].sourceSplitExcludingTaxAmount, 101.89);
 });
 
 test('maps online monthly bill fields and preserves intentional blanks', () => {
@@ -39,22 +117,36 @@ test('maps online monthly bill fields and preserves intentional blanks', () => {
   const preview = buildExpenseReimbursementPreview({
     fixedJson: readFileSync('mock-data/fenbeitong-online-bill-valid.json', 'utf8'),
     documentDate: '2026-01-01',
+    sourceTypeValue: '线上月结 · 企业账单',
     config
   });
   const model = preview.payload.Model;
   assert.equal(preview.sourceKind, 'ONLINE_MONTHLY_BILL');
   assert.equal(preview.sourceSummary.sourceForm, '企业账单');
   assert.equal(preview.sourceSummary.businessLine, '用车');
-  assert.equal(model.FBillNo, '');
+  assert.equal(model.FBillNo, 'MOCK-BILL-202607-X040');
+  assert.equal(
+    model.F_ora_Text_qtr,
+    `${preview.sourceSummary.sourceKindName} · ${preview.sourceSummary.sourceForm}`
+  );
   assert.equal(model.FCausa.startsWith('MOCK-BILL-202607 '), true);
   assert.equal(preview.sourceCode, 'MOCK-BILL-202607');
-  assert.equal(preview.payload.ValidateFlag, 'true');
-  assert.equal(model.FDate, '2026-07-15');
+  assert.equal(preview.payload.ValidateFlag, 'false');
+  assert.equal(model.FDate, '2026-07-01');
   assert.equal(model.FReqAmountSum, 0);
   assert.equal(model.FReqPayReFoundAmountSum, 0);
+  assert.equal(model.FRequestType, '0');
+  assert.equal(model.FRealPay, true);
+  assert.equal(model.FCONTACTUNITTYPE, 'FIN_OTHERS');
+  assert.equal(model.FCONTACTUNIT.FNumber, '01.03.034');
+  assert.equal(preview.documentSummary.contactUnitName, '北京分贝国际旅行社有限公司');
   assert.equal(model.FEntity[0].FRequestAmount, 0);
   assert.equal(model.FEntity[0].FTaxAmt, 100);
   assert.equal(model.FEntity[0].FTaxSubmitAmt, 900);
+  assert.equal(model.FEntity[0].FLOCNOTAXAMOUNT, 900);
+  assert.equal(model.FEntity[0].FExpenseAmount, 1000);
+  assert.equal(model.FEntity[0].FReimbNotPayAmount, 1000);
+  assert.equal(model.FEntity[0].FOriginalAmount, 1000);
   assert.equal(model.FEntity[0].F_ora_Decimal_qtr, 900);
   assert.equal(model.FEntity[0].F_ora_Text_83g, '用车');
   assert.equal(model.FEntity[0].F_PAEZ_Text, '上海市');
@@ -85,6 +177,7 @@ test('uses the enterprise non-deductible total when deductible amount is zero', 
   const entry = preview.payload.Model.FEntity[0];
   assert.equal(entry.FTaxAmt, 0);
   assert.equal(entry.FTaxSubmitAmt, 33.15);
+  assert.equal(entry.FLOCNOTAXAMOUNT, 33.15);
   assert.equal(entry.FExpSubmitAmount, 33.15);
 });
 
@@ -124,10 +217,72 @@ test('keeps a signed zero-net change order and drops only an all-zero helper row
   });
   const entries = preview.payload.Model.FEntity;
   assert.equal(entries.length, 1);
-  assert.equal(entries[0].FExpenseAmount, 0.03);
+  assert.equal(entries[0].FExpenseAmount, 0);
   assert.equal(entries[0].FTaxAmt, -0.03);
   assert.equal(entries[0].FExpSubmitAmount, 0);
   assert.equal(preview.totalAmount, 0);
+});
+
+test('keeps a zero-gross refund group when its merged tax split is non-zero', () => {
+  const config = buildMockTemplate();
+  const source = JSON.parse(readFileSync('mock-data/fenbeitong-online-bill-valid.json', 'utf8'));
+  const common = {
+    ...source.data.order,
+    order_category: 15,
+    business_line_name: '火车',
+    expense_category_code: 'CI00802',
+    root_order_id: 'CHANGE-GROUP'
+  };
+  source.data.orders = [{
+    ...common,
+    order_id: 'CHANGE-GROUP',
+    source_detail_id: 'CHANGE-POSITIVE',
+    repayment_total_amount: 100,
+    reference_deductible_total_amount: 9.01,
+    reference_non_deductible_amount: 90.99
+  }, {
+    ...common,
+    order_id: 'CHANGE-REFUND',
+    source_detail_id: 'CHANGE-REFUND',
+    repayment_total_amount: -100,
+    reference_deductible_total_amount: -9,
+    reference_non_deductible_amount: -91
+  }];
+  delete source.data.order;
+
+  const preview = buildExpenseReimbursementPreview({
+    fixedJson: JSON.stringify(source),
+    documentDate: '2026-05-25',
+    config
+  });
+
+  assert.equal(preview.payload.Model.FEntity.length, 1);
+  assert.equal(preview.payload.Model.FEntity[0].FExpSubmitAmount, 0);
+  assert.equal(preview.payload.Model.FEntity[0].FTaxAmt, 0.01);
+  assert.equal(preview.payload.Model.FEntity[0].FTaxSubmitAmt, -0.01);
+  assert.equal(preview.payload.Model.FEntity[0].FLOCNOTAXAMOUNT, -0.01);
+  assert.equal(preview.taxAmount, 0.01);
+  assert.equal(preview.excludingTaxAmount, -0.01);
+  assert.equal(preview.totalAmount, 0);
+});
+
+test('uses the organization-verified online contact unit supplied by the workflow', () => {
+  const config = buildMockTemplate();
+  const preview = buildExpenseReimbursementPreview({
+    fixedJson: readFileSync('mock-data/fenbeitong-online-bill-valid.json', 'utf8'),
+    sourceTypeValue: '线上月结 · 企业账单',
+    onlineContactUnit: {
+      type: 'FIN_OTHERS',
+      number: 'QTWL-886-VERIFIED',
+      name: '北京分贝国际旅行社有限公司'
+    },
+    config
+  });
+
+  assert.equal(preview.payload.Model.FCONTACTUNITTYPE, 'FIN_OTHERS');
+  assert.equal(preview.payload.Model.FCONTACTUNIT.FNumber, 'QTWL-886-VERIFIED');
+  assert.equal(preview.documentSummary.contactUnitNumber, 'QTWL-886-VERIFIED');
+  assert.equal(preview.documentSummary.contactUnitName, '北京分贝国际旅行社有限公司');
 });
 
 test('keeps a genuinely missing online location blank', () => {
@@ -259,8 +414,12 @@ test('blocks an unpaired negative online refund before calling Kingdee', () => {
 });
 
 test('maps real transport subcategory, employee, tax and route fields', () => {
-  const state = JSON.parse(readFileSync('runtime-data/state.json', 'utf8'));
-  const record = Object.values(state.syncedDocuments).find((item) => item.sourceMode === 'real');
+  const state = JSON.parse(readFileSync('runtime-data-offline/state.json', 'utf8'));
+  const record = Object.values(state.syncedDocuments).find((item) =>
+    item.sourceMode === 'real'
+    && item.requesterCode === 'X025'
+    && String(item.fixedJson || '').includes('CI00802')
+    && String(item.fixedJson || '').includes('29.56'));
   const preview = buildExpenseReimbursementPreview({
     fixedJson: record.fixedJson,
     documentDate: record.paymentDate,
@@ -286,6 +445,65 @@ test('blocks an unmapped X employee instead of falling back to another person', 
     documentDate: '2026-01-26',
     config
   }), /金蝶员工映射缺失/);
+});
+
+test('a live account employee mapping overrides the legacy account mapping', () => {
+  const config = buildMockTemplate();
+  const source = JSON.parse(config.mockFixedJson);
+  source.data.user.code = 'X012';
+  source.data.user.name = '刘昊';
+  config.disableRequiredEmployeeNumberMappings = true;
+  config.employeeDetailNumberMappings = { X012: 'X012' };
+
+  const preview = buildExpenseReimbursementPreview({
+    fixedJson: JSON.stringify(source),
+    documentDate: '2026-01-26',
+    config
+  });
+
+  assert.equal(preview.documentSummary.employeeNumber, 'X012');
+  assert.equal(preview.payload.Model.FProposerID.FStaffNumber, 'X012');
+  assert.equal(preview.payload.Model.FCONTACTUNIT.FNumber, 'X012');
+});
+
+test('keeps a missing source purpose blank and bypasses only Kingdee generic validation', () => {
+  const config = buildMockTemplate();
+  const source = JSON.parse(readFileSync('mock-data/fenbeitong-online-bill-valid.json', 'utf8'));
+  source.data.order.purpose = '';
+  source.data.order.public_payment_use = '';
+  source.data.order.travel_approval_reason = '';
+  source.data.order.reference_deductible_total_amount = 0;
+  source.data.order.reference_non_deductible_amount =
+    source.data.order.repayment_total_amount;
+
+  const preview = buildExpenseReimbursementPreview({
+    fixedJson: JSON.stringify(source),
+    documentDate: '2026-05-25',
+    config
+  });
+
+  assert.equal(preview.payload.Model.FEntity[0].FRemark, '');
+  assert.equal(preview.payload.ValidateFlag, 'false');
+});
+
+test('constrains long courier addresses only in the Kingdee custom text fields', () => {
+  const config = buildMockTemplate();
+  const source = JSON.parse(readFileSync('mock-data/fenbeitong-online-bill-valid.json', 'utf8'));
+  const longAddress = '贵州省贵阳市观山湖区观山街道观山街道西二环235号贵阳火车北站北大资源项目北大资源梦想城一号地块一栋一单元十二层二十三号';
+  source.data.order.order_city_name = longAddress;
+  source.data.order.destination_city_name = longAddress;
+
+  const preview = buildExpenseReimbursementPreview({
+    fixedJson: JSON.stringify(source),
+    documentDate: '2026-05-25',
+    config
+  });
+  const entry = preview.payload.Model.FEntity[0];
+
+  assert.equal([...entry.F_PAEZ_Text].length, 50);
+  assert.equal([...entry.F_ora_Text].length, 50);
+  assert.equal(preview.expenseEntries[0].startLocation, longAddress);
+  assert.equal(preview.expenseEntries[0].arrivalLocation, longAddress);
 });
 
 test('maps the expense department independently for each detail row', () => {
@@ -370,37 +588,39 @@ test('maps the Fenbeitong personal flight subcategory to the Kingdee transport e
   assert.equal(preview.payload.Model.FEntity[0].FExpID.FNumber, 'CI008');
 });
 
-test('blocks ERP generation instead of prorating a partially used invoice tax', () => {
-  const fixedJson = JSON.stringify({
-    code: 0,
-    data: {
-      reimb_id: 'PARTIAL-TAX-BLOCK-ID',
-      reimb_code: 'PARTIAL-TAX-BLOCK-CODE',
-      currency_code: 'CNY',
-      total_amount: 101,
-      payment_amount: 101,
-      user: { code: 'X001', name: 'Tester' },
-      expenses: [{
-        id: 'PARTIAL-TAX-BLOCK-EXPENSE',
-        cost_category: { code: 'CI020', name: 'Hospitality' },
-        total_amount: 101,
-        cost_attributions: [],
-        invoices: [{
-          id: 'PARTIAL-TAX-BLOCK-INVOICE',
-          total_amount: 394,
-          used_amount: 101,
-          tax_amount: 3.9,
-          exclude_tax_amount: 390.1
-        }],
-        cost_custom_fields: [
-          { field_code: 'date_of_expense', detail: '2026-06-14 00:00:00' }
-        ]
-      }]
-    }
+test('maps Fenbeitong team-building subcategories to the Kingdee team activity item', () => {
+  const config = buildMockTemplate();
+  const source = JSON.parse(config.mockFixedJson);
+  const expense = source.data.expenses[0];
+  expense.cost_category = { code: '10039', name: '住宿费-团建' };
+
+  const preview = buildExpenseReimbursementPreview({
+    fixedJson: JSON.stringify(source),
+    config
   });
 
-  assert.throws(
-    () => buildExpenseReimbursementPreview({ fixedJson, config: {} }),
-    /未使用整票税额按比例反算/
-  );
+  assert.equal(preview.payload.Model.FEntity[0].FExpID.FNumber, 'FYXM13_SYS');
+});
+
+test('keeps missing Fenbeitong split fields blank without using invoice tax', () => {
+  const config = buildMockTemplate();
+  const source = JSON.parse(config.mockFixedJson);
+  source.data.expenses[0].cost_custom_fields = source.data.expenses[0].cost_custom_fields
+    .filter((field) => !['deductible_tax', 'untaxed_amount', 'date_of_expense'].includes(field.field_code));
+
+  const preview = buildExpenseReimbursementPreview({
+    fixedJson: JSON.stringify(source),
+    config
+  });
+  const entry = preview.payload.Model.FEntity[0];
+
+  assert.equal(entry.FExpenseAmount, Number(source.data.expenses[0].total_amount));
+  assert.equal(entry.FInvoiceType, '0');
+  assert.equal(Object.hasOwn(entry, 'FTaxAmt'), false);
+  assert.equal(Object.hasOwn(entry, 'FTaxSubmitAmt'), false);
+  assert.equal(Object.hasOwn(entry, 'FLOCNOTAXAMOUNT'), false);
+  assert.equal(Object.hasOwn(entry, 'F_ora_Decimal_qtr'), false);
+  assert.equal(entry.F_PAEZ_Date, '');
+  assert.equal(preview.expenseEntries[0].taxAmount, null);
+  assert.equal(preview.expenseEntries[0].excludingTaxAmount, null);
 });

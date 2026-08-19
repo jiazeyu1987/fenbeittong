@@ -53,6 +53,10 @@ export function getAppConfig() {
       enabled: readBoolean('SCHEDULER_ENABLED', false),
       intervalSeconds: readPositiveInteger('SCHEDULER_INTERVAL_SECONDS', 3600),
       autoPushErp: readBoolean('SCHEDULER_AUTO_PUSH_ERP', false)
+    },
+    paymentStatusSync: {
+      enabled: readBoolean('PAYMENT_STATUS_SYNC_ENABLED', true),
+      orgNumber: process.env.PAYMENT_STATUS_SYNC_ORG_NUMBER || '892'
     }
   };
 }
@@ -182,6 +186,11 @@ export function getSanitizedConfigSummary() {
       enabled: config.scheduler.enabled,
       intervalSeconds: config.scheduler.intervalSeconds,
       autoPushErp: config.scheduler.autoPushErp
+    },
+    paymentStatusSync: {
+      enabled: config.paymentStatusSync.enabled,
+      orgNumber: config.paymentStatusSync.orgNumber,
+      schedule: '每天 00:00'
     }
   };
 }

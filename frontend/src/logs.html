@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>程序日志与操作痕迹</title>
+    <link rel="stylesheet" href="/styles.css?v=20260803-log-center-v1" />
+  </head>
+  <body class="log-center-body">
+    <main class="log-center-shell">
+      <header class="log-center-hero">
+        <div>
+          <span class="panel-kicker">AUDIT TRAIL · 200 RECORDS</span>
+          <h1>程序日志与操作痕迹</h1>
+          <p>独立日志地址，可按关键词、结果、操作类型和日期查询。</p>
+        </div>
+        <a class="secondary toolbar-link" href="/">返回费用报销工作台</a>
+      </header>
+
+      <section class="log-query-panel" aria-label="日志查询条件">
+        <label><span>关键词</span><input id="logQueryInput" placeholder="人员、单号、批次号、失败原因…" /></label>
+        <label><span>结果</span>
+          <select id="logStatusSelect"><option value="">全部结果</option><option value="SUCCESS">成功</option><option value="FAILED">失败</option></select>
+        </label>
+        <label><span>操作类型</span><select id="logActionSelect"><option value="">全部操作</option></select></label>
+        <label><span>开始日期</span><input id="logStartDate" type="date" /></label>
+        <label><span>结束日期</span><input id="logEndDate" type="date" /></label>
+        <button id="queryLogsButton" class="primary-action" type="button">查询</button>
+        <button id="resetLogsButton" class="secondary" type="button">重置</button>
+      </section>
+
+      <section class="log-result-card">
+        <div class="log-result-header">
+          <div><h2>查询结果</h2><p id="logQuerySummary">正在读取日志…</p></div>
+          <button id="refreshLogCenterButton" class="secondary" type="button">刷新日志</button>
+        </div>
+        <div class="log-table-wrap">
+          <table class="log-table">
+            <thead><tr><th>时间</th><th>结果</th><th>操作类型</th><th>操作说明</th><th>详细信息</th></tr></thead>
+            <tbody id="logTableBody"><tr><td colspan="5">正在读取…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/logs.js?v=20260803-log-center-v1"></script>
+  </body>
+</html>
