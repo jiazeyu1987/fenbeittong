@@ -804,7 +804,13 @@ export function markPushedToErp(sourceId, erpResult, options = {}) {
   if (!isRealKingdeeSaveResult(erpResult)) {
     throw new Error('real Kingdee save result is required before marking ERP push success');
   }
-  if (record.processStage === 'ERP_EXPENSE_REIMBURSEMENT_SAVED' || record.erpFid || record.erpNumber) {
+  if (record.lastErpRetryErrorCode === 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH'
+    && (String(record.erpFid) !== String(erpResult.erpFid)
+      || String(record.erpNumber) !== String(erpResult.erpNumber))) {
+    throw new Error('payment bank verification retry must update the original Kingdee bill');
+  }
+  if ((record.processStage === 'ERP_EXPENSE_REIMBURSEMENT_SAVED' || record.erpFid || record.erpNumber)
+    && record.lastErpRetryErrorCode !== 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH') {
     if (
       String(record.erpFid) === String(erpResult.erpFid)
       && String(record.erpNumber) === String(erpResult.erpNumber)
@@ -863,6 +869,36 @@ export function markPushedToErp(sourceId, erpResult, options = {}) {
   });
   persistState(state);
   return structuredClone(nextRecord);
+}
+
+export function preservePaymentBankVerificationFailure(sourceId, error) {
+  const result = error?.detail?.savedResult;
+  if (error?.code !== 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH' || !isRealKingdeeSaveResult(result)) {
+    throw new Error('verified Kingdee save identifiers are required');
+  }
+  const state = loadState();
+  const record = state.voucherRecords[sourceId];
+  if (!record) throw new Error(`prepared record is missing for ${sourceId}`);
+  state.voucherRecords[sourceId] = {
+    ...record,
+    processStatus: 15,
+    processStage: 'EXPENSE_REIMBURSEMENT_PREPARED',
+    erpFid: result.erpFid,
+    erpNumber: result.erpNumber,
+    erpMode: 'real',
+    simulatedErp: false,
+    erpDocumentStatus: result.documentStatus,
+    erpRawResponse: JSON.stringify(result.rawResponse),
+    lastErpRetryErrorCode: error.code,
+    lastErpRetryErrorMessage: error.message,
+    lastErpRetryErrorAt: now(),
+    updateTime: now()
+  };
+  appendOperation(state, 'ERP_PAYMENT_BANK_VERIFY', 'FAILED', {
+    sourceId, erpFid: result.erpFid, erpNumber: result.erpNumber, code: error.code
+  });
+  persistState(state);
+  return structuredClone(state.voucherRecords[sourceId]);
 }
 
 export function restoreErpPushAfterRetryFailure(sourceId, previousRecord, error) {

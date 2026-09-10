@@ -124,11 +124,32 @@ test('online monthly selection key uses the original bill number', () => {
     'ONLINE-BILL:puhui:X003:0013808520260420'
   );
   assert.notEqual(
+    expenseReimbursementSelectionKey({ ...common, requesterCode: 'X999', requesterName: '另一位报销人' }),
+    expenseReimbursementSelectionKey(common)
+  );
+  assert.notEqual(
     expenseReimbursementSelectionKey(common),
     expenseReimbursementSelectionKey({
       ...common,
       sourceCode: '0013808520260501'
     })
+  );
+});
+
+test('local CSV offline selection key groups detail rows by source number', () => {
+  const common = {
+    sourceType: 'OFFLINE_REIMBURSEMENT',
+    sourceMode: 'local-csv',
+    tenantKey: 'local-csv',
+    sourceCode: 'B1IELSHBX26070100002'
+  };
+  assert.equal(
+    expenseReimbursementSelectionKey({ ...common, sourceId: 'CSV-1' }),
+    expenseReimbursementSelectionKey({ ...common, sourceId: 'CSV-2' })
+  );
+  assert.equal(
+    expenseReimbursementSelectionKey(common),
+    'OFFLINE-BILL:local-csv:B1IELSHBX26070100002'
   );
 });
 

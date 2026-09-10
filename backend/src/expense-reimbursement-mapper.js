@@ -13,6 +13,7 @@ const KINGDEE_EXPENSE_ITEM_NUMBERS = Object.freeze({
   CI00805: 'CI008',
   CI009: 'CI009',
   CI010: 'CI010',
+  CI011: 'CI011',
   CI012: 'CI012',
   CI013: 'CI013',
   CI014: 'CI014',
@@ -22,6 +23,7 @@ const KINGDEE_EXPENSE_ITEM_NUMBERS = Object.freeze({
   CI020: 'CI020',
   CI021: 'CI021',
   CI022: 'CI022',
+  CI032: 'CI032',
   // Fenbeitong's team-building subcategories do not have one-to-one Kingdee
   // expense items in this account set. Kingdee exposes the authoritative
   // team-activity item FYXM13_SYS for all three.
@@ -60,7 +62,9 @@ const REQUIRED_DEPARTMENT_NUMBERS = Object.freeze({
 const ONLINE_CONTACT_UNIT = Object.freeze({
   type: 'FIN_OTHERS',
   number: '01.03.034',
-  name: '北京分贝国际旅行社有限公司'
+  // Real-mode saves replace this fallback with the exact base-data record
+  // resolved for 北京分贝通科技有限公司 in the target Kingdee organization.
+  name: '北京分贝通科技有限公司'
 });
 
 export function buildExpenseReimbursementPreview(input) {
@@ -97,14 +101,22 @@ export function buildExpenseReimbursementPreview(input) {
       || round(expense.splitExcludingTaxAmount) !== 0
     ))
   );
-  const entries = mappedExpenses.map((expense) => buildExpenseEntry({
-    config,
-    document,
-    documentDate,
-    departmentNumber: resolveExpenseDepartmentNumber(config, expense),
-    currencyNumber,
-    exchangeRate,
-    expense
+  const entries = mappedExpenses.map((expense) => ({
+    ...buildExpenseEntry({
+      config,
+      document,
+      documentDate,
+      departmentNumber: resolveExpenseDepartmentNumber(config, document, expense),
+      currencyNumber,
+      exchangeRate,
+      expense
+    }),
+    // The desktop client's lower payment panel belongs to the current entry.
+    ...(document.sourceKind === 'OFFLINE_REIMBURSEMENT' && hasCompleteEmployeeBankDetails ? {
+      FBankBranch: employeeBankDetails.openBank,
+      FBankAccountName: employeeBankDetails.accountName,
+      FBankAccount: employeeBankDetails.bankAccount
+    } : {})
   }));
   const totalAmount = round(entries.reduce((sum, entry) => sum + entry.FExpenseAmount, 0));
   const taxAmount = round(entries.reduce((sum, entry) => sum + (Number(entry.FTaxAmt) || 0), 0));
@@ -151,13 +163,11 @@ export function buildExpenseReimbursementPreview(input) {
     ValidateRepeatJson: 'false',
     Model: {
       FID: 0,
-      // Fenbeitong uses one enterprise bill number for many employees, while
-      // Kingdee requires every reimbursement document number to be unique.
-      // Keep the authoritative Fenbeitong bill number verbatim and append the
-      // Fenbeitong employee code as the deterministic uniqueness suffix.
+      // Only online monthly bills append the exact Kingdee employee number,
+      // because their source number can be shared by multiple employees.
       FBillNo: document.sourceKind === 'ONLINE_MONTHLY_BILL'
-        ? onlineEnterpriseBillNumber(document)
-        : document.reimbursementCode,
+        ? onlineEnterpriseBillNumber(input, document, employeeNumber)
+        : requiredText(input.sourceCodeValue || document.reimbursementCode, 'reimbursement number'),
       FDocumentStatus: 'Z',
       // Kingdee resolves departments and employees inside their organization
       // context. Keep the organization fields before every dependent base-data
@@ -214,9 +224,15 @@ export function buildExpenseReimbursementPreview(input) {
       // defaults silently change it for individual documents.
       FPaySettlleTypeID: numberReference('10'),
       ...(employeeBankDetails.openBank ? {
-        BankBranchT: employeeBankDetails.openBank,
-        BankAccountNameT: employeeBankDetails.accountName,
-        BankAccountT: employeeBankDetails.bankAccount
+        ...(document.sourceKind === 'OFFLINE_REIMBURSEMENT' ? {
+          FBankBranchT: employeeBankDetails.openBank,
+          FBankAccountNameT: employeeBankDetails.accountName,
+          FBankAccountT: employeeBankDetails.bankAccount
+        } : {
+          BankBranchT: employeeBankDetails.openBank,
+          BankAccountNameT: employeeBankDetails.accountName,
+          BankAccountT: employeeBankDetails.bankAccount
+        })
       } : {}),
       FRealPay: true,
       FBUSINESSTYPE: '1',
@@ -263,12 +279,12 @@ export function buildExpenseReimbursementPreview(input) {
     sourceIds: Array.isArray(input.sourceIds) && input.sourceIds.length > 0
       ? [...new Set(input.sourceIds.map((value) => String(value).trim()).filter(Boolean))]
       : [document.reimbursementId],
-    sourceCode: document.reimbursementCode,
+    sourceCode: requiredText(input.sourceCodeValue || document.reimbursementCode, 'reimbursement number'),
     sourceKind: document.sourceKind,
     sourceKindName: document.sourceKindName,
     sourceHeader: document.sourceHeader,
     sourceForm: document.sourceForm,
-    marker: `FBT-${document.reimbursementCode}`,
+    marker: `FBT-${requiredText(input.sourceCodeValue || document.reimbursementCode, 'reimbursement number')}`,
     idempotencyKey: `FENBEITONG:EXPENSE_REIMBURSEMENT:${document.reimbursementId}`,
     contentHash,
     totalAmount,
@@ -276,7 +292,7 @@ export function buildExpenseReimbursementPreview(input) {
     excludingTaxAmount,
     sourceSummary: {
       sourceId: document.reimbursementId,
-      sourceCode: document.reimbursementCode,
+      sourceCode: requiredText(input.sourceCodeValue || document.reimbursementCode, 'reimbursement number'),
       sourceKind: document.sourceKind,
       sourceKindName: document.sourceKindName,
       sourceHeader: document.sourceHeader,
@@ -562,6 +578,10 @@ function buildExpenseEntry({ config, document, documentDate, departmentNumber, c
     // created, it must carry the same authoritative Fenbeitong reimbursement
     // amount; later ERP payment operations may reduce this balance.
     FReimbNotPayAmount: amount,
+    // Keep every reimbursement detail on the same telegraphic-transfer
+    // settlement method as the document header. The Kingdee detail field uses
+    // JSFS04_SYS, while the header field uses number 10.
+    FSettlleTypeID: numberReference('JSFS04_SYS'),
     FRequestAmount: requestAmount,
     FReqSubmitAmount: requestAmount,
     FLocExpSubmitAmount: amount,
@@ -625,27 +645,36 @@ function resolveEmployeeNumber(config, document) {
 }
 
 function resolveDepartmentNumber(config, document) {
-  const number = (
-    REQUIRED_DEPARTMENT_NUMBERS[document.departmentCode]
-      || REQUIRED_DEPARTMENT_NUMBERS[document.departmentName]
-      || config.departmentDetailNumberMappings?.[document.departmentCode]
-      || config.departmentDetailNumberMappings?.[document.departmentName]
-      || directKingdeeDepartmentNumber(document.departmentCode)
-  );
+  const number = [
+    document.departmentCode,
+    document.departmentName,
+    ...departmentHierarchyParts(document.departmentName)
+  ].map((candidate) => (
+    REQUIRED_DEPARTMENT_NUMBERS[candidate]
+      || config.departmentDetailNumberMappings?.[candidate]
+      || directKingdeeDepartmentNumber(candidate)
+      || ''
+  )).find(Boolean);
   if (number) return number;
   throw departmentMappingError(document.departmentCode, document.departmentName);
 }
 
-function resolveExpenseDepartmentNumber(config, expense) {
+function resolveExpenseDepartmentNumber(config, document, expense) {
   if (!expense.attributionDepartmentCode && !expense.attributionDepartmentName) return '';
-  const number = String(
-    REQUIRED_DEPARTMENT_NUMBERS[expense.attributionDepartmentCode]
-      || REQUIRED_DEPARTMENT_NUMBERS[expense.attributionDepartmentName]
-      || config.departmentDetailNumberMappings?.[expense.attributionDepartmentCode]
-      || config.departmentDetailNumberMappings?.[expense.attributionDepartmentName]
-      || directKingdeeDepartmentNumber(expense.attributionDepartmentCode)
+  const candidates = [
+    expense.attributionDepartmentCode,
+    expense.attributionDepartmentName,
+    ...departmentHierarchyParts(expense.attributionDepartmentName),
+    document.departmentCode,
+    document.departmentName,
+    ...departmentHierarchyParts(document.departmentName)
+  ];
+  const number = candidates.map((candidate) => (
+    REQUIRED_DEPARTMENT_NUMBERS[candidate]
+      || config.departmentDetailNumberMappings?.[candidate]
+      || directKingdeeDepartmentNumber(candidate)
       || ''
-  ).trim();
+  )).find(Boolean);
   if (number) return number;
   throw departmentMappingError(
     expense.attributionDepartmentCode,
@@ -683,10 +712,25 @@ function reimbursementReason(document) {
   return value.slice(0, 200);
 }
 
-function onlineEnterpriseBillNumber(document) {
-  const billNumber = requiredText(document.reimbursementCode, 'online enterprise bill number');
-  const employeeCode = requiredText(document.userCode, 'online enterprise bill employee code');
-  return `${billNumber}-${employeeCode}`;
+function departmentHierarchyParts(value) {
+  return String(value || '')
+    .split(/[\\/／>＞]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function onlineEnterpriseBillNumber(input, document, employeeNumber) {
+  const sourceNumber = requiredText(
+    input.sourceCodeValue || document.reimbursementCode,
+    'online enterprise bill number'
+  );
+  // Use the employee number resolved against Kingdee. CSVEMP-* is only a
+  // local import placeholder and must never become part of an ERP bill number.
+  const resolvedEmployeeNumber = requiredText(
+    employeeNumber,
+    'resolved Kingdee employee number'
+  );
+  return `${sourceNumber}-${resolvedEmployeeNumber}`;
 }
 
 function expenseItemName(number, fallback) {

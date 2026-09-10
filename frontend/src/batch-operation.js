@@ -133,6 +133,13 @@ export function isConfirmedErpSave(record) {
 }
 
 export function expenseReimbursementSelectionKey(record) {
+  if (
+    record?.sourceType === 'OFFLINE_REIMBURSEMENT'
+    && (record.localCsvImport || record.sourceMode === 'local-csv')
+  ) {
+    const billNumber = String(record.sourceCode || record.sourceId || '').trim();
+    return `OFFLINE-BILL:${record.tenantKey || 'local-csv'}:${billNumber}`;
+  }
   if (record?.sourceType !== 'ONLINE_MONTHLY_BILL') {
     return `SOURCE:${record?.sourceId || ''}`;
   }

@@ -27,6 +27,7 @@ test('maps Fenbeitong detail directly to ER_ExpReimbursement', () => {
   assert.equal(model.FCONTACTUNITTYPE, 'BD_Empinfo');
   assert.equal(model.FCONTACTUNIT.FNumber, 'PH022');
   assert.equal(model.FPaySettlleTypeID.FNumber, '10');
+  assert.ok(model.FEntity.every((entry) => entry.FSettlleTypeID.FNumber === 'JSFS04_SYS'));
   assert.equal(model.FBillNo, 'MOCK-BX-001');
   assert.equal(model.FDate, '2026-07-11');
   assert.equal(model.FReqAmountSum, 228);
@@ -49,7 +50,7 @@ test('maps Fenbeitong detail directly to ER_ExpReimbursement', () => {
   assert.doesNotMatch(JSON.stringify(preview.payload), /GL_VOUCHER|FAccountBookID|FVOUCHERGROUPID|FDEBIT|FCREDIT|FVOUCHERID/);
 });
 
-test('maps ERP employee bank details to reimbursement payment header fields', () => {
+test('maps ERP employee bank details to header and every payment entry without changing other fields', () => {
   const config = buildMockTemplate();
   config.expenseReimbursementSettlementTypeNumber = 'OTHER';
   const preview = buildExpenseReimbursementPreview({
@@ -63,10 +64,39 @@ test('maps ERP employee bank details to reimbursement payment header fields', ()
     config
   });
   const model = preview.payload.Model;
-  assert.equal(model.BankBranchT, 'Test Bank Branch');
-  assert.equal(model.BankAccountNameT, 'Test Employee');
-  assert.equal(model.BankAccountT, '6222000000000000');
+  assert.equal(model.FBankBranchT, 'Test Bank Branch');
+  assert.equal(model.FBankAccountNameT, 'Test Employee');
+  assert.equal(model.FBankAccountT, '6222000000000000');
+  const withoutBank = structuredClone(model);
+  delete withoutBank.FBankBranchT;
+  delete withoutBank.FBankAccountNameT;
+  delete withoutBank.FBankAccountT;
+  for (const entry of withoutBank.FEntity) {
+    assert.equal(entry.FBankBranch, 'Test Bank Branch');
+    assert.equal(entry.FBankAccountName, 'Test Employee');
+    assert.equal(entry.FBankAccount, '6222000000000000');
+    delete entry.FBankBranch;
+    delete entry.FBankAccountName;
+    delete entry.FBankAccount;
+  }
+  assert.deepEqual(withoutBank, buildExpenseReimbursementPreview({
+    fixedJson: config.mockFixedJson, documentDate: '2026-01-26', config
+  }).payload.Model);
   assert.equal(model.FPaySettlleTypeID.FNumber, '10');
+});
+
+test('uses the synchronized source document number as the ERP bill number verbatim', () => {
+  const config = buildMockTemplate();
+  const preview = buildExpenseReimbursementPreview({
+    fixedJson: config.mockFixedJson,
+    sourceCodeValue: '0013808520260801',
+    config
+  });
+
+  assert.equal(preview.payload.Model.FBillNo, '0013808520260801');
+  assert.equal(preview.sourceCode, '0013808520260801');
+  assert.equal(preview.sourceSummary.sourceCode, '0013808520260801');
+  assert.equal(preview.marker, 'FBT-0013808520260801');
 });
 
 test('does not invent incomplete ERP employee bank details', () => {
@@ -82,10 +112,10 @@ test('does not invent incomplete ERP employee bank details', () => {
     config
   });
   const model = preview.payload.Model;
-  assert.equal(Object.hasOwn(model, 'BankBranchT'), false);
+  assert.equal(Object.hasOwn(model, 'FBankBranchT'), false);
   assert.equal(preview.payload.ValidateFlag, 'false');
-  assert.equal(Object.hasOwn(model, 'BankAccountNameT'), false);
-  assert.equal(Object.hasOwn(model, 'BankAccountT'), false);
+  assert.equal(Object.hasOwn(model, 'FBankAccountNameT'), false);
+  assert.equal(Object.hasOwn(model, 'FBankAccountT'), false);
 });
 
 test('uses exact full-invoice values when Fenbeitong split fields do not balance', () => {
@@ -124,7 +154,7 @@ test('maps online monthly bill fields and preserves intentional blanks', () => {
   assert.equal(preview.sourceKind, 'ONLINE_MONTHLY_BILL');
   assert.equal(preview.sourceSummary.sourceForm, '企业账单');
   assert.equal(preview.sourceSummary.businessLine, '用车');
-  assert.equal(model.FBillNo, 'MOCK-BILL-202607-X040');
+  assert.equal(model.FBillNo, 'MOCK-BILL-202607-0000000000001');
   assert.equal(
     model.F_ora_Text_qtr,
     `${preview.sourceSummary.sourceKindName} · ${preview.sourceSummary.sourceForm}`
@@ -139,7 +169,9 @@ test('maps online monthly bill fields and preserves intentional blanks', () => {
   assert.equal(model.FRealPay, true);
   assert.equal(model.FCONTACTUNITTYPE, 'FIN_OTHERS');
   assert.equal(model.FCONTACTUNIT.FNumber, '01.03.034');
-  assert.equal(preview.documentSummary.contactUnitName, '北京分贝国际旅行社有限公司');
+  assert.equal(preview.documentSummary.contactUnitName, '北京分贝通科技有限公司');
+  assert.equal(model.FPaySettlleTypeID.FNumber, '10');
+  assert.equal(model.FEntity[0].FSettlleTypeID.FNumber, 'JSFS04_SYS');
   assert.equal(model.FEntity[0].FRequestAmount, 0);
   assert.equal(model.FEntity[0].FTaxAmt, 100);
   assert.equal(model.FEntity[0].FTaxSubmitAmt, 900);
@@ -158,6 +190,22 @@ test('maps online monthly bill fields and preserves intentional blanks', () => {
   assert.equal(preview.expenseEntries[0].purpose, '商务洽谈');
   assert.equal(preview.expenseEntries[0].sourceReason, '客户拜访用车');
   assert.equal(preview.expenseEntries[0].trafficType, '用车');
+});
+
+test('online bill number uses the resolved employee number instead of a CSV placeholder', () => {
+  const config = buildMockTemplate();
+  const source = JSON.parse(readFileSync('mock-data/fenbeitong-online-bill-valid.json', 'utf8'));
+  source.data.order.third_employee_id = 'CSVEMP-080';
+  source.data.order.employee_name = '李雄';
+
+  const preview = buildExpenseReimbursementPreview({
+    fixedJson: JSON.stringify(source),
+    sourceCodeValue: '0013808520260801',
+    config
+  });
+
+  assert.equal(preview.payload.Model.FBillNo, '0013808520260801-0000000000001');
+  assert.doesNotMatch(preview.payload.Model.FBillNo, /CSVEMP/i);
 });
 
 test('uses the enterprise non-deductible total when deductible amount is zero', () => {
@@ -586,6 +634,76 @@ test('maps the Fenbeitong personal flight subcategory to the Kingdee transport e
   });
 
   assert.equal(preview.payload.Model.FEntity[0].FExpID.FNumber, 'CI008');
+});
+
+test('maps a detailed sales hierarchy to the configured top-level sales department', () => {
+  const config = buildMockTemplate();
+  const source = JSON.parse(config.mockFixedJson);
+  source.data.user.department_name = '销售部/中大区/华东战区';
+  source.data.expenses[0].cost_attributions = [{
+    type: 1,
+    details: [{ name: '销售部/中大区/华东战区', amount: 108 }]
+  }];
+
+  const preview = buildExpenseReimbursementPreview({
+    fixedJson: JSON.stringify(source),
+    documentDate: '2026-07-11',
+    config
+  });
+
+  assert.equal(preview.payload.Model.FRequestDeptID.FNumber, 'BM000006');
+  assert.equal(preview.payload.Model.FEntity[0].FExpenseDeptEntryID.FNumber, 'BM000006');
+});
+
+test('falls back to the application department when an expense attribution contains an organization name', () => {
+  const config = buildMockTemplate();
+  const source = JSON.parse(config.mockFixedJson);
+  source.data.user.department_name = '销售部/中大区/华东战区';
+  source.data.expenses[0].cost_attributions = [{
+    type: 1,
+    details: [{ name: '上海璞慧医疗器械有限公司', amount: 108 }]
+  }];
+
+  const preview = buildExpenseReimbursementPreview({
+    fixedJson: JSON.stringify(source),
+    documentDate: '2026-07-11',
+    config
+  });
+
+  assert.equal(preview.payload.Model.FEntity[0].FExpenseDeptEntryID.FNumber, 'BM000006');
+});
+
+test('maps direct Fenbeitong CI011 and CI032 codes without changing other payload fields', () => {
+  const config = buildMockTemplate();
+  const source = JSON.parse(config.mockFixedJson);
+  source.data.expenses[0].cost_category = { code: 'CI011', name: '交通费-个人（火车）' };
+  source.data.expenses[1].cost_category = { code: 'CI032', name: '通讯费-个人' };
+
+  const preview = buildExpenseReimbursementPreview({
+    fixedJson: JSON.stringify(source),
+    sourceTypeValue: '线下报销 · 费用明细',
+    config
+  });
+  const model = preview.payload.Model;
+
+  assert.deepEqual(model.FEntity.map((entry) => entry.FExpID.FNumber), ['CI011', 'CI032']);
+  assert.equal(model.FBillNo, 'MOCK-BX-001');
+  assert.equal(model.FRequestDeptID.FNumber, 'BM000006');
+  assert.equal(model.FRequestType, '1');
+  assert.equal(model.FPaySettlleTypeID.FNumber, '10');
+  assert.equal(model.F_ora_Text_qtr, '线下报销 · 费用明细');
+  assert.deepEqual(model.FEntity.map((entry) => entry.FReimbNotPayAmount), [108, 120]);
+});
+
+test('rejects an unknown expense code instead of falling back to another item', () => {
+  const config = buildMockTemplate();
+  const source = JSON.parse(config.mockFixedJson);
+  source.data.expenses[0].cost_category = { code: 'UNKNOWN-CODE', name: '未知费用' };
+
+  assert.throws(
+    () => buildExpenseReimbursementPreview({ fixedJson: JSON.stringify(source), config }),
+    /金蝶费用项目映射缺失：UNKNOWN-CODE\/未知费用/
+  );
 });
 
 test('maps Fenbeitong team-building subcategories to the Kingdee team activity item', () => {

@@ -760,6 +760,20 @@ export async function saveKingdeeExpenseReimbursement(payload, options = {}) {
     throw dependencyError('KINGDEE_SAVE_RESPONSE_INVALID', 'Kingdee expense reimbursement save response missing Id or Number');
   }
   const viewBody = await viewSavedExpenseReimbursement(config, authSession, identifiers.erpFid);
+  try {
+    validateExpensePaymentBankFields(activePayload, viewBody);
+  } catch (error) {
+    error.detail.savedResult = {
+      ...identifiers,
+      mode: 'real',
+      simulated: false,
+      mockReplacement: false,
+      documentStatus: viewBody?.Result?.Result?.DocumentStatus
+        || viewBody?.Result?.Result?.FDocumentStatus || 'Z',
+      rawResponse: { save: body, view: viewBody }
+    };
+    throw error;
+  }
   let verificationWarning = '';
   try {
     validateSavedExpenseReimbursementTarget(activePayload, viewBody);
@@ -984,6 +998,7 @@ function networkControlConflictError(payload, status) {
 function matchesExistingExpenseReimbursement(payload, viewBody) {
   const expectedModel = payload?.Model || {};
   const actualModel = viewBody?.Result?.Result || {};
+  if (paymentBankMismatches(expectedModel, actualModel).length > 0) return false;
   const expectedBillNumber = String(expectedModel.FBillNo || '').trim();
   if (expectedBillNumber && String(actualModel.BillNo || actualModel.FBillNo || '').trim()
     !== expectedBillNumber) return false;
@@ -1008,6 +1023,41 @@ function matchesExistingExpenseReimbursement(payload, viewBody) {
     ? actualModel.ER_ExpenseReimbEntry
     : Array.isArray(actualModel.FEntity) ? actualModel.FEntity : [];
   return matchesExpenseReimbursementEntries(expectedEntries, actualEntries);
+}
+
+function paymentBankMismatches(expected, actual) {
+  if (String(expected.FRequestType) !== '1') return [];
+  const mismatches = [
+    ['FBankBranchT', 'BankBranchT', '开户银行'],
+    ['FBankAccountNameT', 'BankAccountNameT', '账户名称'],
+    ['FBankAccountT', 'BankAccountT', '银行账号']
+  ].filter(([key, property]) => Object.hasOwn(expected, key)
+    && !sameText(actual[property], expected[key]))
+    .map(([field, , label]) => ({ field, label }));
+  for (const [index, entry] of (expected.FEntity || []).entries()) {
+    const actualEntry = actual.ER_ExpenseReimbEntry?.[index] || {};
+    for (const [key, property, label] of [
+      ['FBankBranch', 'BankBranch', '开户银行'],
+      ['FBankAccountName', 'BankAccountName', '账户名称'],
+      ['FBankAccount', 'BankAccount', '银行账号']
+    ]) {
+      if (Object.hasOwn(entry, key) && !sameText(actualEntry[property], entry[key])) {
+        mismatches.push({ field: `FEntity[${index}].${key}`, label: `第${index + 1}条明细${label}` });
+      }
+    }
+  }
+  return mismatches;
+}
+
+export function validateExpensePaymentBankFields(payload, viewBody) {
+  const mismatches = paymentBankMismatches(payload?.Model || {}, viewBody?.Result?.Result || {});
+  if (mismatches.length) {
+    throw dependencyError(
+      'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH',
+      `金蝶单据已保存，但付款页签字段校验失败：${mismatches.map((item) => item.label).join('、')}。请更新原单，不要重复新建。`,
+      { mismatches }
+    );
+  }
 }
 
 function matchesExpenseReimbursementEntries(expectedEntries, actualEntries) {

@@ -78,6 +78,7 @@ const state = {
   previewInvalidReason: '',
   preparedSourceIds: new Set(),
   pushedSourceIds: new Set(),
+  pushedExpenseReimbursementKeys: new Set(),
   batchSaveRunning: false,
   batchSavePaused: false,
   batchSaveResumeWaiters: [],
@@ -690,7 +691,7 @@ async function resaveSelectedToErp() {
     throw new Error('请先选择需要保存或重新保存至ERP的单据。');
   }
   const initiallySavedSourceIds = new Set(records
-    .filter((record) => state.pushedSourceIds.has(record.sourceId))
+    .filter((record) => hasSavedExpenseReimbursementGroup(record))
     .map((record) => record.sourceId));
   const initiallyUnsavedCount = records.length - initiallySavedSourceIds.size;
   startBatchProgress(records.length, '保存/重新保存费用报销单');
@@ -791,7 +792,7 @@ async function retryFailedErpSaves() {
   const batch = await runBatchOperation(
     records,
     (record) => saveExpenseReimbursementRowToErp(record, {
-      forceRetry: state.pushedSourceIds.has(record.sourceId)
+      forceRetry: hasSavedExpenseReimbursementGroup(record)
     }),
     (progress) => updateBatchProgress(progress, '重试失败单据'),
     {
@@ -923,6 +924,10 @@ async function refreshRecords() {
   state.pushedSourceIds = new Set(selectedAcctIdRecords
     .filter(isRealPushedRecord)
     .flatMap(processSourceIds));
+  state.pushedExpenseReimbursementKeys = new Set(selectedAcctIdRecords
+    .filter(isRealPushedRecord)
+    .map((record) => String(record.sourceId || '').trim())
+    .filter(Boolean));
   renderSourceQueue(state.syncedDocuments);
   if (records.length === 0) {
     recordsTable.innerHTML = '<tr><td colspan="5">暂无记录，请先同步分贝通数据。</td></tr>';
@@ -1045,6 +1050,11 @@ function uniqueExpenseReimbursementRecords(records) {
 
 function expenseReimbursementGroupKey(record) {
   return expenseReimbursementSelectionKey(record);
+}
+
+function hasSavedExpenseReimbursementGroup(record) {
+  if (state.pushedSourceIds.has(record?.sourceId)) return true;
+  return state.pushedExpenseReimbursementKeys.has(expenseReimbursementGroupKey(record));
 }
 
 function processSourceIds(record) {

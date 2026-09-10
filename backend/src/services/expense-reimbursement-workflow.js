@@ -5,6 +5,8 @@ import {
   findKingdeeOtherContactUnitByName,
   getKingdeeEmployeeBankDetails,
   saveKingdeeExpenseReimbursement,
+  validateExpensePaymentBankFields,
+  viewKingdeeExpenseReimbursement,
   updateKingdeeExpenseReimbursementContactUnit,
   updateKingdeeExpenseReimbursementSourceType
 } from '../adapters/kingdee-client.js';
@@ -24,13 +26,14 @@ import {
   listSyncedDocuments,
   recordOperation,
   restoreErpPushAfterRetryFailure,
+  preservePaymentBankVerificationFailure,
   savePreparedRecord,
   saveSyncedDocuments,
   markPushedToErp
 } from '../repository.js';
 
 const REQUIRED_KINGDEE_ACCOUNT_KEY = 'current';
-const ONLINE_CONTACT_UNIT_NAME = '北京分贝国际旅行社有限公司';
+const ONLINE_CONTACT_UNIT_NAME = '北京分贝通科技有限公司';
 const erpSaveInFlight = new Map();
 
 export async function syncFenbeitongDocuments(options = {}) {
@@ -154,7 +157,7 @@ async function saveExpenseReimbursementToErpUnlocked(input) {
   const savedRecords = associatedRecords.filter((record) =>
     isRealPushedRecord(record) && record.kingdeeAcctIdKey === kingdeeAcctIdKey);
   if (savedRecords.length > 1) {
-    throw new Error(`同一员工同月已有 ${savedRecords.length} 张逐单费用报销单，已停止合并以避免重复；请先在金蝶中处理旧暂存单。`);
+    throw new Error(`当前来源单据组已有 ${savedRecords.length} 张逐单费用报销单，已停止合并以避免重复；请先在金蝶中处理旧暂存单。`);
   }
   const candidateRecord = savedRecords[0]
     || findPreparedRecord(preview.sourceId)
@@ -165,12 +168,22 @@ async function saveExpenseReimbursementToErpUnlocked(input) {
   const migratingExistingBill = Boolean(
     isRealPushedRecord(existingRecord) && existingRecord.sourceId !== preview.sourceId
   );
-  const forceRetry = Boolean(
+  const pendingBankVerification = existingRecord?.lastErpRetryErrorCode === 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH'
+    && Boolean(existingRecord.erpFid && existingRecord.erpNumber);
+  const forceRetry = Boolean(pendingBankVerification || (
     isRealPushedRecord(existingRecord) && (input.forceRetry || migratingExistingBill)
-  );
+  ));
   if (isRealPushedRecord(existingRecord) && !forceRetry) {
     const replay = replaySavedExpenseReimbursement(existingRecord, preview);
     if (replay) {
+      if (String(preview.payload?.Model?.FRequestType) === '1') {
+        const view = await viewKingdeeExpenseReimbursement(existingRecord.erpFid, {
+          accountKey: REQUIRED_KINGDEE_ACCOUNT_KEY,
+          acctIdKey: kingdeeAcctIdKey,
+          orgNumber: preview.documentSummary?.orgNumber || '886'
+        });
+        validateExpensePaymentBankFields(preview.payload, view);
+      }
       // A historical document may already be marked as saved locally even
       // though the source-type field was introduced later.  Do not let the
       // idempotent fast path bypass that required ERP field: fill it only when
@@ -256,9 +269,13 @@ async function saveExpenseReimbursementToErpUnlocked(input) {
       replacesSourceId: migratingExistingBill ? existingRecord.sourceId : ''
     });
   } catch (error) {
+    if (error.code === 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH' && error.detail?.savedResult) {
+      preservePaymentBankVerificationFailure(preview.sourceId, error);
+      throw error;
+    }
     if (migratingExistingBill) {
       discardPreparedRecord(preview.sourceId);
-    } else if (forceRetry) {
+    } else if (forceRetry && isRealPushedRecord(existingRecord)) {
       restoreErpPushAfterRetryFailure(preview.sourceId, existingRecord, error);
     }
     throw error;
@@ -327,10 +344,16 @@ function resolveInput(input) {
   if (synced?.sourceType === 'ONLINE_MONTHLY_BILL') {
     return buildOnlineMonthlyGroupInput(input, synced);
   }
+  if (isLocalCsvOfflineRecord(synced)) {
+    return buildLocalCsvOfflineGroupInput(input, synced, listSyncedDocuments());
+  }
   if (synced) {
     return {
       ...input,
       fixedJson: input.fixedJson || synced.fixedJson,
+      // The synchronized source number is authoritative.  It must not be
+      // replaced by an embedded detail value or a locally generated suffix.
+      sourceCodeValue: requiredText(synced.sourceCode, 'synchronized source document number'),
       // Always overwrite a caller-provided/missing value with the exact
       // synchronized Fenbeitong interface label. This applies equally to
       // initial saves, force updates and automatic save recovery.
@@ -376,6 +399,7 @@ function buildOnlineMonthlyGroupInput(input, selected) {
     ...input,
     sourceId: groupId,
     sourceIds: records.map((record) => record.sourceId),
+    sourceCodeValue: groupBillNo,
     sourceTypeValue: synchronizedSourceTypeValue(selected),
     documentDate: billDate || latestDate || input.documentDate,
     fixedJson: JSON.stringify({
@@ -599,6 +623,76 @@ function resolveOnlineOrderPurpose(order, applicationPurposes) {
 
 export function resolveOnlineOrderPurposeForTest(order, records) {
   return resolveOnlineOrderPurpose(order, buildApplicationPurposeIndex(records));
+}
+
+function isLocalCsvOfflineRecord(record) {
+  return Boolean(
+    record?.sourceType === 'OFFLINE_REIMBURSEMENT'
+    && (record.localCsvImport || record.sourceMode === 'local-csv')
+  );
+}
+
+function buildLocalCsvOfflineGroupInput(input, selected, syncedDocuments) {
+  const tenantKey = selected.tenantKey || 'local-csv';
+  const sourceCode = requiredText(selected.sourceCode, 'synchronized source document number');
+  const records = syncedDocuments
+    .filter(isLocalCsvOfflineRecord)
+    .filter((record) => (record.tenantKey || 'local-csv') === tenantKey)
+    .filter((record) => String(record.sourceCode || '').trim() === sourceCode)
+    .sort((left, right) => (
+      Number(left.originalCsvRowNumber || 0) - Number(right.originalCsvRowNumber || 0)
+      || String(left.sourceId).localeCompare(String(right.sourceId))
+    ));
+  if (records.length === 0) return { ...input, fixedJson: selected.fixedJson };
+
+  const requesterNames = new Set(records.map((record) => String(record.requesterName || '').trim()).filter(Boolean));
+  if (requesterNames.size !== 1) {
+    throw new Error(`线下来源单号 ${sourceCode} 对应多个报销人，已停止合并：${[...requesterNames].join('、')}`);
+  }
+  const sourceData = records.map((record) => {
+    try {
+      return JSON.parse(record.fixedJson || '{}')?.data;
+    } catch {
+      throw new Error(`线下来源数据不是有效 JSON：${record.sourceId}`);
+    }
+  });
+  if (sourceData.some((data) => !data || !Array.isArray(data.expenses) || data.expenses.length === 0)) {
+    throw new Error(`线下来源单号 ${sourceCode} 存在缺少费用明细的数据，已停止合并`);
+  }
+  const first = sourceData[0];
+  const groupId = `OFFLINE-BILL:${tenantKey}:${sourceCode}`;
+  const expenses = sourceData.flatMap((data) => data.expenses);
+  const totalAmount = roundMoney(sourceData.reduce((sum, data) => sum + Number(data.total_amount || 0), 0));
+  const paymentAmount = roundMoney(sourceData.reduce((sum, data) => sum + Number(data.payment_amount ?? data.total_amount ?? 0), 0));
+  return {
+    ...input,
+    sourceId: groupId,
+    sourceIds: records.map((record) => record.sourceId),
+    sourceCodeValue: sourceCode,
+    sourceTypeValue: synchronizedSourceTypeValue(selected),
+    documentDate: selected.applicationDate || input.documentDate,
+    fixedJson: JSON.stringify({
+      code: 0,
+      msg: 'success',
+      data: {
+        ...first,
+        reimb_id: groupId,
+        reimb_code: sourceCode,
+        reimb_third_id: groupId,
+        total_amount: totalAmount,
+        payment_amount: paymentAmount,
+        expenses
+      }
+    })
+  };
+}
+
+function roundMoney(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+export function buildLocalCsvOfflineGroupInputForTest(input, selected, syncedDocuments) {
+  return buildLocalCsvOfflineGroupInput(input, selected, syncedDocuments);
 }
 
 function sameRequester(left, right) {

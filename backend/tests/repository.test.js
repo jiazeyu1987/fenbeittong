@@ -24,6 +24,7 @@ import {
   isRealPushedRecord,
   hasFenbeitongPaymentTime,
   markPushedToErp,
+  preservePaymentBankVerificationFailure,
   markPaymentStatusSyncBatch,
   recordOperation,
   renameStateFileWithRetryForTest,
@@ -659,6 +660,28 @@ test('failed forced regeneration restores the previous ERP voucher', () => {
   assert.equal(restored.processStage, 'ERP_EXPENSE_REIMBURSEMENT_SAVED');
   assert.equal(restored.erpFid, '100033');
   assert.equal(restored.lastErpRetryErrorCode, 'KINGDEE_SAVE_FAILED');
+});
+
+test('bank verification failure retains the saved ID without marking success and retry completes the same bill', () => {
+  resetRepository();
+  const config = buildMockTemplate();
+  const preview = buildVoucherPreview({ fixedJson: config.mockFixedJson, config });
+  savePreparedRecord(preview);
+  const result = { simulated: false, mockReplacement: false, mode: 'real', erpFid: '77', erpNumber: 'BANK-TEST', documentStatus: 'A' };
+  const error = { code: 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH', message: '银行字段校验失败', detail: { savedResult: result } };
+  preservePaymentBankVerificationFailure(preview.sourceId, error);
+  clearStateCacheForTest();
+  const pending = findPreparedRecord(preview.sourceId);
+  assert.equal(pending.erpFid, '77');
+  assert.equal(isRealPushedRecord(pending), false);
+  assert.equal(pending.lastErpRetryErrorCode, error.code);
+  savePreparedRecord(preview, { forceRetry: true });
+  assert.equal(findPreparedRecord(preview.sourceId).erpFid, '77');
+  assert.throws(() => markPushedToErp(preview.sourceId, { ...result, erpFid: '78' }), /original Kingdee bill/);
+  const saved = markPushedToErp(preview.sourceId, result);
+  assert.equal(isRealPushedRecord(saved), true);
+  assert.equal(saved.erpFid, '77');
+  assert.equal(saved.lastErpRetryErrorCode, '');
 });
 
 test('monthly save replaces one earlier per-order process record without leaving a duplicate', () => {

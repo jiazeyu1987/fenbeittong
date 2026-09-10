@@ -8,8 +8,79 @@ import {
   extractKingdeeEmployeeBankDetails,
   queryKingdeeSuccessfulExpensePaymentBills,
   expenseReimbursementWithoutRequestPaymentForTest,
+  validateExpensePaymentBankFields,
   saveKingdeeExpenseReimbursement
 } from '../src/adapters/kingdee-client.js';
+
+test('payment bank verification reads View property names and ignores non-payment bills', () => {
+  const payload = { Model: { FRequestType: '1', FBankBranchT: 'Bank', FBankAccountNameT: 'Employee', FBankAccountT: '123' } };
+  const view = { Result: { Result: { BankBranchT: 'Bank', BankAccountNameT: 'Employee', BankAccountT: '123' } } };
+  assert.doesNotThrow(() => validateExpensePaymentBankFields(payload, view));
+  view.Result.Result.BankAccountT = '';
+  assert.throws(() => validateExpensePaymentBankFields(payload, view), (error) =>
+    error.code === 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH'
+    && error.detail.mismatches.length === 1
+    && error.detail.mismatches[0].field === 'FBankAccountT');
+  payload.Model.FRequestType = '0';
+  assert.doesNotThrow(() => validateExpensePaymentBankFields(payload, view));
+});
+
+test('payment verification checks every entry even when header and first entry match', () => {
+  const entry = { FBankBranch: 'Bank', FBankAccountName: 'Employee', FBankAccount: '123' };
+  const actual = { BankBranch: 'Bank', BankAccountName: 'Employee', BankAccount: '123' };
+  const payload = { Model: { FRequestType: '1', FEntity: [entry, entry] } };
+  const view = { Result: { Result: { ER_ExpenseReimbEntry: [actual, { ...actual, BankAccount: ' ' }] } } };
+  assert.throws(() => validateExpensePaymentBankFields(payload, view), (error) =>
+    error.code === 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH'
+    && error.detail.mismatches[0].field === 'FEntity[1].FBankAccount');
+  view.Result.Result.ER_ExpenseReimbEntry[1] = actual;
+  assert.doesNotThrow(() => validateExpensePaymentBankFields(payload, view));
+  payload.Model.FRequestType = '0';
+  view.Result.Result.ER_ExpenseReimbEntry = [];
+  assert.doesNotThrow(() => validateExpensePaymentBankFields(payload, view));
+});
+
+test('entry bank-only differences require updating the existing bill and retain its ID on failed verification', async () => {
+  const restore = forceKingdeeEnv();
+  const previousFetch = globalThis.fetch;
+  let saved = false;
+  let persistBank = false;
+  const payload = { Model: { FID: 0, FBillNo: 'BANK-TEST', FOrgID: { FNumber: '886' }, FRequestType: '1', FExpAmountSum: 100, FEntity: [], FBankBranchT: 'Bank', FBankAccountNameT: 'Employee', FBankAccountT: '123' } };
+  payload.Model.FEntity = [{ FExpenseAmount: 100, FTaxSubmitAmt: 100, FExpSubmitAmount: 100,
+    FBankBranch: 'Bank', FBankAccountName: 'Employee', FBankAccount: '123' }];
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    if (path.includes('AuthService.ValidateUser')) return jsonResponse({ LoginResultType: 1 }, { 'Set-Cookie': 'session=test' });
+    if (path.includes('DynamicFormService.SwitchOrg')) return jsonResponse({ Result: { ResponseStatus: { IsSuccess: true } } });
+    if (path.includes('DynamicFormService.ExecuteBillQuery')) return jsonResponse([[77, 'BANK-TEST']]);
+    if (path.includes('DynamicFormService.Save')) {
+      assert.equal(JSON.parse(JSON.parse(options.body).data).Model.FID, 77);
+      saved = true;
+      return jsonResponse({ Result: { Id: 77, Number: 'BANK-TEST', ResponseStatus: { IsSuccess: true } } });
+    }
+    if (path.includes('DynamicFormService.View')) return jsonResponse({ Result: {
+      ResponseStatus: { IsSuccess: true }, Result: {
+        Id: 77, BillNo: 'BANK-TEST', OrgID: { Number: '886' }, RequestType: '1', ExpAmountSum: 100,
+        ER_ExpenseReimbEntry: [{ ExpenseAmount: 100, TaxSubmitAmt: 100, ExpSubmitAmount: 100,
+          BankBranch: 'Bank', BankAccountName: 'Employee', BankAccount: saved && persistBank ? '123' : ' ' }],
+        BankBranchT: 'Bank', BankAccountNameT: 'Employee', BankAccountT: '123'
+      }
+    } });
+    throw new Error('unexpected request');
+  };
+  try {
+    await assert.rejects(() => saveKingdeeExpenseReimbursement(payload), (e) => e.code === 'KINGDEE_EXISTING_BILL_MISMATCH');
+    assert.equal(saved, false);
+    await assert.rejects(() => saveKingdeeExpenseReimbursement(payload, { allowExistingBillOverwrite: true }), (e) =>
+      e.code === 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH' && String(e.detail.savedResult.erpFid) === '77');
+    persistBank = true;
+    const result = await saveKingdeeExpenseReimbursement(payload, { allowExistingBillOverwrite: true });
+    assert.equal(result.erpFid, '77');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restore();
+  }
+});
 
 test('extracts the preferred complete bank row from an ERP employee profile', () => {
   const details = extractKingdeeEmployeeBankDetails({

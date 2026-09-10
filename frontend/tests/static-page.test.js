@@ -170,7 +170,10 @@ test('frontend is centered on a finance source document list', () => {
   assert.match(app, /showOperationFeedback/);
   assert.match(app, /saveExpenseReimbursementRowToErp/);
   assert.match(app, /resaveSelectedToErp/);
+  assert.match(app, /filter\(\(record\) => hasSavedExpenseReimbursementGroup\(record\)\)/);
   assert.match(app, /forceRetry:\s*initiallySavedSourceIds\.has\(record\.sourceId\)/);
+  assert.match(app, /forceRetry:\s*hasSavedExpenseReimbursementGroup\(record\)/);
+  assert.match(app, /pushedExpenseReimbursementKeys/);
   assert.doesNotMatch(
     app,
     /uniqueExpenseReimbursementRecords\(selectedLedgerRecords\(\)\)\s*\.filter/

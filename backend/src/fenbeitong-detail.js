@@ -102,7 +102,7 @@ function parseOnlineMonthlyBill(data) {
     ? sourceReasons.join('；')
     : [formatSettlementMonth(settlementMonth), applicantName, businessLine || '线上费用'].filter(Boolean).join(' + ');
   const requestOrganization = firstText(row.custom_field1);
-  const directDepartment = onlineDirectDepartment(row);
+  const directDepartment = onlineRequestDepartment(row);
 
   return {
     sourceKind: 'ONLINE_MONTHLY_BILL',
@@ -142,6 +142,12 @@ function parseOnlineMonthlyBill(data) {
     orderId: parsedExpenses[0].orderId,
     orderIds: parsedExpenses.map((item) => item.orderId)
   };
+}
+
+function onlineRequestDepartment(row) {
+  const name = firstMeaningfulText(row.request_department_name);
+  const code = firstMeaningfulText(row.request_department_code);
+  return name || code ? { name, code } : onlineDirectDepartment(row);
 }
 
 function normalizeSettlementMonth(value) {

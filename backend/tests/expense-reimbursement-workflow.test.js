@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildLocalCsvOfflineGroupInputForTest,
   isAlreadyDeletedKingdeeDraftForTest,
   onlineOriginalBillNumberForTest,
   onlineBillPostingDateForTest,
@@ -11,6 +12,45 @@ import {
   synchronizedSourceTypeValueForTest,
   targetExistingExpenseReimbursementForTest
 } from '../src/services/expense-reimbursement-workflow.js';
+
+test('local CSV offline rows with one source number become one bill with multiple details', () => {
+  const makeRecord = (sourceId, amount, rowNumber) => ({
+    sourceId,
+    sourceCode: 'B1IELSHBX26070100002',
+    sourceType: 'OFFLINE_REIMBURSEMENT',
+    sourceKindName: '线下报销',
+    sourceForm: '费用明细',
+    sourceMode: 'local-csv',
+    localCsvImport: true,
+    tenantKey: 'local-csv',
+    requesterName: '王丽君',
+    applicationDate: '2026-07-01',
+    originalCsvRowNumber: rowNumber,
+    fixedJson: JSON.stringify({ code: 0, data: {
+      reimb_id: sourceId,
+      reimb_code: 'B1IELSHBX26070100002',
+      user: { name: '王丽君', code: `CSVEMP-${rowNumber}`, department_name: '销售部' },
+      currency_code: 'CNY',
+      total_amount: amount,
+      payment_amount: amount,
+      expenses: [{
+        id: `${sourceId}-DETAIL`,
+        total_amount: amount
+      }]
+    } })
+  });
+  const records = [makeRecord('CSV-2', 90.14, 2), makeRecord('CSV-1', 141.12, 1)];
+
+  const grouped = buildLocalCsvOfflineGroupInputForTest({}, records[0], records);
+  const data = JSON.parse(grouped.fixedJson).data;
+
+  assert.equal(grouped.sourceId, 'OFFLINE-BILL:local-csv:B1IELSHBX26070100002');
+  assert.deepEqual(grouped.sourceIds, ['CSV-1', 'CSV-2']);
+  assert.equal(grouped.sourceCodeValue, 'B1IELSHBX26070100002');
+  assert.equal(data.total_amount, 231.26);
+  assert.equal(data.payment_amount, 231.26);
+  assert.equal(data.expenses.length, 2);
+});
 
 test('ERP source type uses the exact synchronized label for online and offline records', () => {
   assert.equal(synchronizedSourceTypeValueForTest({
