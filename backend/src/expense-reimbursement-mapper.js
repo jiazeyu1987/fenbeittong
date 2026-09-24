@@ -574,10 +574,6 @@ function buildExpenseEntry({ config, document, documentDate, departmentNumber, c
     FExpenseAmount: amount,
     ...(hasExactSplit ? { FTaxSubmitAmt: excludingTaxAmount } : {}),
     FExpSubmitAmount: amount,
-    // ERP detail field "报销未付款金额". At the time the reimbursement is
-    // created, it must carry the same authoritative Fenbeitong reimbursement
-    // amount; later ERP payment operations may reduce this balance.
-    FReimbNotPayAmount: amount,
     // Keep every reimbursement detail on the same telegraphic-transfer
     // settlement method as the document header. The Kingdee detail field uses
     // JSFS04_SYS, while the header field uses number 10.
@@ -586,7 +582,6 @@ function buildExpenseEntry({ config, document, documentDate, departmentNumber, c
     FReqSubmitAmount: requestAmount,
     FLocExpSubmitAmount: amount,
     FLocReqSubmitAmount: requestAmount,
-    FPayedAmount: document.sourceKind === 'ONLINE_MONTHLY_BILL' ? amount : requestAmount,
     ...exactTaxFields,
     FExpenseDeptEntryID: optionalNumberReference(departmentNumber),
     FRemark: expense.purpose || '',

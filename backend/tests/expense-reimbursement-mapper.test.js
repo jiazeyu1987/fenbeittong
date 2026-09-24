@@ -38,7 +38,8 @@ test('maps Fenbeitong detail directly to ER_ExpReimbursement', () => {
   assert.equal(model.FEntity[1].FInvoiceType, '1');
   assert.equal(model.FEntity[0].F_ora_Decimal_qtr, 101.89);
   assert.equal(model.FEntity[0].FExpenseAmount, 108);
-  assert.equal(model.FEntity[0].FReimbNotPayAmount, 108);
+  assert.equal(Object.hasOwn(model.FEntity[0], 'FReimbNotPayAmount'), false);
+  assert.ok(model.FEntity.every((entry) => !Object.hasOwn(entry, 'FPayedAmount')));
   assert.equal(model.FEntity[0].FTaxSubmitAmt, 101.89);
   assert.equal(model.FEntity[0].FLOCNOTAXAMOUNT, 101.89);
   assert.deepEqual(model.FEntity.map((entry) => entry.FExpID.FNumber), ['CI011', 'CI032']);
@@ -177,7 +178,8 @@ test('maps online monthly bill fields and preserves intentional blanks', () => {
   assert.equal(model.FEntity[0].FTaxSubmitAmt, 900);
   assert.equal(model.FEntity[0].FLOCNOTAXAMOUNT, 900);
   assert.equal(model.FEntity[0].FExpenseAmount, 1000);
-  assert.equal(model.FEntity[0].FReimbNotPayAmount, 1000);
+  assert.equal(Object.hasOwn(model.FEntity[0], 'FReimbNotPayAmount'), false);
+  assert.ok(model.FEntity.every((entry) => !Object.hasOwn(entry, 'FPayedAmount')));
   assert.equal(model.FEntity[0].FOriginalAmount, 1000);
   assert.equal(model.FEntity[0].F_ora_Decimal_qtr, 900);
   assert.equal(model.FEntity[0].F_ora_Text_83g, '用车');
@@ -692,7 +694,7 @@ test('maps direct Fenbeitong CI011 and CI032 codes without changing other payloa
   assert.equal(model.FRequestType, '1');
   assert.equal(model.FPaySettlleTypeID.FNumber, '10');
   assert.equal(model.F_ora_Text_qtr, '线下报销 · 费用明细');
-  assert.deepEqual(model.FEntity.map((entry) => entry.FReimbNotPayAmount), [108, 120]);
+  assert.ok(model.FEntity.every((entry) => !Object.hasOwn(entry, 'FReimbNotPayAmount')));
 });
 
 test('rejects an unknown expense code instead of falling back to another item', () => {
