@@ -1,4 +1,4 @@
-import { buildMockTemplate } from './mock-template.js';
+import { buildConfigTemplate, buildMockTemplate } from './mock-template.js';
 import { readJson, sendError, sendJson } from './http-utils.js';
 import { AppError } from './errors.js';
 import { createCsvDownload } from './export-downloads.js';
@@ -105,6 +105,9 @@ export async function handleApi(request, response) {
     }
     if (request.method === 'POST' && url.pathname === '/api/payment-status-sync/run') {
       return sendJson(response, 200, { success: true, data: await runPaymentStatusSyncOnce('manual') });
+    }
+    if (request.method === 'GET' && url.pathname === '/api/fenbeitong-expense-reimbursement/config/default-template') {
+      return sendJson(response, 200, { success: true, data: buildConfigTemplate() });
     }
     if (request.method === 'GET' && url.pathname === '/api/fenbeitong-expense-reimbursement/config/mock-template') {
       return sendJson(response, 200, { success: true, data: buildMockTemplate() });

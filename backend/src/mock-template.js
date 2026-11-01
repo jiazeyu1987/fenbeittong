@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
 
-export function buildMockTemplate() {
+export function buildConfigTemplate() {
   return {
     expenseReimbursementOrgNumber: '886',
     expenseReimbursementBillTypeNumber: 'FYBXD001_SYS',
@@ -104,10 +104,7 @@ export function buildMockTemplate() {
       '刘俊霞': 'PL0221',
       '李雄': '0000000000001'
     },
-    mockFixedJson: readFileSync(
-      resolve(root, 'mock-data/fenbeitong-reimbursement-valid.json'),
-      'utf8'
-    ),
+    mockFixedJson: '',
     mockDocumentDate: '2026-01-26',
     mockYear: 2026,
     mockPeriod: 1,
@@ -115,5 +112,14 @@ export function buildMockTemplate() {
     fenbeitongAccessToken: '',
     fenbeitongReimbursementApplyState: 4,
     fenbeitongReimbursementPageSize: 20
+  };
+}
+
+export function buildMockTemplate() {
+  return {
+    ...buildConfigTemplate(),
+    mockFixedJson: readFileSync(
+      resolve(root, 'mock-data/fenbeitong-reimbursement-valid.json'), 'utf8'
+    )
   };
 }

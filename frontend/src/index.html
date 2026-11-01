@@ -20,7 +20,7 @@
           </div>
         </div>
         <div class="ledger-header-status">
-          <a class="data-scope-chip log-center-link" href="/logs.html" target="_blank">日志中心</a>
+          <a class="data-scope-chip log-center-link" href="/logs.html" target="_blank" data-assistant-session-link>日志中心</a>
           <span class="data-scope-chip">线上仅取结算入账</span>
           <span class="data-scope-chip">ERP仅暂存</span>
           <span id="statusBadge" class="badge">未连接</span>
@@ -66,11 +66,11 @@
             </select>
             <button id="resetButton" class="secondary">&#x91CD;&#x7F6E;</button>
             <button id="columnSettingsButton" class="secondary">&#x663E;&#x793A;&#x5B57;&#x6BB5;</button>
-            <button id="fieldMappingButton" class="secondary">字段对应关系</button>
+            <button id="fieldMappingButton" class="secondary" data-required-permission="erp:fenbeitong-voucher:config" hidden>字段对应关系</button>
           </div>
         </div>
 
-        <div class="toolbar-row toolbar-config-row">
+        <div class="toolbar-row toolbar-config-row" data-required-permission="erp:fenbeitong-voucher:config" hidden>
           <div class="toolbar-row-title">
             <span class="toolbar-step">02</span>
             <div><strong>连接配置</strong><small>选择分贝通公司与金蝶账套</small></div>
@@ -106,13 +106,13 @@
           </div>
           <div class="toolbar-controls toolbar-workflow-controls">
             <button id="syncFenbeitongButton" class="outline-action workflow-sync">&#x540C;&#x6B65;&#x5206;&#x8D1D;&#x901A;</button>
-            <span class="workflow-arrow" aria-hidden="true">→</span>
-            <button id="generateVoucherButton" class="outline-action">生成费用报销单</button>
-            <span class="workflow-arrow" aria-hidden="true">→</span>
-            <button id="saveErpButton" class="outline-action workflow-primary">保存费用报销单</button>
-            <button id="resaveErpButton" class="outline-action">保存/更新费用报销单</button>
+            <span class="workflow-arrow" data-required-permission="erp:fenbeitong-voucher:save" aria-hidden="true" hidden>→</span>
+            <button id="generateVoucherButton" class="outline-action" data-required-permission="erp:fenbeitong-voucher:save" hidden>生成费用报销单</button>
+            <span class="workflow-arrow" data-required-permission="erp:fenbeitong-voucher:save" aria-hidden="true" hidden>→</span>
+            <button id="saveErpButton" class="outline-action workflow-primary" data-required-permission="erp:fenbeitong-voucher:save" hidden>保存费用报销单</button>
+            <button id="resaveErpButton" class="outline-action" data-required-permission="erp:fenbeitong-voucher:save" hidden>保存/更新费用报销单</button>
             <button id="viewVoucherButton" class="outline-action">查看费用报销单</button>
-            <button id="syncPaymentStatusButton" class="outline-action">回传付款状态</button>
+            <button id="syncPaymentStatusButton" class="outline-action" data-required-permission="erp:fenbeitong-voucher:save" hidden>回传付款状态</button>
             <span class="toolbar-divider" aria-hidden="true"></span>
             <button id="exportButton" class="success-action">&#x5BFC;&#x51FA;</button>
           </div>
@@ -350,7 +350,7 @@
             <p id="logsUpdatedAt">页面打开后自动刷新日志。</p>
           </div>
           <div class="operation-log-actions">
-            <a class="secondary toolbar-link" href="/logs.html" target="_blank">打开日志中心查询</a>
+            <a class="secondary toolbar-link" href="/logs.html" target="_blank" data-assistant-session-link>打开日志中心查询</a>
             <button id="refreshLogsButton" class="secondary" type="button">刷新日志</button>
           </div>
         </div>

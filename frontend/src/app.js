@@ -60,6 +60,7 @@ const controls = {
 };
 
 const state = {
+  assistantPermissions: new Set(),
   configSaved: false,
   currentStatus: null,
   currentIntegrationSettings: null,
@@ -67,6 +68,7 @@ const state = {
   selectedKingdeeAccountKey: 'current',
   selectedKingdeeAcctIdKey: '',
   selectionDirty: false,
+  syncRunning: false,
   syncedDocuments: [],
   requesterCatalog: [],
   selectedSourceIds: new Set(),
@@ -268,6 +270,9 @@ setupResizableTables();
 renderInterfaceFieldMappings();
 
 run(async () => {
+  const assistantSession = await api.assistantSession();
+  state.assistantPermissions = new Set(assistantSession.permissions || []);
+  applyAssistantPermissions();
   await api.health();
   statusBadge.textContent = '后端已连接';
   statusBadge.classList.add('ok');
@@ -275,6 +280,13 @@ run(async () => {
   await refreshLogs();
   await refreshAll({ includeLogs: false });
 })();
+
+function applyAssistantPermissions() {
+  for (const element of document.querySelectorAll('[data-required-permission]')) {
+    const permission = element.dataset.requiredPermission;
+    element.hidden = !state.assistantPermissions.has(permission);
+  }
+}
 
 function setupResizableTables() {
   const installHandles = (root = document) => {
@@ -388,7 +400,7 @@ function resetTableRowHeights(table) {
 }
 
 async function loadTemplate() {
-  const template = await api.getMockTemplate();
+  const template = await api.getDefaultTemplate();
   applyTemplate(template);
   state.configSaved = false;
   renderConfigValidation();
@@ -397,7 +409,7 @@ async function loadTemplate() {
 }
 
 async function loadCurrentConfig() {
-  const template = await api.getMockTemplate();
+  const template = await api.getDefaultTemplate();
   try {
     const saved = await api.getConfig();
     applyTemplate({ ...template, ...saved });
@@ -413,7 +425,7 @@ async function loadCurrentConfig() {
 }
 
 async function resetFieldMappings() {
-  const template = await api.getMockTemplate();
+  const template = await api.getDefaultTemplate();
   applyTemplate(template);
   state.configSaved = false;
   fieldMappingStatus.textContent = '已恢复默认映射，点击“保存字段对应关系”后才会生效。';
@@ -443,15 +455,30 @@ async function saveConfig() {
 }
 
 async function syncFenbeitong() {
+  if (state.syncRunning) return;
   if (isSelectedTenantWaiting()) {
     show({ tenantKey: state.selectedTenantKey, status: 'waiting_development' }, '接口等待开发中');
     return;
   }
-  const result = await api.syncFenbeitong({ tenantKey: state.selectedTenantKey });
-  selectFirstRecord(result.records);
-  invalidatePreview('预览已失效：同步结果已变更，请重新预览费用报销单。');
-  show(result, `同步完成，新增或更新 ${result.records.length} 张来源单据。`);
-  await refreshAll();
+  state.syncRunning = true;
+  const startedAt = Date.now();
+  const reportWaiting = () => showOperationFeedback(
+    `正在同步分贝通，已等待 ${Math.floor((Date.now() - startedAt) / 1000)} 秒。数据较多时需要较长时间，请勿重复点击或刷新页面。`
+  );
+  reportWaiting();
+  renderActionState();
+  const waitingTimer = setInterval(reportWaiting, 1000);
+  try {
+    const result = await api.syncFenbeitong({ tenantKey: state.selectedTenantKey });
+    selectFirstRecord(result.records);
+    invalidatePreview('预览已失效：同步结果已变更，请重新预览费用报销单。');
+    await refreshAll();
+    show(result, `同步完成，新增或更新 ${result.records.length} 张来源单据。`);
+  } finally {
+    clearInterval(waitingTimer);
+    state.syncRunning = false;
+    renderActionState();
+  }
 }
 
 async function syncPaymentStatusesToFenbeitong() {
@@ -1153,8 +1180,10 @@ function renderActionState() {
   const canViewVoucher = state.preparedSourceIds.has(viewSourceId)
     || state.pushedSourceIds.has(viewSourceId);
   const tenantWaiting = isSelectedTenantWaiting();
-  controls.syncFenbeitong.disabled = tenantWaiting;
-  controls.sync.disabled = tenantWaiting;
+  controls.syncFenbeitong.disabled = tenantWaiting || state.syncRunning;
+  controls.syncFenbeitong.textContent = state.syncRunning ? '同步中…' : '同步分贝通';
+  controls.syncFenbeitong.setAttribute('aria-busy', String(state.syncRunning));
+  controls.sync.disabled = tenantWaiting || state.syncRunning;
   controls.generateVoucher.disabled = !hasSource;
   controls.saveErp.disabled = !hasSource || pushed;
   controls.resaveErp.disabled = !hasPushedSelection && !pushed;
@@ -1165,7 +1194,7 @@ function renderActionState() {
   controls.pushErp.disabled = !hasSource || pushed;
   controls.primaryAction.dataset.action = !state.configSaved ? 'save-config' : state.syncedDocuments.length === 0 ? 'sync' : 'push';
   controls.primaryAction.textContent = !state.configSaved ? '保存配置' : state.syncedDocuments.length === 0 ? '立即同步分贝通数据' : '保存费用报销单';
-  controls.primaryAction.disabled = tenantWaiting && controls.primaryAction.dataset.action === 'sync';
+  controls.primaryAction.disabled = (tenantWaiting || state.syncRunning) && controls.primaryAction.dataset.action === 'sync';
   actionBlockReason.textContent = getActionBlockReason({ sourceId, pushed });
 }
 

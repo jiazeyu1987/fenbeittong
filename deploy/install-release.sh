@@ -30,8 +30,12 @@ chmod 700 "${data_dir}"
 chmod 600 "${release_dir}/.env" "${data_dir}/fenbeitong-tenants.sqlite"
 ln -sfn "${release_dir}" "${current_link}"
 
-install -m 0644 "${upload_dir}/fenbeittong-backend.service" /etc/systemd/system/fenbeittong-backend.service
 install -m 0644 "${upload_dir}/fenbeittong-frontend.service" /etc/systemd/system/fenbeittong-frontend.service
+if systemctl is-enabled --quiet fenbeittong-backend.service; then
+  systemctl disable --now fenbeittong-backend.service
+elif systemctl is-active --quiet fenbeittong-backend.service; then
+  systemctl stop fenbeittong-backend.service
+fi
 systemctl daemon-reload
-systemctl enable fenbeittong-backend.service fenbeittong-frontend.service
-systemctl restart fenbeittong-backend.service fenbeittong-frontend.service
+systemctl enable fenbeittong-frontend.service
+systemctl restart fenbeittong-frontend.service

@@ -1,8 +1,7 @@
 [Unit]
-Description=Fenbeitong Kingdee Expense Reimbursement Frontend
-After=network-online.target fenbeittong-backend.service
+Description=Fenbeitong Kingdee Expense Reimbursement Assistant
+After=network-online.target
 Wants=network-online.target
-Requires=fenbeittong-backend.service
 
 [Service]
 Type=simple
@@ -10,10 +9,12 @@ User=system
 Group=system
 WorkingDirectory=/home/system/fenbeittong-offline
 Environment=NODE_ENV=production
-Environment=FRONTEND_HOST=0.0.0.0
-Environment=FRONTEND_PORT=18734
-Environment=BACKEND_PORT=3101
-ExecStart=/home/system/.local/opt/node/bin/node frontend/server.js
+Environment=FENBEITONG_ASSISTANT_HOST=0.0.0.0
+Environment=FENBEITONG_ASSISTANT_PORT=18734
+Environment=FENBEITONG_ASSISTANT_TICKET_VALIDATE_URL=http://127.0.0.1:48081/admin-api/system/auth/fenbeitong-assistant-ticket/validate
+Environment=FENBEITONG_ASSISTANT_SESSION_TTL_SECONDS=14400
+Environment=APP_DATA_DIR=/home/system/fenbeittong-offline-data
+ExecStart=/home/system/.local/opt/node/bin/node server.js
 Restart=always
 RestartSec=3
 NoNewPrivileges=true

@@ -2,16 +2,40 @@
 // hard-coded development backend here made a page served on port 5173 call
 // the obsolete port 3001 even when its proxy correctly targeted port 3101.
 const baseUrl = '';
+const assistantSession = (() => {
+  const url = new URL(window.location.href);
+  const sessionFromUrl = url.searchParams.get('assistantSession') || '';
+  if (sessionFromUrl) {
+    sessionStorage.setItem('fenbeitongAssistantSession', sessionFromUrl);
+    url.searchParams.delete('assistantSession');
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    return sessionFromUrl;
+  }
+  return sessionStorage.getItem('fenbeitongAssistantSession') || '';
+})();
+
+if (assistantSession) {
+  for (const link of document.querySelectorAll('a[data-assistant-session-link]')) {
+    const url = new URL(link.getAttribute('href') || '', window.location.href);
+    url.searchParams.set('assistantSession', assistantSession);
+    link.setAttribute('href', `${url.pathname}${url.search}${url.hash}`);
+  }
+}
 
 async function request(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
   const attempts = method === 'GET' ? 3 : 1;
+  const headers = new Headers(options.headers || {});
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  if (assistantSession) {
+    headers.set('x-fenbeitong-assistant-session', assistantSession);
+  }
   let response;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
       response = await fetch(baseUrl + path, {
-        headers: { 'Content-Type': 'application/json' },
-        ...options
+        ...options,
+        headers
       });
       break;
     } catch (cause) {
@@ -81,6 +105,7 @@ function localizedErrorMessage(code, message) {
 }
 
 export const api = {
+  assistantSession: () => request('/api/assistant/session'),
   health: () => request('/api/health'),
   ready: () => request('/api/ready'),
   systemStatus: () => request('/api/system/status'),
@@ -103,7 +128,7 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({})
   }),
-  getMockTemplate: () => request('/api/fenbeitong-expense-reimbursement/config/mock-template'),
+  getDefaultTemplate: () => request('/api/fenbeitong-expense-reimbursement/config/default-template'),
   getConfig: () => request('/api/fenbeitong-expense-reimbursement/config'),
   saveConfig: (data) => request('/api/fenbeitong-expense-reimbursement/config', {
     method: 'PUT',

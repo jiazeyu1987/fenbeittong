@@ -2,6 +2,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { missingConfigError } from './errors.js';
+import {
+  getAssistantSessionContext,
+  normalizeAssistantKingdeeConfig
+} from './assistant-session-context.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '../..');
@@ -200,6 +204,10 @@ export function getRootDir() {
 }
 
 function buildKingdeeConfig() {
+  const assistantSession = getAssistantSessionContext();
+  if (assistantSession) {
+    return buildAssistantSessionKingdeeConfig(assistantSession.kingdeeConfig);
+  }
   const kingdee = {
     mode: readMode('KINGDEE_MODE'),
     baseUrl: process.env.KINGDEE_BASE_URL || '',
@@ -221,6 +229,38 @@ function buildKingdeeConfig() {
   kingdee.accounts = buildKingdeeAccounts(kingdee);
   kingdee.acctIds = buildKingdeeAcctIds(kingdee);
   return kingdee;
+}
+
+function buildAssistantSessionKingdeeConfig(input) {
+  const snapshot = normalizeAssistantKingdeeConfig(input);
+  const account = {
+    key: DEFAULT_KINGDEE_ACCOUNT_KEY,
+    label: '当前 ERP 账号',
+    username: snapshot.username,
+    password: snapshot.password
+  };
+  const acctId = {
+    key: DEFAULT_KINGDEE_ACCT_ID_KEY,
+    label: '当前 ERP 账套',
+    acctId: snapshot.acctId
+  };
+  return {
+    mode: 'real',
+    ...snapshot,
+    lcid: String(snapshot.lcid),
+    authPath: process.env.KINGDEE_AUTH_PATH
+      || 'Kingdee.BOS.WebApi.ServicesStub.AuthService.ValidateUser.common.kdsvc',
+    savePath: process.env.KINGDEE_SAVE_PATH
+      || 'Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.Save.common.kdsvc',
+    viewPath: process.env.KINGDEE_VIEW_PATH
+      || 'Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.View.common.kdsvc',
+    switchOrgPath: process.env.KINGDEE_SWITCH_ORG_PATH
+      || 'Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.SwitchOrg.common.kdsvc',
+    selectedAccountKey: account.key,
+    selectedAcctIdKey: acctId.key,
+    accounts: [account],
+    acctIds: [acctId]
+  };
 }
 
 function buildFenbeitongListPayload() {
