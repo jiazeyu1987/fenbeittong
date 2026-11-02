@@ -66,11 +66,11 @@
             </select>
             <button id="resetButton" class="secondary">&#x91CD;&#x7F6E;</button>
             <button id="columnSettingsButton" class="secondary">&#x663E;&#x793A;&#x5B57;&#x6BB5;</button>
-            <button id="fieldMappingButton" class="secondary" data-required-permission="erp:fenbeitong-voucher:config" hidden>字段对应关系</button>
+            <button id="fieldMappingButton" class="secondary" data-required-permission="erp:fenbeitong-voucher:query" hidden>字段对应关系</button>
           </div>
         </div>
 
-        <div class="toolbar-row toolbar-config-row" data-required-permission="erp:fenbeitong-voucher:config" hidden>
+        <div class="toolbar-row toolbar-config-row" data-required-permission="erp:fenbeitong-voucher:query" hidden>
           <div class="toolbar-row-title">
             <span class="toolbar-step">02</span>
             <div><strong>连接配置</strong><small>选择分贝通公司与金蝶账套</small></div>
@@ -106,13 +106,13 @@
           </div>
           <div class="toolbar-controls toolbar-workflow-controls">
             <button id="syncFenbeitongButton" class="outline-action workflow-sync">&#x540C;&#x6B65;&#x5206;&#x8D1D;&#x901A;</button>
-            <span class="workflow-arrow" data-required-permission="erp:fenbeitong-voucher:save" aria-hidden="true" hidden>→</span>
-            <button id="generateVoucherButton" class="outline-action" data-required-permission="erp:fenbeitong-voucher:save" hidden>生成费用报销单</button>
-            <span class="workflow-arrow" data-required-permission="erp:fenbeitong-voucher:save" aria-hidden="true" hidden>→</span>
-            <button id="saveErpButton" class="outline-action workflow-primary" data-required-permission="erp:fenbeitong-voucher:save" hidden>保存费用报销单</button>
-            <button id="resaveErpButton" class="outline-action" data-required-permission="erp:fenbeitong-voucher:save" hidden>保存/更新费用报销单</button>
+            <span class="workflow-arrow" data-required-permission="erp:fenbeitong-voucher:query" aria-hidden="true" hidden>→</span>
+            <button id="generateVoucherButton" class="outline-action" data-required-permission="erp:fenbeitong-voucher:query" hidden>生成费用报销单</button>
+            <span class="workflow-arrow" data-required-permission="erp:fenbeitong-voucher:query" aria-hidden="true" hidden>→</span>
+            <button id="saveErpButton" class="outline-action workflow-primary" data-required-permission="erp:fenbeitong-voucher:query" hidden>保存费用报销单</button>
+            <button id="resaveErpButton" class="outline-action" data-required-permission="erp:fenbeitong-voucher:query" hidden>保存/更新费用报销单</button>
             <button id="viewVoucherButton" class="outline-action">查看费用报销单</button>
-            <button id="syncPaymentStatusButton" class="outline-action" data-required-permission="erp:fenbeitong-voucher:save" hidden>回传付款状态</button>
+            <button id="syncPaymentStatusButton" class="outline-action" data-required-permission="erp:fenbeitong-voucher:query" hidden>回传付款状态</button>
             <span class="toolbar-divider" aria-hidden="true"></span>
             <button id="exportButton" class="success-action">&#x5BFC;&#x51FA;</button>
           </div>

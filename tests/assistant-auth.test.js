@@ -212,9 +212,7 @@ test('a new ERP ticket replaces an existing browser session', async () => {
   });
   assert.equal(sessionResponse.statusCode, 200);
   assert.deepEqual(JSON.parse(sessionResponse.body).data.permissions, [
-    queryPermission,
-    configPermission,
-    savePermission
+    queryPermission
   ]);
 });
 
@@ -224,45 +222,21 @@ test('invalid ticket is rejected', async () => {
   assert.match(response.body, /没有分贝通费用报销权限/);
 });
 
-test('query-only session cannot call config or save operations', async () => {
+test('tab permission reaches configuration, preparation and ERP save handlers', async () => {
   const session = await openTicket('query-ticket');
   const headers = {
     'Content-Type': 'application/json',
     'x-fenbeitong-assistant-session': session.id
   };
-
-  const sessionResponse = await request(`${assistantUrl}/api/assistant/session`, { headers });
-  assert.equal(sessionResponse.statusCode, 200);
-  assert.deepEqual(JSON.parse(sessionResponse.body).data.permissions, [queryPermission]);
-
-  const configResponse = await request(`${assistantUrl}/api/integration-settings`, {
-    method: 'PUT',
-    headers,
-    body: JSON.stringify({
-      tenantKey: 'puhui',
-      kingdeeAccountKey: 'current',
-      kingdeeAcctIdKey: 'puhui-6977227150362f'
-    })
-  });
-  assert.equal(configResponse.statusCode, 403);
-  assert.equal(JSON.parse(configResponse.body).error.code, 'ASSISTANT_PERMISSION_DENIED');
-
-  const saveResponse = await request(`${assistantUrl}/api/fenbeitong-expense-reimbursement/save-erp`, {
-    method: 'POST',
-    headers,
-    body: '{}'
-  });
-  assert.equal(saveResponse.statusCode, 403);
-  assert.equal(JSON.parse(saveResponse.body).error.code, 'ASSISTANT_PERMISSION_DENIED');
-
-  for (const path of [
-    '/api/fenbeitong-expense-reimbursement/prepare',
-    '/api/payment-status-sync/run',
-    '/api/scheduler/run-once'
+  for (const [method, path] of [
+    ['PUT', '/api/integration-settings'],
+    ['POST', '/api/fenbeitong-expense-reimbursement/save-erp'],
+    ['POST', '/api/fenbeitong-expense-reimbursement/prepare']
   ]) {
-    const result = await request(assistantUrl + path, { method: 'POST', headers, body: '{}' });
-    assert.equal(result.statusCode, 403, path);
-    assert.equal(JSON.parse(result.body).error.code, 'ASSISTANT_PERMISSION_DENIED', path);
+    // Malformed input verifies authorization reaches the real handler without upstream writes.
+    const result = await request(assistantUrl + path, { method, headers, body: '{' });
+    assert.equal(result.statusCode, 400, path);
+    assert.equal(JSON.parse(result.body).error.message, 'request body must be valid JSON', path);
   }
 });
 
@@ -290,8 +264,8 @@ test('business APIs reject cookie-only authentication', async () => {
   assert.equal(JSON.parse(response.body).error.code, 'ASSISTANT_SESSION_REQUIRED');
 });
 
-test('full session can update integration selection with the session ERP account', async () => {
-  const session = await openTicket('full-ticket');
+test('tab permission can update integration selection with the session ERP account', async () => {
+  const session = await openTicket('query-ticket');
   const response = await request(`${assistantUrl}/api/integration-settings`, {
     method: 'PUT',
     headers: {

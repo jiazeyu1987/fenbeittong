@@ -29,7 +29,7 @@ Open `http://127.0.0.1:5173`.
 
 IntRuoyi starts the integrated entry with `node server.js`. It listens on fixed port `18734` and requires `FENBEITONG_ASSISTANT_TICKET_VALIDATE_URL`. Direct access to the page and business APIs is rejected; the browser must enter through `/auth/callback?ticket=...` and then use the issued assistant session.
 
-The validated session carries `erp:fenbeitong-voucher:query/config/save` permissions and the current IntRuoyi Kingdee configuration snapshot. Kingdee calls made through the integrated entry use that session snapshot and fail immediately when it is incomplete.
+The only module permission is `erp:fenbeitong-voucher:query`: access to the IntRuoyi tab grants all assistant functions, including configuration, generation, ERP save/update, and payment status synchronization. The validated session carries this permission and the current IntRuoyi Kingdee configuration snapshot. Kingdee calls made through the integrated entry use that session snapshot and fail immediately when it is incomplete.
 
 The integrated entry handles interactive work only. Its deployment service starts `server.js` directly and does not start the legacy unauthenticated backend service; scheduled background synchronization remains disabled in this mode.
 

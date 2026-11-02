@@ -32,8 +32,6 @@ const sessionCookieName = 'fenbeitong_assistant_session';
 const sessionQueryName = 'assistantSession';
 const callbackReplayTtlMillis = 30_000;
 const queryPermission = 'erp:fenbeitong-voucher:query';
-const configPermission = 'erp:fenbeitong-voucher:config';
-const savePermission = 'erp:fenbeitong-voucher:save';
 const sessions = new Map();
 const callbackReplayGrants = new Map();
 
@@ -134,7 +132,7 @@ function createAssistantSession(validation) {
   const sessionId = randomUUID();
   sessions.set(sessionId, {
     userId: validation.userId,
-    permissions,
+    permissions: [queryPermission],
     kingdeeConfig: normalizeAssistantKingdeeConfig(validation.kingdeeConfig),
     expiresAt: Date.now() + sessionTtlSeconds * 1000
   });
@@ -182,21 +180,6 @@ async function handleAuthCallback(request, response, requestUrl) {
   } catch (error) {
     return sendForbiddenPage(response, String(error?.message || error), 503);
   }
-}
-
-function requiredPermission(method, pathname) {
-  if (method === 'PUT') return configPermission;
-  if (method === 'POST' && [
-    '/api/scheduler/run-once',
-    '/api/payment-status-sync/run',
-    '/api/fenbeitong-expense-reimbursement/prepare',
-    '/api/fenbeitong-expense-reimbursement/save-erp'
-  ].includes(pathname)) return savePermission;
-  return queryPermission;
-}
-
-function hasPermission(session, permission) {
-  return session.permissions.includes(permission);
 }
 
 function sendJson(response, statusCode, body) {
@@ -289,12 +272,11 @@ const server = createServer(async (request, response) => {
     }
 
     if (requestUrl.pathname.startsWith('/api/')) {
-      const permission = requiredPermission(request.method || 'GET', requestUrl.pathname);
-      if (!hasPermission(session, permission)) {
+      if (!session.permissions.includes(queryPermission)) {
         return sendApiForbidden(
           response,
           'ASSISTANT_PERMISSION_DENIED',
-          `当前账号缺少权限：${permission}`
+          `当前账号缺少权限：${queryPermission}`
         );
       }
       return await runWithAssistantSession(session, () => handleApi(request, response));
