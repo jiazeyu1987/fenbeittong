@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>分贝通金蝶费用报销单工作台</title>
-    <link rel="stylesheet" href="/styles.css?v=20260803-save-status-filter-v2" />
+    <link rel="stylesheet" href="/styles.css?v=20261125-requester-layer" />
   </head>
   <body>
     <main class="ledger-shell">
@@ -53,17 +53,22 @@
             <button id="queryLedgerButton" class="primary-action compact-action">&#x67E5;&#x8BE2;</button>
           </div>
           <div class="toolbar-controls toolbar-quick-filters">
-            <select id="requesterFilterSelect" class="ledger-quick-filter" aria-label="按报销人筛选">
-              <option value="">全部报销人</option>
-            </select>
+            <div class="requester-search">
+              <input id="requesterFilterInput" class="ledger-quick-filter"
+                type="search" autocomplete="off" placeholder="搜索报销人" aria-label="按报销人筛选"
+                role="combobox" aria-autocomplete="list" aria-controls="requesterSuggestions" aria-expanded="false" />
+              <ul id="requesterSuggestions" class="requester-suggestions" role="listbox" aria-label="匹配的报销人" hidden></ul>
+            </div>
             <select id="sourceTypeFilterSelect" class="ledger-quick-filter" aria-label="按来源类型筛选">
               <option value="">全部来源类型</option>
               <option value="OFFLINE_REIMBURSEMENT">线下报销 · 费用明细</option>
               <option value="ONLINE_MONTHLY_BILL">线上月结 · 月度账单</option>
             </select>
-            <select id="dateFilterSelect" class="ledger-quick-filter" aria-label="按日期筛选">
-              <option value="">全部日期</option>
-            </select>
+            <div class="ledger-date-range" role="group" aria-label="费用发生日期范围">
+              <label>费用日期从 <input id="dateFilterStart" type="date" aria-label="费用发生开始日期" /></label>
+              <label>至 <input id="dateFilterEnd" type="date" aria-label="费用发生结束日期" /></label>
+              <button id="applyDateFilterButton" class="primary-action compact-action" type="button">确认日期</button>
+            </div>
             <button id="resetButton" class="secondary">&#x91CD;&#x7F6E;</button>
             <button id="columnSettingsButton" class="secondary">&#x663E;&#x793A;&#x5B57;&#x6BB5;</button>
             <button id="fieldMappingButton" class="secondary" data-required-permission="erp:fenbeitong-voucher:query" hidden>字段对应关系</button>
@@ -112,7 +117,6 @@
             <button id="saveErpButton" class="outline-action workflow-primary" data-required-permission="erp:fenbeitong-voucher:query" hidden>保存费用报销单</button>
             <button id="resaveErpButton" class="outline-action" data-required-permission="erp:fenbeitong-voucher:query" hidden>保存/更新费用报销单</button>
             <button id="viewVoucherButton" class="outline-action">查看费用报销单</button>
-            <button id="syncPaymentStatusButton" class="outline-action" data-required-permission="erp:fenbeitong-voucher:query" hidden>回传付款状态</button>
             <span class="toolbar-divider" aria-hidden="true"></span>
             <button id="exportButton" class="success-action">&#x5BFC;&#x51FA;</button>
           </div>
@@ -164,9 +168,6 @@
         <label><input type="checkbox" data-column-toggle="reason" checked />事由</label>
         <label><input type="checkbox" data-column-toggle="expenseDepartment" checked />费用承担部门</label>
         <label><input type="checkbox" data-column-toggle="department" checked />&#x90E8;&#x95E8;</label>
-        <label><input type="checkbox" data-column-toggle="erpPaymentBillType" checked />ERP付款单类型</label>
-        <label><input type="checkbox" data-column-toggle="erpBankProcessingStatus" checked />银行处理状态</label>
-        <label><input type="checkbox" data-column-toggle="erpPaymentDate" checked />付款时间</label>
         <label><input type="checkbox" data-column-toggle="startLocation" checked />出发地</label>
         <label><input type="checkbox" data-column-toggle="arrivalLocation" checked />目的地</label>
         <label><input type="checkbox" data-column-toggle="trafficType" checked />交通类型</label>
@@ -269,6 +270,7 @@
                   <option value="">处理状态</option>
                   <option value="saved">已保存ERP</option>
                   <option value="unsaved">未保存</option>
+                  <option value="unverified">待核对ERP</option>
                 </select>
               </th>
               <th data-column-key="sourceType">来源类型</th>
@@ -288,9 +290,6 @@
               <th data-column-key="reason">事由</th>
               <th data-column-key="expenseDepartment">费用承担部门</th>
               <th data-column-key="department">部门</th>
-              <th data-column-key="erpPaymentBillType">ERP付款单类型</th>
-              <th data-column-key="erpBankProcessingStatus">银行处理状态</th>
-              <th data-column-key="erpPaymentDate">付款时间</th>
               <th data-column-key="startLocation">出发地</th>
               <th data-column-key="arrivalLocation">目的地</th>
               <th data-column-key="trafficType">交通类型</th>
@@ -419,7 +418,7 @@
         </details>
       </section>
     </main>
-    <script type="module" src="/app.js?v=20260811-online-original-bill-group-v1"></script>
+    <script type="module" src="/app.js?v=20261125-requester-options"></script>
   </body>
 </html>
 

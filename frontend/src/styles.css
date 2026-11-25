@@ -1223,8 +1223,63 @@ body {
 
 .toolbar-quick-filters {
   flex: 0 1 auto;
-  justify-content: flex-end;
-  margin-left: auto;
+  justify-content: flex-start;
+}
+
+.requester-search {
+  position: relative;
+  max-width: 100%;
+}
+
+.ledger-toolbar:has(.requester-suggestions:not([hidden])) {
+  position: relative;
+  z-index: 5;
+  overflow: visible;
+}
+
+.requester-suggestions {
+  position: absolute;
+  z-index: 1;
+  inset: calc(100% + 5px) 0 auto;
+  max-height: 172px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(29, 38, 68, 0.14);
+}
+
+.requester-suggestions li {
+  padding: 7px 9px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.requester-suggestions li:hover,
+.requester-suggestions [aria-selected="true"] {
+  background: #eef2ff;
+}
+
+.ledger-date-range {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ledger-date-range label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.ledger-toolbar .ledger-date-range input {
+  width: 130px;
 }
 
 .toolbar-config-controls,
@@ -1829,6 +1884,10 @@ body {
   .ledger-toolbar .ledger-quick-filter,
   .compact-field {
     width: 100% !important;
+  }
+
+  .ledger-date-range label {
+    flex: 0 1 165px;
   }
 
   .compact-field {

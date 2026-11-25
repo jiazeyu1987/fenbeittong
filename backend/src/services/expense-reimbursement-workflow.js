@@ -4,6 +4,8 @@ import {
   findKingdeeEmployeeNumberByName,
   findKingdeeOtherContactUnitByName,
   getKingdeeEmployeeBankDetails,
+  kingdeeExpenseReimbursementExists,
+  queryKingdeeExpenseReimbursementHeaders,
   saveKingdeeExpenseReimbursement,
   validateExpensePaymentBankFields,
   viewKingdeeExpenseReimbursement,
@@ -11,6 +13,7 @@ import {
   updateKingdeeExpenseReimbursementSourceType
 } from '../adapters/kingdee-client.js';
 import { getAppConfig } from '../config.js';
+import { AppError } from '../errors.js';
 import { buildExpenseReimbursementPreview } from '../expense-reimbursement-mapper.js';
 import { parseFenbeitongDetail } from '../fenbeitong-detail.js';
 import {
@@ -22,11 +25,13 @@ import {
   getIntegrationSelection,
   getKingdeeAcctIdSelection,
   isRealPushedRecord,
+  listPreparedKingdeeTargets,
   saveFenbeitongRequesterCatalog,
   listSyncedDocuments,
   recordOperation,
   restoreErpPushAfterRetryFailure,
-  preservePaymentBankVerificationFailure,
+  isKingdeeSaveVerificationFailure,
+  preserveKingdeeSaveVerificationFailure,
   savePreparedRecord,
   saveSyncedDocuments,
   markPushedToErp
@@ -82,8 +87,61 @@ export async function previewExpenseReimbursement(input) {
   return buildPreviewWithResolvedEmployee(resolveInput(input));
 }
 
+export async function verifyExpenseReimbursementSaveStatus(records, acctIdKey) {
+  const byOrganization = new Map();
+  for (const record of records) {
+    if (record.kingdeeAcctIdKey !== acctIdKey || !isRealPushedRecord(record)) continue;
+    record.erpSaveStatus = 'unverified';
+    let orgNumber;
+    try {
+      orgNumber = JSON.parse(record.expenseReimbursementPayload || '{}').Model?.FOrgID?.FNumber;
+    } catch {
+      continue;
+    }
+    if (!orgNumber || !Number.isSafeInteger(Number(record.erpFid)) || Number(record.erpFid) <= 0) continue;
+    if (!byOrganization.has(orgNumber)) byOrganization.set(orgNumber, []);
+    byOrganization.get(orgNumber).push(record);
+  }
+  if (getAppConfig().kingdee.mode !== 'real') return records;
+
+  const batchSize = 100;
+  for (const [orgNumber, candidates] of byOrganization) {
+    for (let start = 0; start < candidates.length; start += batchSize) {
+      const batch = candidates.slice(start, start + batchSize);
+      const fids = [...new Set(batch.map((record) => Number(record.erpFid)))];
+      try {
+        const rows = await queryKingdeeExpenseReimbursementHeaders({
+          acctIdKey, orgNumber, fids, limit: fids.length + 1, accountKey: REQUIRED_KINGDEE_ACCOUNT_KEY
+        });
+        const ids = new Map(rows.map((row) => [Number(row.FID), String(row.FBillNo || '').trim()]));
+        for (const record of batch) {
+          const number = ids.get(Number(record.erpFid));
+          record.erpSaveStatus = number === String(record.erpNumber).trim()
+            ? 'confirmed' : number === undefined ? 'missing' : 'unverified';
+        }
+      } catch {
+        // Leave unavailable checks unverified so an ERP outage does not hide the ledger.
+      }
+    }
+  }
+  return records;
+}
+
 export async function prepareExpenseReimbursement(input) {
-  return savePreparedRecord(await previewExpenseReimbursement(input));
+  const preview = await previewExpenseReimbursement(input);
+  const acctIdKey = input.kingdeeAcctIdKey || getKingdeeAcctIdSelection();
+  const previous = listPreparedKingdeeTargets(preview, acctIdKey);
+  for (const record of previous) {
+    const org = JSON.parse(record.expenseReimbursementPayload || '{}').Model?.FOrgID;
+    const orgNumber = requiredText(org?.FNumber, 'saved Kingdee organization number');
+    if (await kingdeeExpenseReimbursementExists(record.erpFid, record.erpNumber, {
+      accountKey: REQUIRED_KINGDEE_ACCOUNT_KEY, acctIdKey, orgNumber
+    })) {
+      throw new AppError('KINGDEE_REIMBURSEMENT_STILL_EXISTS',
+        `金蝶仍存在费用报销单 ${record.erpNumber}，请使用“保存/更新费用报销单”处理原单。`, 409);
+    }
+  }
+  return savePreparedRecord(preview, { kingdeeAcctIdKey: acctIdKey, confirmedDeletedRecords: previous });
 }
 
 export function saveExpenseReimbursementToErp(input) {
@@ -168,9 +226,9 @@ async function saveExpenseReimbursementToErpUnlocked(input) {
   const migratingExistingBill = Boolean(
     isRealPushedRecord(existingRecord) && existingRecord.sourceId !== preview.sourceId
   );
-  const pendingBankVerification = existingRecord?.lastErpRetryErrorCode === 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH'
+  const pendingVerification = isKingdeeSaveVerificationFailure(existingRecord?.lastErpRetryErrorCode)
     && Boolean(existingRecord.erpFid && existingRecord.erpNumber);
-  const forceRetry = Boolean(pendingBankVerification || (
+  const forceRetry = Boolean(pendingVerification || (
     isRealPushedRecord(existingRecord) && (input.forceRetry || migratingExistingBill)
   ));
   if (isRealPushedRecord(existingRecord) && !forceRetry) {
@@ -217,7 +275,7 @@ async function saveExpenseReimbursementToErpUnlocked(input) {
       return replay;
     }
     throw new Error(
-      `费用报销单 ${preview.sourceId} 已保存到 ERP，但当前内容已经变化；请使用“重新保存费用报销单”更新原单，系统不会重复新建。`
+      `费用报销单 ${preview.sourceId} 已保存到 ERP，但当前内容已经变化。请使用“保存/更新费用报销单”更新原单。`
     );
   }
   try {
@@ -226,6 +284,11 @@ async function saveExpenseReimbursementToErpUnlocked(input) {
       preview,
       existingRecord
     );
+    const receiptOnly = Boolean(forceRetry && existingRecord?.erpReceiptWarnings?.length
+      && existingRecord.contentHash === preview.contentHash && !replaceOnlineDraft);
+    if (input.requireReceiptOnly && !receiptOnly) {
+      throw new AppError('KINGDEE_RECEIPT_ONLY_TARGET_CHANGED', '原单内容或本地关联已变更，已停止仅补录收票。', 409);
+    }
     if (forceRetry && !replaceOnlineDraft) {
       targetExistingExpenseReimbursement(preview.payload, existingRecord);
     }
@@ -236,7 +299,9 @@ async function saveExpenseReimbursementToErpUnlocked(input) {
     });
     const erpResult = await saveKingdeeExpenseReimbursement(preview.payload, {
       accountKey: REQUIRED_KINGDEE_ACCOUNT_KEY,
-      acctIdKey: input.kingdeeAcctIdKey,
+      acctIdKey: kingdeeAcctIdKey,
+      receiptInvoices: preview.receiptInvoices,
+      receiptOnly,
       // A previous ERP save can succeed before the local process record is
       // persisted (for example, when the local state file is temporarily
       // locked).  In that orphaned-state case there is no existingRecord, but
@@ -269,8 +334,8 @@ async function saveExpenseReimbursementToErpUnlocked(input) {
       replacesSourceId: migratingExistingBill ? existingRecord.sourceId : ''
     });
   } catch (error) {
-    if (error.code === 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH' && error.detail?.savedResult) {
-      preservePaymentBankVerificationFailure(preview.sourceId, error);
+    if (isKingdeeSaveVerificationFailure(error.code) && error.detail?.savedResult) {
+      preserveKingdeeSaveVerificationFailure(preview.sourceId, error);
       throw error;
     }
     if (migratingExistingBill) {

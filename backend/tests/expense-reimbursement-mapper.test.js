@@ -463,16 +463,33 @@ test('blocks an unpaired negative online refund before calling Kingdee', () => {
   }), /未找到对应原订单/);
 });
 
-test('maps real transport subcategory, employee, tax and route fields', () => {
-  const state = JSON.parse(readFileSync('runtime-data-offline/state.json', 'utf8'));
-  const record = Object.values(state.syncedDocuments).find((item) =>
-    item.sourceMode === 'real'
-    && item.requesterCode === 'X025'
-    && String(item.fixedJson || '').includes('CI00802')
-    && String(item.fixedJson || '').includes('29.56'));
+test('maps offline transport subcategory, employee, tax and route fields', () => {
+  const document = {
+    code: 0,
+    data: {
+      reimb_id: 'TEST-TRAIN-REIMBURSEMENT',
+      reimb_code: 'TEST-TRAIN-001',
+      currency_code: 'CNY',
+      total_amount: 358,
+      payment_amount: 358,
+      user: { code: 'X025', name: '测试员工', department_code: 'BM000006', department_name: '销售部' },
+      expenses: [{
+        id: 'TEST-TRAIN-EXPENSE',
+        cost_category: { code: 'CI00802', name: '交通费-个人（火车）' },
+        total_amount: 358,
+        cost_custom_fields: [
+          { field_code: 'date_of_expense', detail: '2026-06-29 08:45:00' },
+          { field_code: 'start_location', detail: [{ name: '湖南省' }, { name: '长沙市' }] },
+          { field_code: 'arrival_location', detail: [{ name: '广东省' }, { name: '广州市' }] },
+          { field_code: 'deductible_tax', detail: '29.56' },
+          { field_code: 'untaxed_amount', detail: '328.44' }
+        ]
+      }]
+    }
+  };
   const preview = buildExpenseReimbursementPreview({
-    fixedJson: record.fixedJson,
-    documentDate: record.paymentDate,
+    fixedJson: JSON.stringify(document),
+    documentDate: '2026-06-30',
     config: buildMockTemplate()
   });
   assert.equal(preview.documentSummary.employeeNumber, 'PL0098');

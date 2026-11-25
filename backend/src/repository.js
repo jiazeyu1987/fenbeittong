@@ -159,11 +159,36 @@ export function finishSyncBatch(batchId, patch) {
   return structuredClone(nextBatch);
 }
 
+export function listPreparedKingdeeTargets(preview, acctIdKey) {
+  return structuredClone(preparedKingdeeTargets(loadState(), preview, acctIdKey));
+}
+
+function preparedKingdeeTargets(state, preview, acctIdKey) {
+  const sourceIds = new Set([preview.sourceId, ...(preview.sourceIds || [])]);
+  return Object.values(state.voucherRecords).filter((record) =>
+    record.targetFormId === 'ER_ExpReimbursement'
+    && record.kingdeeAcctIdKey === acctIdKey
+    && (isRealPushedRecord(record) || (record.erpFid && record.erpNumber
+      && isKingdeeSaveVerificationFailure(record.lastErpRetryErrorCode)))
+    && [record.sourceId, ...(record.sourceIds || [])].some((id) => sourceIds.has(id)));
+}
+
 export function savePreparedRecord(preview, options = {}) {
   const state = loadState();
   const stored = state.voucherRecords[preview.sourceId] || {};
   const kingdeeAcctIdKey = options.kingdeeAcctIdKey
     || state.integrationSelection.kingdeeAcctIdKey;
+  const deletedRecords = options.confirmedDeletedRecords || [];
+  if (options.confirmedDeletedRecords) {
+    const currentTargets = preparedKingdeeTargets(state, preview, kingdeeAcctIdKey);
+    if (currentTargets.length !== deletedRecords.length || currentTargets.some((record) =>
+      !deletedRecords.some((checked) => checked.sourceId === record.sourceId
+        && checked.erpFid === record.erpFid && checked.erpNumber === record.erpNumber
+        && checked.updateTime === record.updateTime))) {
+      throw new Error('核对金蝶期间，本地保存记录发生变化，请重新生成。');
+    }
+  }
+  const storedWasDeleted = deletedRecords.some((record) => record.sourceId === preview.sourceId);
   const storedForAnotherAcctId = stored.targetFormId === 'ER_ExpReimbursement'
     && stored.kingdeeAcctIdKey
     && stored.kingdeeAcctIdKey !== kingdeeAcctIdKey;
@@ -172,7 +197,7 @@ export function savePreparedRecord(preview, options = {}) {
     ? options.previousRecord
     : null;
   const previous = suppliedPrevious || (
-    stored.targetFormId === 'ER_ExpReimbursement' && !storedForAnotherAcctId ? stored : {}
+    stored.targetFormId === 'ER_ExpReimbursement' && !storedForAnotherAcctId && !storedWasDeleted ? stored : {}
   );
   const forceRetry = Boolean(options.forceRetry && isRealPushedRecord(previous));
   const record = {
@@ -205,6 +230,18 @@ export function savePreparedRecord(preview, options = {}) {
     createTime: previous.createTime || now(),
     updateTime: now()
   };
+  if (deletedRecords.length > 0) {
+    record.previousErpPushes = [
+      ...(record.previousErpPushes || []),
+      ...deletedRecords.flatMap((item) => [...(item.previousErpPushes || []), previousErpPushesEntry(item)])
+    ];
+    for (const item of deletedRecords) {
+      delete state.voucherRecords[item.sourceId];
+      appendOperation(state, 'ERP_DELETED_REIMBURSEMENT_UNLINK', 'SUCCESS', {
+        sourceId: item.sourceId, previousErpFid: item.erpFid, previousErpNumber: item.erpNumber
+      });
+    }
+  }
   state.voucherRecords[record.sourceId] = record;
   if (forceRetry) {
     appendOperation(state, 'ERP_EXPENSE_REIMBURSEMENT_RETRY_PREPARE', 'SUCCESS', {
@@ -804,13 +841,14 @@ export function markPushedToErp(sourceId, erpResult, options = {}) {
   if (!isRealKingdeeSaveResult(erpResult)) {
     throw new Error('real Kingdee save result is required before marking ERP push success');
   }
-  if (record.lastErpRetryErrorCode === 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH'
+  const pendingVerification = isKingdeeSaveVerificationFailure(record.lastErpRetryErrorCode);
+  if (pendingVerification
     && (String(record.erpFid) !== String(erpResult.erpFid)
       || String(record.erpNumber) !== String(erpResult.erpNumber))) {
-    throw new Error('payment bank verification retry must update the original Kingdee bill');
+    throw new Error('save verification retry must update the original Kingdee bill');
   }
   if ((record.processStage === 'ERP_EXPENSE_REIMBURSEMENT_SAVED' || record.erpFid || record.erpNumber)
-    && record.lastErpRetryErrorCode !== 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH') {
+    && !pendingVerification) {
     if (
       String(record.erpFid) === String(erpResult.erpFid)
       && String(record.erpNumber) === String(erpResult.erpNumber)
@@ -818,6 +856,7 @@ export function markPushedToErp(sourceId, erpResult, options = {}) {
       const replayedRecord = {
         ...record,
         erpDocumentStatus: erpResult.documentStatus || record.erpDocumentStatus,
+        erpReceiptWarnings: erpResult.receiptWarnings ?? record.erpReceiptWarnings ?? [],
         erpRawResponse: erpResult.rawResponse
           ? JSON.stringify(erpResult.rawResponse)
           : record.erpRawResponse,
@@ -848,6 +887,7 @@ export function markPushedToErp(sourceId, erpResult, options = {}) {
     erpMode: erpResult.mode || (erpResult.simulated ? 'mock' : 'real'),
     erpMockReplacement: Boolean(erpResult.mockReplacement),
     erpMockReason: erpResult.mockReason || '',
+    erpReceiptWarnings: erpResult.receiptWarnings || [],
     erpRawResponse: erpResult.rawResponse ? JSON.stringify(erpResult.rawResponse) : '',
     lastErpRetryErrorCode: '',
     lastErpRetryErrorMessage: '',
@@ -871,9 +911,13 @@ export function markPushedToErp(sourceId, erpResult, options = {}) {
   return structuredClone(nextRecord);
 }
 
-export function preservePaymentBankVerificationFailure(sourceId, error) {
+export function isKingdeeSaveVerificationFailure(code) {
+  return code === 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH' || code === 'KINGDEE_RECEIPT_LINK_MISMATCH';
+}
+
+export function preserveKingdeeSaveVerificationFailure(sourceId, error) {
   const result = error?.detail?.savedResult;
-  if (error?.code !== 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH' || !isRealKingdeeSaveResult(result)) {
+  if (!isKingdeeSaveVerificationFailure(error?.code) || !isRealKingdeeSaveResult(result)) {
     throw new Error('verified Kingdee save identifiers are required');
   }
   const state = loadState();
@@ -894,7 +938,8 @@ export function preservePaymentBankVerificationFailure(sourceId, error) {
     lastErpRetryErrorAt: now(),
     updateTime: now()
   };
-  appendOperation(state, 'ERP_PAYMENT_BANK_VERIFY', 'FAILED', {
+  const action = error.code === 'KINGDEE_RECEIPT_LINK_MISMATCH' ? 'ERP_RECEIPT_LINK_VERIFY' : 'ERP_PAYMENT_BANK_VERIFY';
+  appendOperation(state, action, 'FAILED', {
     sourceId, erpFid: result.erpFid, erpNumber: result.erpNumber, code: error.code
   });
   persistState(state);

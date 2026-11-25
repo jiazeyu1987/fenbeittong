@@ -37,9 +37,10 @@ export const interfaceFieldCatalog = [
   row('线下', 'data.expenses[].reason', '用途', 'FRemark', '费用明细用途'),
   row('线下', 'data.expenses[].attribution_department.code / name', '费用承担部门', 'FExpenseDeptEntryID', COMMON_NOTES.configured),
   row('线下', 'data.expenses[].invoices[].type', '发票类型', 'FInvoiceType', '有发票或税额拆分时使用增值税模式'),
-  row('线下', 'invoices[].code / number / issued_time', '发票代码、号码、开票日期', '—', COMMON_NOTES.displayOnly),
-  row('线下', 'invoices[].seller_name / buyer_name', '销售方、购买方名称', '—', COMMON_NOTES.displayOnly),
-  row('线下', 'invoices[].tax_amount / exclude_tax_amount / total_amount', '发票税额、不计税金额、价税合计', '—', '用于界面核对；费用行税额仍取费用拆分字段'),
+  row('线下', 'invoices[].type / invoice_type_name', '发票类别', 'IV_ReceivedInvoice.FINVOICETYPE', '新建收票单按账套配置转换发票类别'),
+  row('线下', 'invoices[].code / number / issued_time', '发票代码、号码、开票日期', 'FIVCODE / FIVNUMBER / FOPENDATE', '逐张关联到金蝶收票信息'),
+  row('线下', 'invoices[].seller_name / buyer_name', '销售方、购买方名称', 'FSALENAME / FPURNAME', '同步至收票单'),
+  row('线下', 'invoices[].tax_amount / exclude_tax_amount / total_amount', '发票税额、不计税金额、价税合计', 'FSUMTAXAMOUNT / FSUMAMOUNT / FSUMALLAMOUNT', '收票单写票面金额；费用行税额仍取费用拆分字段'),
 
   row('线上', 'data.bill_no / orders[].bill_no', '企业账单编号', 'FBillNo', '直接同步企业账单编号，并追加员工编号保证唯一'),
   row('线上', 'data.group_bill_no', '分组账单编号', 'FBillNo', '有值时优先于bill_no'),

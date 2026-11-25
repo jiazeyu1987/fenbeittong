@@ -37,7 +37,6 @@ const controls = {
   saveErp: document.querySelector('#saveErpButton'),
   resaveErp: document.querySelector('#resaveErpButton'),
   viewVoucher: document.querySelector('#viewVoucherButton'),
-  syncPaymentStatus: document.querySelector('#syncPaymentStatusButton'),
   exportLedger: document.querySelector('#exportButton'),
   queryLedger: document.querySelector('#queryLedgerButton'),
   resetLedger: document.querySelector('#resetButton'),
@@ -70,9 +69,10 @@ const state = {
   selectionDirty: false,
   syncRunning: false,
   syncedDocuments: [],
-  requesterCatalog: [],
+  expenseDateRange: { startDate: '', endDate: '' },
+  requesterQuery: { name: '', exact: false },
   selectedSourceIds: new Set(),
-  visibleColumnKeys: new Set(['status', 'sourceType', 'documentType', 'sourceCode', 'applicationDate', 'time', 'requester', 'employeeOpenBank', 'employeeAccountName', 'employeeBankAccount', 'departmentAttributionAmount', 'splitTaxAmount', 'splitExcludingTaxAmount', 'expenseCategories', 'businessLine', 'reason', 'expenseDepartment', 'department', 'erpPaymentBillType', 'erpBankProcessingStatus', 'erpPaymentDate', 'startLocation', 'arrivalLocation', 'trafficType', 'purpose', 'expenseOrganization', 'paymentAmount', 'invoiceType', 'invoiceCode', 'invoiceNumber', 'invoiceIssueDate', 'sellerName', 'buyerName', 'invoiceTaxAmount', 'invoiceExcludingTaxAmount', 'invoiceTotalAmount', 'requestOrganization', 'requestPaymentAmount', 'sourceDocumentStatus', 'interfaceSource']),
+  visibleColumnKeys: new Set(['status', 'sourceType', 'documentType', 'sourceCode', 'applicationDate', 'time', 'requester', 'employeeOpenBank', 'employeeAccountName', 'employeeBankAccount', 'departmentAttributionAmount', 'splitTaxAmount', 'splitExcludingTaxAmount', 'expenseCategories', 'businessLine', 'reason', 'expenseDepartment', 'department', 'startLocation', 'arrivalLocation', 'trafficType', 'purpose', 'expenseOrganization', 'paymentAmount', 'invoiceType', 'invoiceCode', 'invoiceNumber', 'invoiceIssueDate', 'sellerName', 'buyerName', 'invoiceTaxAmount', 'invoiceExcludingTaxAmount', 'invoiceTotalAmount', 'requestOrganization', 'requestPaymentAmount', 'sourceDocumentStatus', 'interfaceSource']),
   sortField: 'time',
   sortDirection: 'desc',
   lastPreview: null,
@@ -80,6 +80,7 @@ const state = {
   previewInvalidReason: '',
   preparedSourceIds: new Set(),
   pushedSourceIds: new Set(),
+  unverifiedErpSourceIds: new Set(),
   pushedExpenseReimbursementKeys: new Set(),
   batchSaveRunning: false,
   batchSavePaused: false,
@@ -98,9 +99,13 @@ const searchFieldSelect = document.querySelector('#searchFieldSelect');
 const matchModeSelect = document.querySelector('#matchModeSelect');
 const sourceSearchInput = document.querySelector('#sourceSearchInput');
 const saveStatusFilterSelect = document.querySelector('#saveStatusFilterSelect');
-const requesterFilterSelect = document.querySelector('#requesterFilterSelect');
+const requesterFilterInput = document.querySelector('#requesterFilterInput');
+const requesterSuggestions = document.querySelector('#requesterSuggestions');
+let activeRequesterOption = -1;
 const sourceTypeFilterSelect = document.querySelector('#sourceTypeFilterSelect');
-const dateFilterSelect = document.querySelector('#dateFilterSelect');
+const dateFilterStart = document.querySelector('#dateFilterStart');
+const dateFilterEnd = document.querySelector('#dateFilterEnd');
+const applyDateFilterButton = document.querySelector('#applyDateFilterButton');
 const paginationSummary = document.querySelector('#paginationSummary');
 const pageSizeSelect = document.querySelector('#pageSizeSelect');
 const previousPageButton = document.querySelector('#previousPageButton');
@@ -151,7 +156,6 @@ controls.generateVoucher.addEventListener('click', run(generateExpenseReimbursem
 controls.saveErp.addEventListener('click', run(pushSelectedToErp));
 controls.resaveErp.addEventListener('click', run(resaveSelectedToErp));
 controls.viewVoucher.addEventListener('click', run(queryProcess));
-controls.syncPaymentStatus.addEventListener('click', run(syncPaymentStatusesToFenbeitong));
 controls.queryLedger.addEventListener('click', () => {
   clearLedgerSelection('查询条件已变更，请重新选择当前结果中的单据。');
   state.ledgerPage = 1;
@@ -162,9 +166,14 @@ controls.resetLedger.addEventListener('click', () => {
   searchFieldSelect.value = 'sourceCode';
   matchModeSelect.value = 'contains';
   saveStatusFilterSelect.value = '';
-  requesterFilterSelect.value = '';
+  requesterFilterInput.value = '';
+  state.requesterQuery = { name: '', exact: false };
+  closeRequesterSuggestions();
   sourceTypeFilterSelect.value = '';
-  dateFilterSelect.value = '';
+  dateFilterStart.value = '';
+  dateFilterEnd.value = '';
+  dateFilterEnd.setCustomValidity('');
+  state.expenseDateRange = { startDate: '', endDate: '' };
   clearLedgerSelection('筛选条件已重置，请重新选择待处理单据。');
   state.ledgerPage = 1;
   renderSourceQueue(state.syncedDocuments);
@@ -205,12 +214,17 @@ kingdeeAccountSelect.addEventListener('change', () => {
   renderKingdeeAccountState();
   renderActionState();
 });
-kingdeeAcctIdSelect.addEventListener('change', () => {
+kingdeeAcctIdSelect.addEventListener('change', run(async () => {
   state.selectedKingdeeAcctIdKey = kingdeeAcctIdSelect.value;
+  state.preparedSourceIds.clear();
+  state.pushedSourceIds.clear();
+  state.pushedExpenseReimbursementKeys.clear();
+  state.unverifiedErpSourceIds.clear();
   markIntegrationSelectionDirty();
   renderKingdeeAcctIdState();
+  await refreshRecords();
   renderActionState();
-});
+}));
 sourceQueueBody.addEventListener('change', run(toggleQueuedDocument));
 sourceQueueBody.addEventListener('click', run(generateExpenseReimbursementFromRow));
 selectAllRowsCheckbox.addEventListener('change', () => toggleAllFilteredDocuments(selectAllRowsCheckbox.checked));
@@ -248,12 +262,94 @@ sourceSearchInput.addEventListener('keydown', (event) => {
     renderSourceQueue(state.syncedDocuments);
   }
 });
-for (const filterSelect of [saveStatusFilterSelect, requesterFilterSelect, sourceTypeFilterSelect, dateFilterSelect]) {
-  filterSelect.addEventListener('change', () => {
-    clearLedgerSelection('筛选条件已变更，请重新选择当前结果中的单据。');
-    state.ledgerPage = 1;
-    renderSourceQueue(state.syncedDocuments);
+function refreshLedgerFilters() {
+  clearLedgerSelection('筛选条件已变更，请重新选择当前结果中的单据。');
+  state.ledgerPage = 1;
+  renderSourceQueue(state.syncedDocuments);
+}
+for (const control of [saveStatusFilterSelect, sourceTypeFilterSelect]) {
+  control.addEventListener('change', refreshLedgerFilters);
+}
+for (const control of [dateFilterStart, dateFilterEnd]) {
+  control.addEventListener('input', () => dateFilterEnd.setCustomValidity(''));
+  control.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') applyExpenseDateFilter();
   });
+}
+applyDateFilterButton.addEventListener('click', applyExpenseDateFilter);
+requesterFilterInput.addEventListener('input', (event) => {
+  if (!event.isComposing) renderRequesterSuggestions();
+});
+requesterFilterInput.addEventListener('compositionend', renderRequesterSuggestions);
+requesterFilterInput.addEventListener('blur', closeRequesterSuggestions);
+requesterFilterInput.addEventListener('keydown', (event) => {
+  if (event.isComposing) return;
+  if (event.key === 'Escape' && !requesterSuggestions.hidden) {
+    event.preventDefault();
+    closeRequesterSuggestions();
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    const option = requesterSuggestions.children[activeRequesterOption];
+    applyRequesterFilter(option?.textContent ?? requesterFilterInput.value, Boolean(option));
+  } else if (['ArrowDown', 'ArrowUp'].includes(event.key) && !requesterSuggestions.hidden) {
+    event.preventDefault();
+    const options = requesterSuggestions.children;
+    const direction = event.key === 'ArrowDown' ? 1 : -1;
+    const start = activeRequesterOption < 0 && direction === -1 ? 0 : activeRequesterOption;
+    options[activeRequesterOption]?.setAttribute('aria-selected', 'false');
+    activeRequesterOption = (start + direction + options.length) % options.length;
+    const option = options[activeRequesterOption];
+    option.setAttribute('aria-selected', 'true');
+    requesterFilterInput.setAttribute('aria-activedescendant', option.id);
+    option.scrollIntoView({ block: 'nearest' });
+  }
+});
+requesterSuggestions.addEventListener('mousedown', (event) => event.preventDefault());
+requesterSuggestions.addEventListener('click', (event) => {
+  const option = event.target.closest('[role="option"]');
+  if (option) applyRequesterFilter(option.textContent, true);
+});
+
+function closeRequesterSuggestions() {
+  requesterSuggestions.hidden = true;
+  requesterSuggestions.replaceChildren();
+  requesterFilterInput.setAttribute('aria-expanded', 'false');
+  requesterFilterInput.removeAttribute('aria-activedescendant');
+  activeRequesterOption = -1;
+}
+
+function renderRequesterSuggestions() {
+  closeRequesterSuggestions();
+  const keyword = requesterFilterInput.value.trim().toLowerCase();
+  if (!keyword) {
+    if (state.requesterQuery.name) applyRequesterFilter('', false);
+    return;
+  }
+  const names = [...new Set(state.syncedDocuments.map((record) =>
+    displayRequester(record, buildSourceSummary(record).requester)))].filter((name) => name.toLowerCase().includes(keyword));
+  if (!names.length) return;
+  names.sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  requesterSuggestions.innerHTML = names.map((name, index) =>
+    `<li id="requester-suggestion-${index}" role="option" aria-selected="false">${escapeHtml(name)}</li>`).join('');
+  requesterSuggestions.hidden = false;
+  requesterFilterInput.setAttribute('aria-expanded', 'true');
+}
+
+function applyRequesterFilter(name, exact) {
+  requesterFilterInput.value = name.trim();
+  state.requesterQuery = { name: name.trim().toLowerCase(), exact };
+  closeRequesterSuggestions();
+  refreshLedgerFilters();
+}
+
+function applyExpenseDateFilter() {
+  const startDate = dateFilterStart.value;
+  const endDate = dateFilterEnd.value;
+  const invalid = startDate && endDate && startDate > endDate;
+  dateFilterEnd.setCustomValidity(invalid ? '结束日期不能早于开始日期。' : '');
+  if (!dateFilterEnd.reportValidity()) return;
+  state.expenseDateRange = { startDate, endDate };
+  refreshLedgerFilters();
 }
 sourceIdInput.addEventListener('input', () => {
   invalidatePreview('预览已失效：来源单据已变更，请重新预览费用报销单。');
@@ -481,20 +577,6 @@ async function syncFenbeitong() {
   }
 }
 
-async function syncPaymentStatusesToFenbeitong() {
-  showOperationFeedback('正在核对金蝶付款单并回传分贝通付款状态，请勿关闭页面。');
-  const response = await api.runPaymentStatusSync();
-  const result = response.result;
-  const summary = [
-    `已回传 ${result.syncedCount} 张`,
-    `已付款无需重复处理 ${result.alreadyPaidCount} 张`,
-    `安全跳过 ${result.skippedCount} 张`,
-    `失败 ${result.failedCount} 张`
-  ].join('；');
-  show(result, `付款状态同步完成：${summary}。`);
-  await refreshAll();
-}
-
 async function runSchedulerOnce() {
   const result = await api.runSchedulerOnce();
   selectFirstRecord(result.sync.records);
@@ -539,10 +621,6 @@ async function generateExpenseReimbursementsFromLedger() {
     if (!record) throw new Error(`待处理单据不存在：${sourceId}`);
     records.push(record);
   }
-  const alreadySaved = records.filter((record) => state.pushedSourceIds.has(record.sourceId));
-  if (alreadySaved.length > 0) {
-    throw new Error(`以下单据已保存到金蝶，请使用“重新保存费用报销单”：${alreadySaved.map(displaySourceCode).join('、')}`);
-  }
   const prepared = [];
   for (const record of records) {
     prepared.push(await generateExpenseReimbursementForRecord(record));
@@ -558,9 +636,6 @@ async function generateExpenseReimbursementFromRow(event) {
   const sourceId = button.dataset.sourceId;
   const record = state.syncedDocuments.find((item) => item.sourceId === sourceId);
   if (!record) throw new Error(`待处理单据不存在：${sourceId}`);
-  if (state.pushedSourceIds.has(sourceId)) {
-    throw new Error('该费用报销单已保存到金蝶，请使用“重新保存费用报销单”。');
-  }
   const preparedRecord = await generateExpenseReimbursementForRecord(record);
   show({ count: 1, record: preparedRecord }, '已生成待保存费用报销单，尚未写入金蝶。');
   await refreshAll();
@@ -619,6 +694,7 @@ async function generateExpenseReimbursementForRecord(record) {
   state.previewSignature = requestSignature(request);
   state.previewInvalidReason = '';
   addProcessSourceIds(state.preparedSourceIds, preparedRecord);
+  deleteProcessSourceIds(state.pushedSourceIds, preparedRecord);
   return preparedRecord;
 }
 
@@ -715,19 +791,19 @@ async function resaveSelectedToErp() {
     }
   }
   if (records.length === 0) {
-    throw new Error('请先选择需要保存或重新保存至ERP的单据。');
+    throw new Error('请先选择需要保存或更新至ERP的单据。');
   }
   const initiallySavedSourceIds = new Set(records
     .filter((record) => hasSavedExpenseReimbursementGroup(record))
     .map((record) => record.sourceId));
   const initiallyUnsavedCount = records.length - initiallySavedSourceIds.size;
-  startBatchProgress(records.length, '保存/重新保存费用报销单');
+  startBatchProgress(records.length, '保存/更新费用报销单');
   const batch = await runBatchOperation(
     records,
     (record) => saveExpenseReimbursementRowToErp(record, {
       forceRetry: initiallySavedSourceIds.has(record.sourceId)
     }),
-    (progress) => updateBatchProgress(progress, '保存/重新保存费用报销单'),
+    (progress) => updateBatchProgress(progress, '保存/更新费用报销单'),
     {
       concurrency: ERP_BATCH_CONCURRENCY,
       waitUntilResumed: waitUntilBatchSaveResumed
@@ -765,7 +841,7 @@ async function resaveSelectedToErp() {
       message: error.message
     }));
     show({
-      error: `有 ${failures.length} 张费用报销单未能保存或重新保存`,
+      error: `有 ${failures.length} 张费用报销单未能保存或更新`,
       code: 'BATCH_RESAVE_PARTIAL_FAILURE',
       successCount: batch.successes.length,
       savedNewCount,
@@ -775,7 +851,7 @@ async function resaveSelectedToErp() {
       records: batch.successes,
       skipped,
       failures
-    }, `批量保存结束：首次保存 ${savedNewCount} 张，重新保存 ${resavedCount} 张，业务跳过 ${skipped.length} 张，未保存 ${failures.length} 张。未全部完成，不显示保存成功。\n失败明细：\n${formatBatchFailureDetails(failures)}`);
+    }, `批量保存结束：首次保存 ${savedNewCount} 张，更新 ${resavedCount} 张，业务跳过 ${skipped.length} 张，未保存 ${failures.length} 张。未全部完成，不显示保存成功。\n失败明细：\n${formatBatchFailureDetails(failures)}`);
     finishBatchProgress(records.length, batch.successes.length, failures.length, true, skipped.length);
     await refreshAll();
     return;
@@ -788,7 +864,7 @@ async function resaveSelectedToErp() {
       resavedCount,
       skippedCount: skippedFailures.length,
       records: batch.successes
-    }, `批量处理完成：首次保存 ${savedNewCount} 张，重新保存 ${resavedCount} 张，自动跳过 ${skippedFailures.length} 张。`);
+    }, `批量处理完成：首次保存 ${savedNewCount} 张，更新 ${resavedCount} 张，自动跳过 ${skippedFailures.length} 张。`);
     finishBatchProgress(records.length, batch.successes.length, 0, false, skippedFailures.length);
     await refreshAll();
     return;
@@ -800,7 +876,7 @@ async function resaveSelectedToErp() {
       resavedCount,
       records: batch.successes
     },
-    `全部处理成功：首次保存 ${savedNewCount} 张，重新保存 ${resavedCount} 张`
+    `全部处理成功：首次保存 ${savedNewCount} 张，更新 ${resavedCount} 张`
   );
   setFailedErpSaveRecords([]);
   finishBatchProgress(records.length, batch.successes.length, 0, false);
@@ -916,19 +992,16 @@ async function queryProcess() {
 }
 
 async function refreshAll(options = {}) {
-  const [settings, status, documents, requesters] = await Promise.all([
+  const [settings, status, documents] = await Promise.all([
     api.integrationSettings(),
     api.systemStatus(),
-    api.listSyncedDocuments(),
-    api.listFenbeitongRequesters(state.selectedTenantKey)
+    api.listSyncedDocuments()
   ]);
   state.currentIntegrationSettings = settings;
   state.currentStatus = status;
   state.syncedDocuments = documents;
-  state.requesterCatalog = requesters;
-  renderLedgerFilterOptions(documents, requesters);
+  renderLedgerFilterOptions(documents);
   renderStatus(status, settings);
-  renderSourceQueue(documents);
   await refreshRecords();
   if (options.includeLogs !== false) await refreshLogs();
   renderActionState();
@@ -942,17 +1015,20 @@ async function updateKingdeeAccountSelection() {
 }
 
 async function refreshRecords() {
-  const records = await api.listProcessRecords();
+  const acctIdKey = state.selectedKingdeeAcctIdKey;
+  const records = await api.listProcessRecords(acctIdKey);
+  if (acctIdKey !== state.selectedKingdeeAcctIdKey) return;
   const selectedAcctIdRecords = records.filter((record) =>
     record.kingdeeAcctIdKey === state.selectedKingdeeAcctIdKey);
   state.preparedSourceIds = new Set(selectedAcctIdRecords
     .filter((record) => record.processStage === 'EXPENSE_REIMBURSEMENT_PREPARED')
     .flatMap(processSourceIds));
-  state.pushedSourceIds = new Set(selectedAcctIdRecords
-    .filter(isRealPushedRecord)
-    .flatMap(processSourceIds));
-  state.pushedExpenseReimbursementKeys = new Set(selectedAcctIdRecords
-    .filter(isRealPushedRecord)
+  const savedRecords = selectedAcctIdRecords.filter((record) =>
+    isConfirmedErpSave(record) && record.erpSaveStatus === 'confirmed');
+  state.pushedSourceIds = new Set(savedRecords.flatMap(processSourceIds));
+  state.unverifiedErpSourceIds = new Set(selectedAcctIdRecords
+    .filter((record) => record.erpSaveStatus === 'unverified').flatMap(processSourceIds));
+  state.pushedExpenseReimbursementKeys = new Set(savedRecords
     .map((record) => String(record.sourceId || '').trim())
     .filter(Boolean));
   renderSourceQueue(state.syncedDocuments);
@@ -1362,9 +1438,6 @@ function renderSourceQueue(records) {
         ${renderLedgerCell('reason', escapeHtml(summary.reason))}
         ${renderLedgerCell('expenseDepartment', escapeHtml(summary.expenseDepartment))}
         ${renderLedgerCell('department', escapeHtml(summary.department))}
-        ${renderLedgerCell('erpPaymentBillType', escapeHtml(summary.erpPaymentBillType))}
-        ${renderLedgerCell('erpBankProcessingStatus', escapeHtml(summary.erpBankProcessingStatus))}
-        ${renderLedgerCell('erpPaymentDate', escapeHtml(summary.erpPaymentDate))}
         ${renderLedgerCell('startLocation', escapeHtml(summary.startLocation))}
         ${renderLedgerCell('arrivalLocation', escapeHtml(summary.arrivalLocation))}
         ${renderLedgerCell('trafficType', escapeHtml(summary.trafficType))}
@@ -1385,7 +1458,7 @@ function renderSourceQueue(records) {
         ${renderLedgerCell('sourceDocumentStatus', escapeHtml(summary.sourceDocumentStatus))}
         ${renderLedgerCell('interfaceSource', escapeHtml(legacyUnverified ? '历史数据待核验' : record.mockReplacement ? '接口未启用' : '正式接口'))}
         <td data-column-key="operationPanel" class="operation-panel-cell">
-          <button class="row-action row-generate-expense-reimbursement" type="button" data-source-id="${escapeHtml(record.sourceId)}" aria-label="为 ${escapeHtml(displaySourceCode(record))} ${legacyUnverified ? '禁止保存' : pushed ? '已保存费用报销单' : '生成待保存费用报销单'}" ${legacyUnverified || pushed ? 'disabled' : ''}>${legacyUnverified ? '禁止保存' : pushed ? '已保存' : actionText}</button>
+          <button class="row-action row-generate-expense-reimbursement" type="button" data-source-id="${escapeHtml(record.sourceId)}" aria-label="为 ${escapeHtml(displaySourceCode(record))} ${legacyUnverified ? '禁止保存' : pushed ? '核对金蝶后重新生成' : '生成待保存费用报销单'}" ${legacyUnverified ? 'disabled' : ''}>${legacyUnverified ? '禁止保存' : pushed ? '核对后生成' : actionText}</button>
         </td>
       </tr>
     `;
@@ -1428,22 +1501,24 @@ function currentLedgerPageRecords() {
 
 function filterLedgerRecords(records) {
   const keyword = sourceSearchInput.value.trim().toLowerCase();
+  const { name: requesterKeyword, exact: exactRequester } = state.requesterQuery;
+  const { startDate, endDate } = state.expenseDateRange;
+  const statusFilter = saveStatusFilterSelect.value;
   return expandLedgerRecords(records).filter((record) => {
     const summary = buildSourceSummary(record);
     const savedToErp = state.pushedSourceIds.has(record.sourceId);
-    if (saveStatusFilterSelect.value === 'saved' && !savedToErp) {
-      return false;
-    }
-    if (saveStatusFilterSelect.value === 'unsaved' && savedToErp) {
-      return false;
-    }
-    if (requesterFilterSelect.value && displayRequester(record, summary.requester) !== requesterFilterSelect.value) {
-      return false;
-    }
+    const unverified = !savedToErp && state.unverifiedErpSourceIds.has(record.sourceId);
+    if (statusFilter === 'saved' && !savedToErp) return false;
+    if (statusFilter === 'unsaved' && (savedToErp || unverified)) return false;
+    if (statusFilter === 'unverified' && !unverified) return false;
+    if (requesterKeyword && !matchesLedgerQuery(displayRequester(record, summary.requester).toLowerCase(),
+      requesterKeyword, exactRequester ? 'equals' : 'contains')) return false;
     if (sourceTypeFilterSelect.value && record.sourceType !== sourceTypeFilterSelect.value) {
       return false;
     }
-    if (dateFilterSelect.value && dateOnly(summary.paymentDate) !== dateFilterSelect.value) {
+    const expenseDate = dateOnly(summary.paymentDate);
+    if ((startDate || endDate) && (!expenseDate
+      || (startDate && expenseDate < startDate) || (endDate && expenseDate > endDate))) {
       return false;
     }
     return !keyword
@@ -1451,24 +1526,13 @@ function filterLedgerRecords(records) {
   });
 }
 
-function renderLedgerFilterOptions(records, requesterCatalog = []) {
+function renderLedgerFilterOptions(records) {
   records = expandLedgerRecords(records);
-  const selectedRequester = requesterFilterSelect.value;
   const selectedSourceType = sourceTypeFilterSelect.value;
-  const selectedDate = dateFilterSelect.value;
-  const catalogNames = requesterCatalog
-    .map((requester) => String(requester?.name || '').trim())
-    .filter(Boolean);
-  const requesters = [...new Set((catalogNames.length > 0 ? catalogNames : records.map((record) => {
-    const summary = buildSourceSummary(record);
-    return displayRequester(record, summary.requester);
-  })).filter((value) => value && value !== '-'))]
-    .sort((left, right) => left.localeCompare(right, 'zh-CN'));
   const sourceTypes = new Map([
     ['OFFLINE_REIMBURSEMENT', '线下报销 · 费用明细'],
     ['ONLINE_MONTHLY_BILL', '线上月结 · 月度账单']
   ]);
-  const dates = new Set();
   for (const record of records) {
     const summary = buildSourceSummary(record);
     if (!sourceTypes.has(record.sourceType)) {
@@ -1477,12 +1541,7 @@ function renderLedgerFilterOptions(records, requesterCatalog = []) {
         `${summary.sourceKindName}${summary.sourceForm ? ` · ${summary.sourceForm}` : ''}`
       );
     }
-    if (summary.paymentDate) dates.add(dateOnly(summary.paymentDate));
   }
-  requesterFilterSelect.innerHTML = [
-    '<option value="">全部报销人</option>',
-    ...requesters.map((requester) => `<option value="${escapeHtml(requester)}">${escapeHtml(requester)}</option>`)
-  ].join('');
   sourceTypeFilterSelect.innerHTML = [
     '<option value="">全部来源类型</option>',
     ...[...sourceTypes.entries()]
@@ -1490,15 +1549,7 @@ function renderLedgerFilterOptions(records, requesterCatalog = []) {
       .sort((left, right) => left[1].localeCompare(right[1], 'zh-CN'))
       .map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`)
   ].join('');
-  dateFilterSelect.innerHTML = [
-    '<option value="">全部日期</option>',
-    ...[...dates]
-      .sort((left, right) => right.localeCompare(left))
-      .map((date) => `<option value="${escapeHtml(date)}">${escapeHtml(date)}</option>`)
-  ].join('');
-  requesterFilterSelect.value = requesters.includes(selectedRequester) ? selectedRequester : '';
   sourceTypeFilterSelect.value = sourceTypes.has(selectedSourceType) ? selectedSourceType : '';
-  dateFilterSelect.value = dates.has(selectedDate) ? selectedDate : '';
 }
 
 function renderLedgerTotals(records) {
@@ -1619,9 +1670,6 @@ function ledgerColumnDefinitions() {
     { key: 'reason', label: '事由' },
     { key: 'expenseDepartment', label: '费用承担部门' },
     { key: 'department', label: '部门' },
-    { key: 'erpPaymentBillType', label: 'ERP付款单类型' },
-    { key: 'erpBankProcessingStatus', label: '银行处理状态' },
-    { key: 'erpPaymentDate', label: '付款时间' },
     { key: 'startLocation', label: '出发地' },
     { key: 'arrivalLocation', label: '目的地' },
     { key: 'trafficType', label: '交通类型' },
@@ -1990,9 +2038,6 @@ function buildSourceSummary(record) {
       sourceKindName: record.sourceKindName || (record.sourceType === 'ONLINE_MONTHLY_BILL' ? '线上月结' : '线下报销'),
       sourceForm: record.sourceForm || (record.sourceType === 'ONLINE_MONTHLY_BILL' ? '企业账单' : '费用明细'),
       documentType: record.documentType || '',
-      erpPaymentBillType: record.erpPaymentBillType || '',
-      erpBankProcessingStatus: record.erpBankProcessingStatus || '',
-      erpPaymentDate: record.erpPaymentDate || '',
       reason: record.reason || '',
       requester: record.requesterName || record.requesterCode || data.submitter?.name || data.proposer?.name || data.user?.name || '-',
       employeeOpenBank: record.employeeOpenBank || '',
@@ -2038,7 +2083,7 @@ function buildSourceSummary(record) {
           : record.paymentDate || dateOnly(data.payment_time || data.pay_time || data.payment_date || data.reimburse_time || '')
     };
   } catch {
-    return { sourceKindName: '', sourceForm: '', documentType: '', erpPaymentBillType: '', erpBankProcessingStatus: '', erpPaymentDate: '', reason: '', requester: '-', employeeOpenBank: '', employeeAccountName: '', employeeBankAccount: '', department: '-', expenseCategories: 'JSON解析失败', startLocation: '', arrivalLocation: '', trafficType: '', purpose: '', expenseDepartment: '', totalAmount: 0, splitTaxAmount: null, splitExcludingTaxAmount: null, taxMappingComplete: false, documentTaxMappingComplete: false, departmentAttributionAmount: 0, invoiceType: '', invoiceCode: '', invoiceNumber: '', invoiceIssueDate: '', sellerName: '', buyerName: '', invoiceTaxAmount: null, invoiceExcludingTaxAmount: null, invoiceTotalAmount: null, requestOrganization: '', requestPaymentAmount: null, sourceDocumentStatus: '', expenseOrganization: '', paymentAmount: null, businessLine: '', applicationDate: '', paymentDate: '' };
+    return { sourceKindName: '', sourceForm: '', documentType: '', reason: '', requester: '-', employeeOpenBank: '', employeeAccountName: '', employeeBankAccount: '', department: '-', expenseCategories: 'JSON解析失败', startLocation: '', arrivalLocation: '', trafficType: '', purpose: '', expenseDepartment: '', totalAmount: 0, splitTaxAmount: null, splitExcludingTaxAmount: null, taxMappingComplete: false, documentTaxMappingComplete: false, departmentAttributionAmount: 0, invoiceType: '', invoiceCode: '', invoiceNumber: '', invoiceIssueDate: '', sellerName: '', buyerName: '', invoiceTaxAmount: null, invoiceExcludingTaxAmount: null, invoiceTotalAmount: null, requestOrganization: '', requestPaymentAmount: null, sourceDocumentStatus: '', expenseOrganization: '', paymentAmount: null, businessLine: '', applicationDate: '', paymentDate: '' };
   }
 }
 
@@ -2324,25 +2369,14 @@ function queueStatus(record) {
   if (isLegacyUnverified(record)) return '来源待核验';
   const sourceId = record.sourceId;
   if (state.pushedSourceIds.has(sourceId)) return '已保存ERP';
+  if (state.unverifiedErpSourceIds.has(sourceId)) return '待核对ERP';
   if (state.preparedSourceIds.has(sourceId)) return '已生成';
   if (state.lastPreview?.sourceId === sourceId) return '已预览';
-  return stageName(record.processStage);
+  return '未保存';
 }
 
 function isLegacyUnverified(record) {
   return record?.sourceType === 'ONLINE_LEGACY_UNVERIFIED';
-}
-
-function isRealPushedRecord(record) {
-  return Boolean(
-    record
-    && record.processStage === 'ERP_EXPENSE_REIMBURSEMENT_SAVED'
-    && record.targetFormId === 'ER_ExpReimbursement'
-    && record.erpMode === 'real'
-    && record.simulatedErp === false
-    && record.erpFid
-    && record.erpNumber
-  );
 }
 
 function readConfig() {
@@ -2517,7 +2551,14 @@ function hasFieldMapping(value) {
 }
 
 function show(value, summary = '') {
-  const message = summary || summarizeValue(value);
+  const records = Array.isArray(value?.records) ? value.records : [value];
+  const receiptNotes = records.flatMap((record) => record?.erpReceiptWarnings?.length
+    ? [`${record.erpNumber || record.sourceCode}：${record.erpReceiptWarnings.join(' ')}`]
+    : []);
+  const message = [
+    summary || summarizeValue(value),
+    ...(receiptNotes.length ? [`有 ${receiptNotes.length} 张已保存的报销单存在收票提示：`, ...receiptNotes] : [])
+  ].join('\n');
   resultOutput.textContent = JSON.stringify(value, null, 2);
   resultSummary.textContent = message;
   showOperationFeedback(message, Boolean(value?.error));

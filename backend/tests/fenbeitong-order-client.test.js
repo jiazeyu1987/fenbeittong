@@ -19,7 +19,7 @@ import {
   saveFenbeitongTenantCredentials
 } from '../src/tenant-store.js';
 
-test('updates Fenbeitong paid status with the ERP payment business date', async () => {
+test('updates Fenbeitong paid status in batches sharing the same ERP payment time', async () => {
   const previousMode = process.env.FENBEITONG_MODE;
   const previousDataDir = process.env.APP_DATA_DIR;
   const previousFetch = globalThis.fetch;
@@ -27,29 +27,47 @@ test('updates Fenbeitong paid status with the ERP payment business date', async 
   process.env.APP_DATA_DIR = 'runtime-data-test-payment-status-client';
   resetTenantStoreForTest();
   saveTenant();
-  let updatePayload;
+  const sameTimeCodes = Array.from({ length: 21 }, (_, index) => `REIMB-${index + 1}`);
+  const updatePayloads = [];
   globalThis.fetch = async (url, options = {}) => {
     const path = new URL(String(url)).pathname;
     if (path === '/openapi/auth/getToken') return jsonResponse({ code: 0, data: 'payment-token' });
     if (path === '/openapi/reimbursement/v1/update_state') {
-      updatePayload = JSON.parse(String(options.body));
+      const payload = JSON.parse(String(options.body));
+      updatePayloads.push(payload);
+      if (payload.payment_date === '2026-07-10 10:00:00') {
+        return Response.json({ code: -9999, msg: 'unavailable' }, { status: 503 });
+      }
+      if (payload.payment_date === '2026-07-10 09:30:00') {
+        return jsonResponse({
+          code: -9999,
+          msg: '批次失败',
+          data: [{ id: 'internal-reimbursement-id', error_msg: '该报销单付款状态错误' }]
+        });
+      }
       return jsonResponse({ code: 0, msg: 'success', data: [] });
     }
     throw new Error(`unexpected Fenbeitong URL: ${url}`);
   };
   try {
     const result = await markFenbeitongReimbursementsPaid([
-      { code: 'B1IELSHBX26070100002', paymentTime: '2026-07-10' },
-      { code: 'B1IELSHBX26070100002', paymentTime: '2026-07-10' }
+      { code: sameTimeCodes[0], paymentTime: '2026-07-10T00:00:00+08:00' },
+      { code: 'REJECTED', paymentTime: '2026-07-10 09:30:00' },
+      ...sameTimeCodes.map((code) => ({ code, paymentTime: '2026/7/10 00:00:00' })),
+      { code: 'NO-RESPONSE', paymentTime: '2026-07-10 10:00:00' },
+      { code: 'NEXT-DAY', paymentTime: '2026-07-11 00:00:00' }
     ]);
-    assert.deepEqual(updatePayload, {
-      reimbursements: [{
-        code: 'B1IELSHBX26070100002',
-        payment_time: '2026-07-10 00:00:00'
-      }]
-    });
-    assert.deepEqual(result.succeeded, ['B1IELSHBX26070100002']);
-    assert.deepEqual(result.failed, []);
+    assert.deepEqual(updatePayloads, [
+      { reimbursements: sameTimeCodes.slice(0, 20).map((code) => ({ code })), pay_status: '1', payment_date: '2026-07-10 00:00:00' },
+      { reimbursements: [{ code: sameTimeCodes[20] }], pay_status: '1', payment_date: '2026-07-10 00:00:00' },
+      { reimbursements: [{ code: 'REJECTED' }], pay_status: '1', payment_date: '2026-07-10 09:30:00' },
+      { reimbursements: [{ code: 'NO-RESPONSE' }], pay_status: '1', payment_date: '2026-07-10 10:00:00' },
+      { reimbursements: [{ code: 'NEXT-DAY' }], pay_status: '1', payment_date: '2026-07-11 00:00:00' }
+    ]);
+    assert.equal(result.requested, 24);
+    assert.deepEqual(result.succeeded, [...sameTimeCodes, 'NEXT-DAY']);
+    assert.deepEqual(result.failed, [{ code: 'REJECTED', message: '该报销单付款状态错误' }]);
+    assert.deepEqual(result.unconfirmed, [{ code: 'NO-RESPONSE', message: 'Fenbeitong request failed: HTTP 503' }]);
   } finally {
     globalThis.fetch = previousFetch;
     resetTenantStoreForTest();

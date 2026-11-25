@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 
 test('frontend page exposes expected workflow controls', () => {
   const html = readFileSync('frontend/src/index.html', 'utf8');
+  assert.doesNotMatch(html, /id="syncPaymentStatusButton"/);
   for (const id of [
     'financeWorkbenchHeader',
     'ledgerToolbar',
@@ -16,10 +17,13 @@ test('frontend page exposes expected workflow controls', () => {
     'searchFieldSelect',
     'matchModeSelect',
     'sourceSearchInput',
-    'requesterFilterSelect',
+    'requesterFilterInput',
+    'requesterSuggestions',
     'saveStatusFilterSelect',
     'sourceTypeFilterSelect',
-    'dateFilterSelect',
+    'dateFilterStart',
+    'dateFilterEnd',
+    'applyDateFilterButton',
     'queryLedgerButton',
     'selectAllRowsCheckbox',
     'syncFenbeitongButton',
@@ -248,9 +252,6 @@ test('ledger fields follow the approved interface-field order everywhere', () =>
     'reason',
     'expenseDepartment',
     'department',
-    'erpPaymentBillType',
-    'erpBankProcessingStatus',
-    'erpPaymentDate',
     'startLocation',
     'arrivalLocation',
     'trafficType',
@@ -346,23 +347,25 @@ test('ledger supports requester/source filters and filtered amount totals', () =
   const html = readFileSync('frontend/src/index.html', 'utf8');
   const app = readFileSync('frontend/src/app.js', 'utf8');
   const css = readFileSync('frontend/src/styles.css', 'utf8');
-  assert.match(html, /id="requesterFilterSelect"[\s\S]*全部报销人/);
+  assert.match(html, /id="requesterFilterInput"[^>]*type="search"/);
+  assert.doesNotMatch(html, /requesterFilterOptions|id="requesterFilterInput"[^>]*\blist=/);
+  assert.match(html, /id="requesterSuggestions"[^>]*role="listbox"[^>]*hidden/);
   assert.match(html, /id="saveStatusFilterSelect"[\s\S]*已保存ERP[\s\S]*未保存/);
   assert.match(html, /<th data-column-key="status">[\s\S]*id="saveStatusFilterSelect"[\s\S]*<\/th>/);
   assert.match(html, /id="sourceTypeFilterSelect"[\s\S]*全部来源类型/);
   assert.match(html, /value="OFFLINE_REIMBURSEMENT">线下报销 · 费用明细/);
   assert.match(html, /value="ONLINE_MONTHLY_BILL">线上月结 · 月度账单/);
-  assert.match(html, /id="dateFilterSelect"[\s\S]*全部日期/);
+  assert.match(html, /id="dateFilterStart" type="date"[\s\S]*id="dateFilterEnd" type="date"/);
+  assert.match(html, /id="applyDateFilterButton"[^>]*>确认日期<\/button>/);
   assert.match(html, /id="sourceQueueTotals"/);
-  assert.match(app, /function renderLedgerFilterOptions\(records,\s*requesterCatalog/);
+  assert.match(app, /function renderLedgerFilterOptions\(records\)/);
   assert.match(app, /function renderLedgerTotals\(records\)/);
   assert.match(app, /record\.kingdeeAcctIdKey === state\.selectedKingdeeAcctIdKey/);
-  assert.match(app, /requesterFilterSelect\.value/);
+  assert.match(app, /requesterFilterInput\.value/);
   assert.match(app, /sourceTypeFilterSelect\.value/);
   assert.match(app, /\['ONLINE_MONTHLY_BILL', '线上月结 · 月度账单'\]/);
-  assert.match(app, /dateFilterSelect\.value/);
-  assert.match(app, /dateOnly\(summary\.paymentDate\) !== dateFilterSelect\.value/);
-  assert.match(app, /filterSelect\.addEventListener\('change',[\s\S]*clearLedgerSelection/);
+  assert.match(app, /expenseDate < startDate[\s\S]*expenseDate > endDate/);
+  assert.match(app, /control\.addEventListener\('change', refreshLedgerFilters\)/);
   assert.match(app, /function clearLedgerSelection\(reason\)/);
   assert.match(app, /filteredSourceIds\.has\(record\.sourceId\)/);
   for (const key of [
@@ -426,7 +429,7 @@ test('Fenbeitong columns use canonical synchronized business fields', () => {
   assert.doesNotMatch(html, /更新时间/);
   assert.match(app, /record\.paymentDate/);
   assert.match(app, /record\.expenseDateTime \|\| record\.paymentDate/);
-  assert.match(app, /dateOnly\(summary\.paymentDate\) !== dateFilterSelect\.value/);
+  assert.match(app, /const expenseDate = dateOnly\(summary\.paymentDate\)/);
   assert.match(app, /record\.totalAmount/);
   assert.match(app, /record\.splitTaxAmount/);
   assert.match(app, /record\.splitExcludingTaxAmount/);

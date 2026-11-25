@@ -33,7 +33,7 @@ export function getPaymentStatusSchedulerStatus() {
   return structuredClone(state);
 }
 
-export async function runPaymentStatusSyncOnce(trigger = 'manual') {
+export async function runPaymentStatusSyncOnce(trigger = 'manual', options = {}) {
   if (running) throw new Error('payment status sync is already in progress');
   running = true;
   state.running = true;
@@ -41,8 +41,7 @@ export async function runPaymentStatusSyncOnce(trigger = 'manual') {
   state.lastError = '';
   recordOperation('PAYMENT_STATUS_SYNC_START', 'SUCCESS', { trigger });
   try {
-    const config = getAppConfig().paymentStatusSync;
-    const result = await syncPaymentStatuses({ orgNumber: config.orgNumber });
+    const result = await syncPaymentStatuses(options);
     state.lastSuccessAt = new Date().toISOString();
     state.lastResult = {
       totalCount: result.totalCount,

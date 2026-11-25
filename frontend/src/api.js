@@ -138,12 +138,6 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(data)
   }),
-  paymentStatusSyncStatus: () => request('/api/payment-status-sync/status'),
-  previewPaymentStatusSync: (tenantKey) => request(`/api/payment-status-sync/preview?tenantKey=${encodeURIComponent(tenantKey || '')}`),
-  runPaymentStatusSync: () => request('/api/payment-status-sync/run', {
-    method: 'POST',
-    body: JSON.stringify({})
-  }),
   listSyncedDocuments: () => request('/api/fenbeitong-expense-reimbursement/synced-documents'),
   listFenbeitongRequesters: (tenantKey) => request(`/api/fenbeitong-expense-reimbursement/requesters?tenantKey=${encodeURIComponent(tenantKey)}`),
   preview: (data) => request('/api/fenbeitong-expense-reimbursement/preview', {
@@ -158,7 +152,8 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(data)
   }),
-  listProcessRecords: () => request('/api/fenbeitong-expense-reimbursement/process'),
+  listProcessRecords: (acctIdKey) => request(`/api/fenbeitong-expense-reimbursement/process${
+    acctIdKey ? `?verifyErpAcctId=${encodeURIComponent(acctIdKey)}` : ''}`),
   getProcess: (sourceId) => request(`/api/fenbeitong-expense-reimbursement/process/${encodeURIComponent(sourceId)}`),
   createCsvExport: (data) => request('/api/exports', {
       method: 'POST',

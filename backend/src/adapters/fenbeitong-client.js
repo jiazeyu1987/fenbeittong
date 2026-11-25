@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { getAppConfig, getRootDir, validateFenbeitongConfig } from '../config.js';
 import { dependencyError } from '../errors.js';
+import { normalizePaymentTimestamp } from '../payment-timestamp.js';
 import {
   getFenbeitongTenant,
   updateFenbeitongTenantToken
@@ -158,7 +159,7 @@ export async function getFenbeitongReimbursementPaymentDetail(code, options = {}
 export async function markFenbeitongReimbursementsPaid(items, options = {}) {
   const reimbursements = normalizePaymentUpdates(Array.isArray(items) ? items : [items]);
   if (reimbursements.length === 0) {
-    return { requested: 0, succeeded: [], failed: [] };
+    return { requested: 0, succeeded: [], failed: [], unconfirmed: [] };
   }
   const config = getAppConfig().fenbeitong;
   if (config.mode !== 'real') {
@@ -170,76 +171,78 @@ export async function markFenbeitongReimbursementsPaid(items, options = {}) {
   const tenant = resolveTenant(config.defaultTenantKey, options.tenantKey);
   validateFenbeitongConfig(tenant);
   const accessToken = await resolveAccessToken(tenant);
+  const codesByPaymentTime = new Map();
+  for (const { code, paymentTime } of reimbursements) {
+    if (!codesByPaymentTime.has(paymentTime)) codesByPaymentTime.set(paymentTime, []);
+    codesByPaymentTime.get(paymentTime).push(code);
+  }
   const succeeded = [];
   const failed = [];
-  for (const batch of chunk(reimbursements, 20)) {
-    const body = await postFenbeitongApiRaw(
-      tenant,
-      REIMBURSEMENT_PAYMENT_UPDATE_PATH,
-      accessToken,
-      {
-        reimbursements: batch.map((item) => ({
-          code: item.code,
-          payment_time: item.paymentTime
-        }))
-      }
-    );
-    if (String(body.code) === '0') {
-      succeeded.push(...batch.map((item) => item.code));
+  const unconfirmed = [];
+  const batches = [...codesByPaymentTime].flatMap(([paymentTime, codes]) =>
+    chunk(codes, 20).map((batch) => ({ paymentTime, codes: batch }))
+  );
+  for (const { paymentTime, codes } of batches) {
+    let body;
+    try {
+      body = await postFenbeitongApiRaw(tenant, REIMBURSEMENT_PAYMENT_UPDATE_PATH, accessToken, {
+        reimbursements: codes.map((code) => ({ code })),
+        pay_status: '1',
+        payment_date: paymentTime
+      }, 1);
+    } catch (error) {
+      if (!['FENBEITONG_HTTP_FAILED', 'FENBEITONG_NETWORK_FAILED'].includes(error.code)) throw error;
+      unconfirmed.push(...codes.map((code) => ({ code, message: error.message })));
       continue;
     }
-    if (String(body.code) !== '1' || !Array.isArray(body.data)) {
-      throw dependencyError(
-        'FENBEITONG_PAYMENT_UPDATE_FAILED',
-        `Fenbeitong payment status update failed: code=${body.code}, msg=${body.msg || ''}`,
-        { code: body.code, msg: body.msg || '' }
-      );
+    const responseCode = String(body?.code ?? '');
+    if (responseCode === '0') {
+      succeeded.push(...codes);
+      continue;
     }
-    const errorsByCode = new Map(body.data.map((item) => [
+    const allFailed = responseCode === '-9999';
+    if (!allFailed && (responseCode !== '1' || !Array.isArray(body.data))) {
+      const message = `分贝通未确认批次写入结果（响应码 ${responseCode || '空'}）：${body?.msg || '无响应说明'}`;
+      unconfirmed.push(...codes.map((code) => ({ code, message })));
+      continue;
+    }
+    const errors = Array.isArray(body.data) ? body.data : body.data?.reimbursements;
+    const fallbackMessage = String(body.msg || '付款状态更新失败').trim();
+    const errorsByCode = new Map((Array.isArray(errors) ? errors : []).map((item) => [
       String(item?.no || item?.code || item?.id || '').trim(),
-      String(item?.error_msg || item?.msg || body.msg || '付款状态更新失败').trim()
+      String(item?.error_msg || item?.msg || fallbackMessage).trim()
     ]));
-    for (const { code } of batch) {
-      const message = errorsByCode.get(code);
-      if (message) failed.push({ code, message });
+    for (const code of codes) {
+      const message = errorsByCode.get(code) || (codes.length === 1 ? errorsByCode.values().next().value : '');
+      if (message || allFailed) failed.push({ code, message: message || fallbackMessage });
       else succeeded.push(code);
     }
   }
-  return { requested: reimbursements.length, succeeded, failed };
+  return { requested: reimbursements.length, succeeded, failed, unconfirmed };
 }
 
 function normalizePaymentUpdates(items) {
   const byCode = new Map();
   for (const item of items) {
     const code = String(item?.code || '').trim();
-    const paymentTime = fenbeitongPaymentTime(item?.paymentTime);
+    const paymentTime = normalizePaymentTimestamp(item?.paymentTime);
     if (!code) continue;
     if (!paymentTime) {
       throw dependencyError(
         'FENBEITONG_PAYMENT_TIME_REQUIRED',
-        `Fenbeitong payment status update requires the ERP payment business date: ${code}`
+        `Fenbeitong payment status update requires the ERP payment transaction timestamp: ${code}`
       );
     }
     const existing = byCode.get(code);
     if (existing && existing.paymentTime !== paymentTime) {
       throw dependencyError(
         'FENBEITONG_PAYMENT_TIME_CONFLICT',
-        `Fenbeitong payment status update received conflicting ERP payment dates: ${code}`
+        `Fenbeitong payment status update received conflicting ERP payment timestamps: ${code}`
       );
     }
     byCode.set(code, { code, paymentTime });
   }
   return [...byCode.values()];
-}
-
-function fenbeitongPaymentTime(value) {
-  const match = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/.exec(
-    String(value || '').trim()
-  );
-  if (!match) return '';
-  const date = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
-  if (!match[4]) return `${date} 00:00:00`;
-  return `${date} ${match[4].padStart(2, '0')}:${match[5].padStart(2, '0')}:${String(match[6] || '00').padStart(2, '0')}`;
 }
 
 async function pullSettlementBillDocuments(tenant, accessToken) {
@@ -1220,16 +1223,16 @@ async function resolveAccessToken(tenant) {
 
 async function postFenbeitongApi(tenant, path, accessToken, payload) {
   const body = await postFenbeitongApiRaw(tenant, path, accessToken, payload);
-  if (String(body.code) !== '0') {
-    throw dependencyError('FENBEITONG_RESPONSE_FAILED', `Fenbeitong response failed: code=${body.code}, msg=${body.msg || ''}`, {
-      code: body.code,
-      msg: body.msg || ''
+  if (String(body?.code) !== '0') {
+    throw dependencyError('FENBEITONG_RESPONSE_FAILED', `Fenbeitong response failed: code=${body?.code}, msg=${body?.msg || ''}`, {
+      code: body?.code,
+      msg: body?.msg || ''
     });
   }
   return body;
 }
 
-async function postFenbeitongApiRaw(tenant, path, accessToken, payload) {
+async function postFenbeitongApiRaw(tenant, path, accessToken, payload, maxAttempts = 3) {
   const url = new URL(path, tenant.baseUrl);
   const { response, body } = await fetchFenbeitongJson(url, {
     method: 'POST',
@@ -1238,7 +1241,7 @@ async function postFenbeitongApiRaw(tenant, path, accessToken, payload) {
       'access-token': accessToken
     },
     body: JSON.stringify(payload)
-  });
+  }, maxAttempts);
   if (!response.ok) {
     throw dependencyError('FENBEITONG_HTTP_FAILED', `Fenbeitong request failed: HTTP ${response.status}`, {
       status: response.status
@@ -1271,7 +1274,7 @@ async function fetchFenbeitongJson(url, options, maxAttempts = 3) {
   }
   throw dependencyError(
     'FENBEITONG_NETWORK_FAILED',
-    `无法连接分贝通服务，已自动重试 ${maxAttempts} 次。`,
+    maxAttempts === 1 ? '未收到分贝通写入响应。' : `无法连接分贝通服务，尝试 ${maxAttempts} 次均失败。`,
     { cause: String(lastError?.message || lastError || '') }
   );
 }
@@ -1285,6 +1288,7 @@ function retryDelay(attempt) {
 }
 
 function normalizeReimbursementPaymentState(summary = {}) {
+  const paymentState = firstOrderText(summary.payment_state);
   return {
     id: firstOrderText(summary.reimb_id, summary.id),
     code: firstOrderText(
@@ -1295,7 +1299,7 @@ function normalizeReimbursementPaymentState(summary = {}) {
     ),
     applyState: Number(summary.apply_state),
     applyStateName: firstOrderText(summary.apply_state_name),
-    paymentState: Number(summary.payment_state),
+    paymentState: paymentState ? Number(paymentState) : NaN,
     paymentStateName: firstOrderText(summary.payment_state_name),
     paymentAmount: Number(summary.payment_amount || 0),
     totalAmount: Number(summary.total_amount || 0),

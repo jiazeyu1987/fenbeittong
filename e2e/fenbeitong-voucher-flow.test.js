@@ -167,7 +167,7 @@ function forceMockExternalEnv() {
   process.env.APP_DATA_DIR = 'runtime-data/e2e-flow';
   process.env.FENBEITONG_MODE = 'mock';
   process.env.KINGDEE_MODE = 'real';
-  process.env.KINGDEE_BASE_URL = 'http://172.30.30.8';
+  process.env.KINGDEE_BASE_URL = 'http://kingdee.test';
   process.env.KINGDEE_ACCT_ID = '6977227150362f';
   process.env.KINGDEE_ACCT_ID_KEY = 'puhui-6977227150362f';
   process.env.KINGDEE_ACCT_ID_LABEL = 'Puhui verified acctID';
@@ -282,12 +282,21 @@ function stubKingdeeFetch() {
             F_ora_Text_qtr: savedModel.F_ora_Text_qtr,
             FRequestType: savedModel.FRequestType,
             FRealPay: savedModel.FRealPay,
-            FEntity: savedModel.FEntity,
+            BankBranchT: savedModel.FBankBranchT,
+            BankAccountNameT: savedModel.FBankAccountNameT,
+            BankAccountT: savedModel.FBankAccountT,
+            ER_ExpenseReimbEntry: savedModel.FEntity.map((entry) => ({
+              ...entry,
+              BankBranch: entry.FBankBranch,
+              BankAccountName: entry.FBankAccountName,
+              BankAccount: entry.FBankAccount
+            })),
             FDocumentStatus: 'Z'
           }
         }
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
+    if (new URL(text).hostname === 'kingdee.test') throw new Error(`Unexpected Kingdee endpoint: ${text}`);
     return previousFetch(url, options);
   };
   return () => {

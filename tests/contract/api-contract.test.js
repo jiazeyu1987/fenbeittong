@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { buildMockTemplate } from '../../backend/src/mock-template.js';
 import { buildExpenseReimbursementPreview } from '../../backend/src/expense-reimbursement-mapper.js';
+import { handleApi } from '../../backend/src/routes.js';
 import { getSystemStatus } from '../../backend/src/services/system-status.js';
 import { resetRepository } from '../../backend/src/repository.js';
 import { validateFenbeitongConfig } from '../../backend/src/config.js';
@@ -86,6 +88,7 @@ test('system status exposes mode and readiness for formal workflow', () => {
     assert.deepEqual(status.readiness.kingdee.missing, ['KINGDEE_MODE=real']);
     assert.equal(status.scheduler.enabled, false);
     assert.equal(status.scheduler.autoPushErp, false);
+    assert.equal(status.config.paymentStatusSync.enabled, false);
     assert.ok(Object.hasOwn(status.summary.counts, 'syncedDocuments'));
     assert.ok(Object.hasOwn(status.summary.counts, 'operationLogs'));
     assert.equal(status.config.fenbeitong.credentialStore, 'sqlite');
@@ -105,6 +108,18 @@ test('system status exposes mode and readiness for formal workflow', () => {
     assert.equal(status.config.kingdee.acctIds.some((acctId) => Object.hasOwn(acctId, 'acctId')), false);
   } finally {
     restore();
+  }
+});
+
+test('paused payment status sync has no HTTP entry points', async (t) => {
+  const server = createServer(handleApi);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const baseUrl = `http://127.0.0.1:${server.address().port}/api/payment-status-sync`;
+  for (const [path, method] of [['status', 'GET'], ['preview', 'GET'], ['run', 'POST']]) {
+    const response = await fetch(`${baseUrl}/${path}`, { method, signal: AbortSignal.timeout(5000) });
+    assert.equal(response.status, 404, `${method} ${path}`);
+    assert.equal((await response.json()).success, false);
   }
 });
 

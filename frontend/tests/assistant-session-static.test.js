@@ -34,7 +34,7 @@ test('all business and configuration controls use the single tab permission', ()
   assert.ok(button);
   assert.doesNotMatch(button, /\bhidden\b|data-required-permission/);
   assert.doesNotMatch(html, /erp:fenbeitong-voucher:(?:save|config)/);
-  for (const id of ['fieldMappingButton', 'generateVoucherButton', 'saveErpButton', 'resaveErpButton', 'syncPaymentStatusButton']) {
+  for (const id of ['fieldMappingButton', 'generateVoucherButton', 'saveErpButton', 'resaveErpButton']) {
     const protectedButton = html.match(new RegExp(`<button\\b[^>]*\\bid="${id}"[^>]*>`))?.[0];
     assert.ok(protectedButton);
     assert.match(protectedButton, /data-required-permission="erp:fenbeitong-voucher:query"/);

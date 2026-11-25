@@ -24,7 +24,7 @@ import {
   isRealPushedRecord,
   hasFenbeitongPaymentTime,
   markPushedToErp,
-  preservePaymentBankVerificationFailure,
+  preserveKingdeeSaveVerificationFailure,
   markPaymentStatusSyncBatch,
   recordOperation,
   renameStateFileWithRetryForTest,
@@ -669,7 +669,7 @@ test('bank verification failure retains the saved ID without marking success and
   savePreparedRecord(preview);
   const result = { simulated: false, mockReplacement: false, mode: 'real', erpFid: '77', erpNumber: 'BANK-TEST', documentStatus: 'A' };
   const error = { code: 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH', message: '银行字段校验失败', detail: { savedResult: result } };
-  preservePaymentBankVerificationFailure(preview.sourceId, error);
+  preserveKingdeeSaveVerificationFailure(preview.sourceId, error);
   clearStateCacheForTest();
   const pending = findPreparedRecord(preview.sourceId);
   assert.equal(pending.erpFid, '77');

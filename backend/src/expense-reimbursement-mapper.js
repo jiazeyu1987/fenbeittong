@@ -240,7 +240,24 @@ export function buildExpenseReimbursementPreview(input) {
       FEntity: entries
     }
   };
-  const contentHash = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  const receiptInvoices = document.expenses.flatMap((expense) => expense.invoices || [])
+    .filter((invoice) => invoice.number || invoice.code || invoice.typeName
+      || invoice.issuedDate || invoice.sellerName || invoice.buyerName)
+    .map((invoice) => ({
+      code: invoice.code,
+      number: invoice.number,
+      typeCode: invoice.typeCode,
+      typeName: invoice.typeName,
+      issuedDate: invoice.issuedDate,
+      sellerName: invoice.sellerName,
+      buyerName: invoice.buyerName,
+      taxAmount: invoice.exactTaxAmount,
+      excludingTaxAmount: invoice.exactExcludingTaxAmount,
+      totalAmount: invoice.exactTotalAmount
+    }));
+  const contentHash = createHash('sha256')
+    .update(JSON.stringify(receiptInvoices.length > 0 ? { payload, receiptInvoices } : payload))
+    .digest('hex');
   const expenseEntries = entries.map((entry, index) => ({
     sourceExpenseId: mappedExpenses[index].sourceExpenseId || mappedExpenses[index].id,
     sourceInvoiceId: mappedExpenses[index].sourceInvoiceId || '',
@@ -326,6 +343,7 @@ export function buildExpenseReimbursementPreview(input) {
       taxAmount
     },
     expenseEntries,
+    receiptInvoices,
     documentSummary: {
       formId: 'ER_ExpReimbursement',
       formName: '费用报销单',

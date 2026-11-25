@@ -1,17 +1,22 @@
 import { getEffectiveKingdeeConfig, validateKingdeeConfig } from '../config.js';
 import { AppError, dependencyError } from '../errors.js';
+import { normalizePaymentTimestamp } from '../payment-timestamp.js';
 import { getKingdeeAccountSelection, getKingdeeAcctIdSelection } from '../repository.js';
 
 const EXPENSE_REIMBURSEMENT_FORM_ID = 'ER_ExpReimbursement';
 const EMPLOYEE_FORM_ID = 'BD_Empinfo';
 const DEPARTMENT_FORM_ID = 'BD_Department';
 const PAYMENT_BILL_FORM_ID = 'AP_PAYBILL';
+const RECEIPT_FORM_ID = 'IV_ReceivedInvoice';
 const BILL_QUERY_PATH = 'Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.ExecuteBillQuery.common.kdsvc';
+const BUSINESS_INFO_PATH = 'Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.QueryBusinessInfo.common.kdsvc';
 const BILL_DELETE_PATH = 'Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.Delete.common.kdsvc';
 const employeeNumberCache = new Map();
 const employeeBankCache = new Map();
 const departmentNumberCache = new Map();
 const otherContactUnitCache = new Map();
+const receiptCreations = new Map();
+const receiptTypeCache = new Map();
 const EMPLOYEE_CACHE_TTL_MS = 10 * 60 * 1000;
 
 export function clearKingdeeEmployeeNumberCacheForTest() {
@@ -94,7 +99,7 @@ export async function findKingdeeOtherContactUnitByName(name, options = {}) {
   return value;
 }
 
-export async function queryKingdeeSuccessfulExpensePaymentBills(options = {}) {
+export async function queryKingdeeExpensePaymentBills(options = {}) {
   const accountKey = options.accountKey || getKingdeeAccountSelection();
   const acctIdKey = options.acctIdKey || getKingdeeAcctIdSelection();
   const config = getEffectiveKingdeeConfig(accountKey, acctIdKey);
@@ -107,7 +112,10 @@ export async function queryKingdeeSuccessfulExpensePaymentBills(options = {}) {
     );
   }
   validateKingdeeConfig(accountKey, acctIdKey);
-  const orgNumber = String(options.orgNumber || '892').trim();
+  const orgNumber = String(options.orgNumber || '').trim();
+  if (!orgNumber) {
+    throw dependencyError('KINGDEE_PAYMENT_ORG_REQUIRED', '查询金蝶付款单需要明确的付款组织。');
+  }
   const limit = Math.min(10000, Math.max(1, Number(options.limit) || 2000));
   const authSession = await switchKingdeeOrganization(
     config,
@@ -131,13 +139,17 @@ export async function queryKingdeeSuccessfulExpensePaymentBills(options = {}) {
     'FBANKMSG',
     'FCOMMENT',
     'FPAYAMOUNTFOR_E',
-    'FQQLSH'
+    'FQQLSH',
+    'FLastFinishTime',
+    'FFinishTime',
+    'FSRCBILLNO',
+    'FPAYBILLENTRY_FEntryID'
   ];
   const response = await postKingdeeJsonWrapper(config, BILL_QUERY_PATH, {
     data: JSON.stringify({
       FormId: PAYMENT_BILL_FORM_ID,
       FieldKeys: fieldKeys.join(','),
-      FilterString: [],
+      FilterString: `FPAYORGID.FNumber = ${kingdeeFilterText(orgNumber)}`,
       OrderString: 'FDATE DESC,FBillNo DESC',
       TopRowCount: 0,
       StartRow: Math.max(0, Number(options.startRow) || 0),
@@ -167,7 +179,15 @@ export async function queryKingdeeSuccessfulExpensePaymentBills(options = {}) {
   const rows = (Array.isArray(body) ? body : [])
     .filter(Array.isArray)
     .map((row) => paymentBillRow(fieldKeys, row));
-  return aggregateSuccessfulPaymentBills(rows);
+  if (options.requireComplete && rows.length >= limit) {
+    throw dependencyError('KINGDEE_PAYMENT_QUERY_TRUNCATED', '金蝶付款单查询达到明细行上限，无法完整核对付款关系。');
+  }
+  return aggregatePaymentBills(rows);
+}
+
+export async function queryKingdeeSuccessfulExpensePaymentBills(options = {}) {
+  const bills = await queryKingdeeExpensePaymentBills(options);
+  return bills.filter((bill) => bill.bankStatusCode === 'C');
 }
 
 export async function findKingdeeEmployeeNumberByName(name, options = {}) {
@@ -397,6 +417,21 @@ export async function viewKingdeeExpenseReimbursement(erpFid, options = {}) {
   return viewSavedExpenseReimbursement(config, authSession, erpFid);
 }
 
+export async function kingdeeExpenseReimbursementExists(erpFid, billNumber, options) {
+  const { accountKey, acctIdKey, orgNumber } = options;
+  const config = getEffectiveKingdeeConfig(accountKey, acctIdKey);
+  validateKingdeeConfig(accountKey, acctIdKey);
+  const authSession = await switchKingdeeOrganization(config, await loginKingdee(config), orgNumber);
+  try {
+    await viewSavedExpenseReimbursement(config, authSession, erpFid);
+    return true;
+  } catch (error) {
+    if (error.code !== 'KINGDEE_VIEW_FAILED'
+      || !isMissingExpenseReimbursement({ Errors: [{ Message: error.message }] })) throw error;
+  }
+  return Boolean(await findExpenseReimbursementFidByNumber(config, authSession, billNumber));
+}
+
 export async function queryKingdeeExpenseReimbursementHeaders(options = {}) {
   const accountKey = options.accountKey || getKingdeeAccountSelection();
   const acctIdKey = options.acctIdKey || getKingdeeAcctIdSelection();
@@ -417,11 +452,13 @@ export async function queryKingdeeExpenseReimbursementHeaders(options = {}) {
     'FCreateDate',
     'F_ora_Text_qtr'
   ];
+  const fids = options.fids?.map(Number).filter(positiveId);
+  if (fids && fids.length === 0) return [];
   const response = await postKingdeeJsonWrapper(config, BILL_QUERY_PATH, {
     data: JSON.stringify({
       FormId: EXPENSE_REIMBURSEMENT_FORM_ID,
       FieldKeys: fieldKeys.join(','),
-      FilterString: [],
+      FilterString: fids ? `FID in (${fids.join(',')})` : [],
       OrderString: 'FCreateDate DESC,FBillNo DESC',
       TopRowCount: 0,
       StartRow: Math.max(0, Number(options.startRow) || 0),
@@ -447,6 +484,10 @@ export async function queryKingdeeExpenseReimbursementHeaders(options = {}) {
       `Kingdee expense reimbursement query failed: ${message || 'unknown error'}`,
       { orgNumber }
     );
+  }
+  if (fids && (!Array.isArray(body) || body.some((row) => !Array.isArray(row)
+    || !fids.includes(Number(row[0])) || !String(row[1] || '').trim()))) {
+    throw dependencyError('KINGDEE_BILL_QUERY_RESPONSE_INVALID', '金蝶单据核对结果异常，暂无法确认保存状态。');
   }
   return (Array.isArray(body) ? body : [])
     .filter(Array.isArray)
@@ -651,6 +692,10 @@ export async function saveKingdeeExpenseReimbursement(payload, options = {}) {
   );
   let activePayload = payload;
   let existingBillBeforeOverwrite = null;
+  let existingView;
+  const { receipts, receiptWarnings } = await planKingdeeReceipts(
+    config, authSession, accountOrgNumber, options.receiptInvoices || []
+  );
   const requestedFid = Number(activePayload?.Model?.FID);
   const requestedBillNumber = String(activePayload?.Model?.FBillNo || '').trim();
   if (!positiveId(requestedFid) && requestedBillNumber) {
@@ -660,8 +705,9 @@ export async function saveKingdeeExpenseReimbursement(payload, options = {}) {
       requestedBillNumber
     );
     if (positiveId(existingFid)) {
-      const existingView = await viewSavedExpenseReimbursement(config, authSession, existingFid);
-      if (matchesExistingExpenseReimbursement(activePayload, existingView)) {
+      existingView = await viewSavedExpenseReimbursement(config, authSession, existingFid);
+      if (matchesExistingExpenseReimbursement(activePayload, existingView)
+        && receipts.every((receipt) => receipt.id && linkedReceiptIds(existingView).has(receipt.id))) {
         const existingModel = existingView.Result.Result;
         return {
           simulated: false,
@@ -669,6 +715,7 @@ export async function saveKingdeeExpenseReimbursement(payload, options = {}) {
           mockReplacement: false,
           mockReason: '',
           recoveredExistingBill: true,
+          receiptWarnings,
           erpFid: String(existingModel.Id || existingModel.FID || existingFid),
           erpNumber: String(existingModel.BillNo || existingModel.FBillNo || requestedBillNumber),
           documentStatus: existingModel.DocumentStatus || existingModel.FDocumentStatus || 'Z',
@@ -678,7 +725,7 @@ export async function saveKingdeeExpenseReimbursement(payload, options = {}) {
       if (!options.allowExistingBillOverwrite) {
         throw dependencyError(
           'KINGDEE_EXISTING_BILL_MISMATCH',
-          `金蝶已存在费用报销单 ${requestedBillNumber}，但内容与当前分贝通数据不一致；如需覆盖，请使用“重新保存费用报销单”。`,
+          `金蝶已存在费用报销单 ${requestedBillNumber}，但原单内容与工作台本次生成的数据不一致。请先在金蝶核对原单。`,
           { billNumber: requestedBillNumber, erpFid: String(existingFid) }
         );
       }
@@ -687,11 +734,73 @@ export async function saveKingdeeExpenseReimbursement(payload, options = {}) {
       activePayload.Model.FID = existingFid;
     }
   }
-  let body = await postExpenseReimbursementSave(config, authSession, activePayload);
+  if (options.receiptOnly && receipts.length === 0) {
+    if (receiptWarnings.length > 0 && positiveId(requestedFid)) {
+      const view = await viewSavedExpenseReimbursement(config, authSession, requestedFid);
+      const model = view.Result.Result;
+      if (String(model.BillNo || model.FBillNo || '') !== requestedBillNumber) {
+        throw dependencyError('KINGDEE_RECEIPT_UPDATE_TARGET_MISMATCH', '收票补录的单号与金蝶原单不一致。');
+      }
+      validateExpensePaymentBankFields(activePayload, view);
+      return {
+        simulated: false,
+        mode: 'real',
+        mockReplacement: false,
+        receiptWarnings,
+        erpFid: String(requestedFid),
+        erpNumber: requestedBillNumber,
+        documentStatus: model.DocumentStatus || model.FDocumentStatus || 'Z',
+        rawResponse: { view }
+      };
+    }
+    throw dependencyError('KINGDEE_RECEIPT_UPDATE_TARGET_REQUIRED', '补录收票需要完整的来源发票。');
+  }
+  if (receipts.length > 0) {
+    const targetFid = Number(activePayload.Model.FID);
+    if (!existingView && positiveId(targetFid)) {
+      existingView = await viewSavedExpenseReimbursement(config, authSession, targetFid).catch((error) => {
+        if (error.code === 'KINGDEE_VIEW_FAILED' && /不存在|已删除|未找到/.test(error.message)) return null;
+        throw error;
+      });
+    }
+    if (options.receiptOnly && !existingView) {
+      throw dependencyError('KINGDEE_RECEIPT_UPDATE_TARGET_REQUIRED', '未找到金蝶原单，已停止补录收票。');
+    }
+    const existingStatus = existingView?.Result?.Result?.DocumentStatus
+      ?? existingView?.Result?.Result?.FDocumentStatus;
+    if (existingView && !['Z', 'A', 'D'].includes(String(existingStatus))
+      && receipts.some((receipt) => !linkedReceiptIds(existingView).has(receipt.id))) {
+      throw dependencyError('KINGDEE_RECEIPT_REIMBURSEMENT_LOCKED', '金蝶原单当前状态无法补录收票信息，请由财务确认可编辑后重试。');
+    }
+    for (const receipt of receipts) {
+      if (!receipt.id) receipt.id = await ensureKingdeeReceipt(config, authSession, receipt);
+    }
+    activePayload = structuredClone(activePayload);
+    const links = new Map(receiptViewEntries(existingView)
+      .filter((row) => positiveId(row.RecInv_Id || row.RecInv?.Id))
+      .map((row) => [String(row.RecInv_Id || row.RecInv.Id), row.Id]));
+    for (const { id } of receipts) {
+      if (!links.has(id)) links.set(id, null);
+    }
+    activePayload.Model.FRecInvInfo = [...links].map(([id, entryId]) => ({
+      ...(positiveId(entryId) ? { FEntryID: entryId } : {}),
+      FRecInv: { FID: Number(id) }
+    }));
+  }
+  const savePayload = options.receiptOnly ? {
+    ...activePayload,
+    NeedUpDateFields: ['FRecInvInfo', 'FRecInv'],
+    IsDeleteEntry: 'false',
+    Model: {
+      FID: activePayload.Model.FID,
+      FRecInvInfo: activePayload.Model.FRecInvInfo
+    }
+  } : activePayload;
+  let body = await postExpenseReimbursementSave(config, authSession, savePayload);
   let status = body?.Result?.ResponseStatus;
   let recoveredMissingTarget = false;
   let savedWithoutRequestPayment = false;
-  if (!status?.IsSuccess && isMissingEmployeeBankDetails(status)) {
+  if (!options.receiptOnly && !status?.IsSuccess && isMissingEmployeeBankDetails(status)) {
     activePayload = expenseReimbursementWithoutRequestPayment(activePayload);
     body = await postExpenseReimbursementSave(config, authSession, activePayload);
     status = body?.Result?.ResponseStatus;
@@ -701,7 +810,8 @@ export async function saveKingdeeExpenseReimbursement(payload, options = {}) {
     const existingFid = Number(activePayload?.Model?.FID);
     if (positiveId(existingFid)) {
       const existingView = await viewSavedExpenseReimbursement(config, authSession, existingFid);
-      if (matchesExistingExpenseReimbursement(activePayload, existingView)) {
+      if (matchesExistingExpenseReimbursement(activePayload, existingView)
+        && receipts.every((receipt) => linkedReceiptIds(existingView).has(receipt.id))) {
         const existingModel = existingView.Result.Result;
         return {
           simulated: false,
@@ -710,6 +820,7 @@ export async function saveKingdeeExpenseReimbursement(payload, options = {}) {
           mockReason: '',
           recoveredMissingTarget: false,
           recoveredNetworkControlConflict: true,
+          receiptWarnings,
           erpFid: String(existingModel.Id || existingModel.FID || existingFid),
           erpNumber: String(existingModel.BillNo || existingModel.FBillNo || activePayload.Model.FBillNo),
           documentStatus: existingModel.DocumentStatus || existingModel.FDocumentStatus || 'Z',
@@ -719,13 +830,17 @@ export async function saveKingdeeExpenseReimbursement(payload, options = {}) {
     }
     throw networkControlConflictError(activePayload, status);
   }
-  if (!status?.IsSuccess && isMissingExpenseReimbursement(status) && positiveId(activePayload?.Model?.FID)) {
+  if (!options.receiptOnly && !status?.IsSuccess
+    && isMissingExpenseReimbursement(status) && positiveId(activePayload?.Model?.FID)) {
     activePayload = structuredClone(payload);
     activePayload.Model.FID = await findExpenseReimbursementFidByNumber(
       config,
       authSession,
       activePayload.Model.FBillNo
     );
+    if (receipts.length > 0) {
+      activePayload.Model.FRecInvInfo = receipts.map(({ id }) => ({ FRecInv: { FID: Number(id) } }));
+    }
     body = await postExpenseReimbursementSave(config, authSession, activePayload);
     status = body?.Result?.ResponseStatus;
     recoveredMissingTarget = true;
@@ -759,9 +874,21 @@ export async function saveKingdeeExpenseReimbursement(payload, options = {}) {
   if (!identifiers.erpFid || !identifiers.erpNumber) {
     throw dependencyError('KINGDEE_SAVE_RESPONSE_INVALID', 'Kingdee expense reimbursement save response missing Id or Number');
   }
+  if (options.receiptOnly && (identifiers.erpFid !== String(activePayload.Model.FID)
+    || identifiers.erpNumber !== activePayload.Model.FBillNo)) {
+    throw dependencyError('KINGDEE_RECEIPT_UPDATE_TARGET_MISMATCH', '收票补录返回的单号或内码与金蝶原单不一致。');
+  }
   const viewBody = await viewSavedExpenseReimbursement(config, authSession, identifiers.erpFid);
   try {
     validateExpensePaymentBankFields(activePayload, viewBody);
+    const actualReceiptIds = linkedReceiptIds(viewBody);
+    if (receipts.some((receipt) => !actualReceiptIds.has(receipt.id))) {
+      throw dependencyError(
+        'KINGDEE_RECEIPT_LINK_MISMATCH',
+        '金蝶已保存报销单，但回读缺少应关联的收票单。请更新原单重试。',
+        {}
+      );
+    }
   } catch (error) {
     error.detail.savedResult = {
       ...identifiers,
@@ -792,6 +919,7 @@ export async function saveKingdeeExpenseReimbursement(payload, options = {}) {
     recoveredMissingTarget,
     savedWithoutRequestPayment,
     verificationWarning,
+    receiptWarnings,
     erpFid: identifiers.erpFid,
     erpNumber: identifiers.erpNumber,
     documentStatus: viewBody?.Result?.Result?.FDocumentStatus
@@ -804,6 +932,216 @@ export async function saveKingdeeExpenseReimbursement(payload, options = {}) {
       existingBeforeOverwrite: existingBillBeforeOverwrite
     }
   };
+}
+
+function receiptViewEntries(view) {
+  const entries = view?.Result?.Result?.RecInvInfo;
+  return Array.isArray(entries) ? entries : [];
+}
+
+function linkedReceiptIds(view) {
+  return new Set(receiptViewEntries(view).map((row) => String(row.RecInv_Id || row.RecInv?.Id || '')));
+}
+
+async function planKingdeeReceipts(config, authSession, orgNumber, invoices) {
+  if (invoices.some((invoice) => String(invoice.number || '')
+    .split(/[,，;；/|、]/).map((part) => part.trim()).filter(Boolean).length > 1)) {
+    return {
+      receipts: [],
+      receiptWarnings: ['同一格合并了多个发票号码，收票信息待补。请提供逐张发票数据后更新单据。']
+    };
+  }
+  const missing = new Set();
+  const receipts = new Map();
+  if (invoices.length === 0) return { receipts: [], receiptWarnings: [] };
+  let typeMappings;
+  try {
+    const configured = JSON.parse(process.env.KINGDEE_RECEIPT_INVOICE_TYPES || '{}');
+    if (!configured || Array.isArray(configured) || typeof configured !== 'object') throw new Error();
+    typeMappings = configured;
+  } catch {
+    throw dependencyError('KINGDEE_RECEIPT_TYPE_CONFIG_INVALID', '金蝶发票类别配置必须为 JSON 对象。');
+  }
+  let categories;
+  for (const invoice of invoices) {
+    const number = String(invoice.number || '').trim();
+    if (!number || number.length > 50 || /[\s,，;；/|、]/.test(number)) {
+      missing.add('缺少有效的单张发票号码，请补充逐张发票数据。');
+      continue;
+    }
+    const required = [
+      ['发票代码', invoice.code || (/^\d{20}$/.test(number) ? true : '')],
+      ['开票日期', invoice.issuedDate], ['销售方名称', invoice.sellerName],
+      ['税额', Number.isFinite(invoice.taxAmount)], ['不含税金额', Number.isFinite(invoice.excludingTaxAmount)],
+      ['价税合计', Number.isFinite(invoice.totalAmount)]
+    ].filter(([, value]) => !value).map(([label]) => label);
+    if (required.length) {
+      missing.add(`发票 ${number} 缺少${required.join('、')}。`);
+      continue;
+    }
+    const type = [invoice.typeCode, invoice.typeName].find((key) => key && Object.hasOwn(typeMappings, key));
+    const caption = receiptTypeCaption(invoice.typeName || invoice.typeCode, number);
+    let typeNumber = type ? String(typeMappings[type]).trim() : '';
+    if (!typeNumber && caption) {
+      categories ||= await readKingdeeReceiptTypes(config, authSession);
+      typeNumber = categories.get(caption) || '';
+    }
+    if (!/^\d+$/.test(typeNumber)) {
+      missing.add(`发票 ${number} 的票种“${invoice.typeName || invoice.typeCode || '来源未提供'}”无法映射到金蝶发票类别。`);
+      continue;
+    }
+    const model = {
+      FIVCODE: invoice.code || '',
+      FIVNUMBER: number,
+      FOPENDATE: invoice.issuedDate,
+      FSALENAME: invoice.sellerName,
+      ...(invoice.buyerName ? { FPURNAME: invoice.buyerName } : {}),
+      FSUMTAXAMOUNT: invoice.taxAmount,
+      FSUMAMOUNT: invoice.excludingTaxAmount,
+      FSUMALLAMOUNT: invoice.totalAmount,
+      FINVOICETYPE: typeNumber
+    };
+    const key = JSON.stringify([invoice.code, invoice.number]);
+    if (receipts.has(key)) {
+      if (JSON.stringify(receipts.get(key).model) !== JSON.stringify(model)) {
+        throw dependencyError('KINGDEE_RECEIPT_SOURCE_CONFLICT', `来源发票 ${invoice.number} 的票面信息不一致。`);
+      }
+      continue;
+    }
+    receipts.set(key, { model, orgNumber, id: '' });
+  }
+  if (missing.size) {
+    throw dependencyError('KINGDEE_RECEIPT_DATA_INCOMPLETE',
+      `收票信息不完整，本次保存未执行。${[...missing].join(' ')}`);
+  }
+  for (const receipt of receipts.values()) {
+    receipt.id = await findKingdeeReceipt(config, authSession, receipt);
+  }
+  return { receipts: [...receipts.values()], receiptWarnings: [] };
+}
+
+function receiptTypeCaption(value, number) {
+  const name = String(value || '').trim().replaceAll('(', '（').replaceAll(')', '）');
+  const digital = /^\d{20}$/.test(number);
+  switch (name) {
+    case '电子发票（增值税普通发票）':
+    case '电子发票（普通发票）':
+      return digital ? '全电普通发票' : '电子普通发票';
+    case '电子发票（增值税专用发票）':
+      return digital ? '全电专用发票' : '电子发票专票';
+    case '电子发票（铁路电子客票）':
+      return '电子铁路客票';
+    case '电子发票（航空运输电子客票行程单）':
+      return '电子航空客票';
+    case '出租车发票':
+      return '的士票';
+    case '客运汽车票':
+      return '客运发票';
+    default:
+      return name;
+  }
+}
+
+async function readKingdeeReceiptTypes(config, authSession) {
+  const key = JSON.stringify([config.baseUrl, config.acctId, config.accountKey]);
+  const cached = receiptTypeCache.get(key);
+  if (cached?.expiresAt > Date.now()) return cached.types;
+  const response = await postKingdeeJsonWrapper(config, BUSINESS_INFO_PATH, {
+    formid: RECEIPT_FORM_ID,
+    data: JSON.stringify({ FormId: RECEIPT_FORM_ID })
+  }, authSession);
+  const body = await response.json();
+  const field = body?.Result?.NeedReturnData?.Entrys?.flatMap((entity) => entity.Fields || [])
+    .find((item) => item.Key === 'FINVOICETYPE');
+  const types = new Map((Array.isArray(field?.Extends) ? field.Extends : [])
+    .filter((item) => item.Invalid === false && item.Caption && /^\d+$/.test(String(item.Value)))
+    .map((item) => [item.Caption, String(item.Value)]));
+  if (!response.ok || types.size === 0) {
+    throw dependencyError('KINGDEE_RECEIPT_TYPE_LOOKUP_FAILED', '无法读取金蝶收票单的发票类别，请核对账套权限或配置票种映射。');
+  }
+  receiptTypeCache.set(key, { types, expiresAt: Date.now() + EMPLOYEE_CACHE_TTL_MS });
+  return types;
+}
+
+async function findKingdeeReceipt(config, authSession, receipt) {
+  const { model, orgNumber } = receipt;
+  const fields = Object.keys(model);
+  const response = await postKingdeeJsonWrapper(config, BILL_QUERY_PATH, {
+    data: JSON.stringify({
+      FormId: RECEIPT_FORM_ID,
+      FieldKeys: ['FID', 'FSOURCEORGID.FNumber', ...fields].join(','),
+      FilterString: `FIVNUMBER = ${kingdeeFilterText(model.FIVNUMBER)} AND FSOURCEORGID.FNumber = ${kingdeeFilterText(orgNumber)}`,
+      Limit: 100
+    })
+  }, authSession);
+  const rows = await response.json();
+  if (!response.ok || !Array.isArray(rows) || rows.some((row) => !Array.isArray(row) || !positiveId(row[0]))) {
+    throw dependencyError('KINGDEE_RECEIPT_QUERY_FAILED', '金蝶收票单查询失败，请检查接口权限。');
+  }
+  const matches = rows.filter((row) => sameText(row[1], orgNumber)
+    && sameText(row[2], model.FIVCODE) && sameText(row[3], model.FIVNUMBER));
+  if (matches.length === 0) return '';
+  if (matches.length > 1 || fields.some((field, index) => {
+    const expected = model[field];
+    if (expected === '' || expected === null) return false;
+    return typeof expected === 'number'
+      ? !String(matches[0][index + 2] ?? '').trim() || !sameMoney(matches[0][index + 2], expected)
+      : !sameText(matches[0][index + 2], expected, field === 'FOPENDATE');
+  })) {
+    throw dependencyError(
+      'KINGDEE_RECEIPT_CONFLICT',
+      `金蝶收票单与来源发票 ${model.FIVNUMBER} 的票面信息不一致或匹配到多张，已停止关联。`
+    );
+  }
+  return String(matches[0][0]);
+}
+
+async function ensureKingdeeReceipt(config, authSession, receipt) {
+  const { model, orgNumber } = receipt;
+  const key = JSON.stringify([config.baseUrl, config.acctId, orgNumber, model.FIVCODE, model.FIVNUMBER]);
+  const pending = receiptCreations.get(key);
+  if (pending) {
+    await pending;
+    const id = await findKingdeeReceipt(config, authSession, receipt);
+    if (!id) throw dependencyError('KINGDEE_RECEIPT_READBACK_FAILED', '金蝶收票单保存后未能核验。');
+    return id;
+  }
+  const creation = (async () => {
+    const existing = await findKingdeeReceipt(config, authSession, receipt);
+    if (existing) return existing;
+    const response = await postKingdeeJsonWrapper(config, config.savePath, {
+      formid: RECEIPT_FORM_ID,
+      data: JSON.stringify({
+        NumberSearch: 'true',
+        Model: {
+          FID: 0,
+          FSOURCEORGID: { FNumber: orgNumber },
+          FSETTLEORGID: { FNumber: orgNumber },
+          ...Object.fromEntries(Object.entries(model).filter(([, value]) => value !== null && value !== ''))
+        }
+      })
+    }, authSession);
+    const body = await response.json();
+    if (!response.ok || !body?.Result?.ResponseStatus?.IsSuccess) {
+      throw dependencyError(
+        'KINGDEE_RECEIPT_SAVE_FAILED',
+        `金蝶收票单 ${model.FIVNUMBER} 保存失败：${statusMessage(body?.Result?.ResponseStatus) || response.status}`
+      );
+    }
+    const id = await findKingdeeReceipt(config, authSession, receipt);
+    if (!id) throw dependencyError('KINGDEE_RECEIPT_READBACK_FAILED', '金蝶收票单保存后未能核验。');
+    return id;
+  })();
+  receiptCreations.set(key, creation);
+  try {
+    return await creation;
+  } finally {
+    receiptCreations.delete(key);
+  }
+}
+
+function kingdeeFilterText(value) {
+  return `'${String(value ?? '').replaceAll("'", "''")}'`;
 }
 
 function isMissingEmployeeBankDetails(status) {
@@ -951,9 +1289,11 @@ async function findExpenseReimbursementFidByNumber(config, authSession, billNumb
       { billNumber: number }
     );
   }
-  const matches = Array.isArray(body)
-    ? body.filter((row) => Array.isArray(row) && String(row[1] || '').trim() === number)
-    : [];
+  if (!Array.isArray(body) || body.some((row) => !Array.isArray(row)
+    || !positiveId(row[0]) || String(row[1] || '').trim() !== number)) {
+    throw dependencyError('KINGDEE_BILL_QUERY_RESPONSE_INVALID', '金蝶单号查询结果异常，无法确认原单是否存在。');
+  }
+  const matches = body;
   if (matches.length > 1) {
     throw dependencyError(
       'KINGDEE_DUPLICATE_BILL_NUMBER',
@@ -962,14 +1302,7 @@ async function findExpenseReimbursementFidByNumber(config, authSession, billNumb
     );
   }
   if (matches.length === 0) return 0;
-  const fid = Number(matches[0][0]);
-  if (!positiveId(fid)) {
-    throw dependencyError(
-      'KINGDEE_BILL_QUERY_RESPONSE_INVALID',
-      `Kingdee expense reimbursement lookup returned an invalid FID for ${number}`
-    );
-  }
-  return fid;
+  return Number(matches[0][0]);
 }
 
 function isMissingExpenseReimbursement(status) {
@@ -1070,7 +1403,8 @@ function matchesExpenseReimbursementEntries(expectedEntries, actualEntries) {
         !Number.isFinite(Number(expected.FTaxAmt))
         || sameMoney(actual.TaxAmt ?? actual.FTaxAmt, expected.FTaxAmt)
       )
-      && sameMoney(actual.TaxSubmitAmt ?? actual.FTaxSubmitAmt, expected.FTaxSubmitAmt)
+      && (!Object.hasOwn(expected, 'FTaxSubmitAmt')
+        || sameMoney(actual.TaxSubmitAmt ?? actual.FTaxSubmitAmt, expected.FTaxSubmitAmt))
       && sameMoney(actual.ExpSubmitAmount ?? actual.FExpSubmitAmount, expected.FExpSubmitAmount)
       && (
         !Number.isFinite(Number(expected.FReimbNotPayAmount))
@@ -1088,8 +1422,9 @@ function matchesExpenseReimbursementEntries(expectedEntries, actualEntries) {
         || sameMoney(actual.F_ora_Decimal_qtr, expected.F_ora_Decimal_qtr)
       )
       && sameText(actual.Remark ?? actual.FRemark, expected.FRemark)
-      && referenceNumber(actual.ExpenseDeptEntryID || actual.FExpenseDeptEntryID)
-        === referenceNumber(expected.FExpenseDeptEntryID)
+      && (!referenceNumber(expected.FExpenseDeptEntryID)
+        || referenceNumber(actual.ExpenseDeptEntryID || actual.FExpenseDeptEntryID)
+          === referenceNumber(expected.FExpenseDeptEntryID))
       && sameText(actual.F_ora_Text_83g, expected.F_ora_Text_83g);
   });
 }
@@ -1377,14 +1712,17 @@ function paymentBillRow(fieldKeys, row) {
     billTypeNumber: String(values['FBillTypeID.FNumber'] || '').trim(),
     billTypeName: String(values['FBillTypeID.FName'] || '').trim(),
     businessDate: String(values.FDATE || '').slice(0, 10),
+    paymentTime: normalizePaymentTimestamp(values.FLastFinishTime),
+    entryPaymentTime: normalizePaymentTimestamp(values.FFinishTime),
     employeeNumber: String(values['FCONTACTUNIT.FNumber'] || '').trim(),
     employeeName: String(values['FCONTACTUNIT.FName'] || '').trim(),
     payableAmount: Number(values.FPAYTOTALAMOUNTFOR_H || 0),
     paidAmount: Number(values.FREALPAYAMOUNTFOR_H || 0),
     remark: String(values.FREMARK || '').trim(),
-    sourceBillNumber: String(values.FSourceBillNumber || values.FSRCBILLNO || '').trim(),
+    sourceBillNumber: String(values.FSourceBillNumber || '').trim(),
+    linkedSourceBillNumber: String(values.FSRCBILLNO || '').trim(),
     thirdPartyBillNumber: String(values.FTHIRDBILLNO || '').trim(),
-    entryId: '',
+    entryId: String(values.FPAYBILLENTRY_FEntryID || ''),
     bankStatusCode: String(values.FBankStatus || '').trim(),
     bankStatusName: values.FBankStatus === 'C' ? '银行交易成功' : String(values.FBANKMSG || '').trim(),
     bankStatusMessage: String(values.FBANKMSG || '').trim(),
@@ -1397,40 +1735,49 @@ function paymentBillRow(fieldKeys, row) {
   };
 }
 
-function aggregateSuccessfulPaymentBills(rows) {
+function aggregatePaymentBills(rows) {
   const bills = new Map();
   for (const row of rows) {
     if (row.billTypeNumber !== 'SGBXD' || !row.id) continue;
     const bill = bills.get(row.id) || {
       ...row,
+      sourceBillNumbers: new Set(),
+      entryIds: new Set(),
       entries: []
     };
+    if (row.sourceBillNumber) bill.sourceBillNumbers.add(row.sourceBillNumber);
+    if (row.linkedSourceBillNumber) bill.sourceBillNumbers.add(row.linkedSourceBillNumber);
+    bills.set(row.id, bill);
+    if (row.entryId && bill.entryIds.has(row.entryId)) continue;
+    if (row.entryId) bill.entryIds.add(row.entryId);
     bill.entries.push({
       bankStatusCode: row.bankStatusCode,
       bankStatusName: row.bankStatusName,
       bankStatusMessage: row.bankStatusMessage,
       remark: row.entryRemark,
+      sourceBillNumber: row.sourceBillNumber,
       paymentAmount: row.entryPaymentAmount,
+      paymentTime: row.entryPaymentTime,
       requestSerialNumber: row.requestSerialNumber
     });
-    bills.set(row.id, bill);
   }
-  return [...bills.values()]
-    .filter((bill) => (
-      bill.entries.length > 0
-      && bill.entries.every((entry) => entry.bankStatusCode === 'C')
-    ))
-    .map((bill) => ({
+  return [...bills.values()].map(({ entryIds, sourceBillNumbers, ...bill }) => {
+    const codes = [...new Set(bill.entries.map((entry) => entry.bankStatusCode))];
+    const names = [...new Set(bill.entries.map((entry) => entry.bankStatusName || entry.bankStatusCode).filter(Boolean))];
+    const entryTimes = bill.entries.map((entry) => entry.paymentTime);
+    return {
       ...bill,
-      bankStatusCode: 'C',
-      bankStatusName: '银行交易成功',
-      bankStatusMessage: '',
+      sourceBillNumbers: [...sourceBillNumbers],
+      paymentTime: bill.paymentTime || (entryTimes.every(Boolean) ? entryTimes.sort().at(-1) : ''),
+      bankStatusCode: codes.length === 1 ? codes[0] : '',
+      bankStatusName: names.join(' / '),
       entryRemark: '',
       entryPaymentAmount: bill.entries.reduce((sum, entry) => sum + entry.paymentAmount, 0),
       requestSerialNumber: bill.entries
         .map((entry) => entry.requestSerialNumber)
         .find(Boolean) || ''
-    }));
+    };
+  });
 }
 
 function referenceNumber(reference) {

@@ -6,7 +6,7 @@ import { test } from 'node:test';
 const source = readFileSync('frontend/src/app.js', 'utf8');
 const syncFunction = source.slice(
   source.indexOf('async function syncFenbeitong()'),
-  source.indexOf('async function syncPaymentStatusesToFenbeitong()')
+  source.indexOf('async function runSchedulerOnce()')
 );
 
 function harness() {

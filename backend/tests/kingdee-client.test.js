@@ -5,6 +5,7 @@ import {
   clearKingdeeEmployeeNumberCacheForTest,
   findKingdeeDepartmentNumberByName,
   findKingdeeEmployeeNumberByName,
+  kingdeeExpenseReimbursementExists,
   extractKingdeeEmployeeBankDetails,
   queryKingdeeSuccessfulExpensePaymentBills,
   expenseReimbursementWithoutRequestPaymentForTest,
@@ -69,7 +70,9 @@ test('entry bank-only differences require updating the existing bill and retain 
     throw new Error('unexpected request');
   };
   try {
-    await assert.rejects(() => saveKingdeeExpenseReimbursement(payload), (e) => e.code === 'KINGDEE_EXISTING_BILL_MISMATCH');
+    await assert.rejects(() => saveKingdeeExpenseReimbursement(payload), (error) => (
+      error.code === 'KINGDEE_EXISTING_BILL_MISMATCH' && /请先在金蝶核对原单/.test(error.message)
+    ));
     assert.equal(saved, false);
     await assert.rejects(() => saveKingdeeExpenseReimbursement(payload, { allowExistingBillOverwrite: true }), (e) =>
       e.code === 'KINGDEE_PAYMENT_BANK_FIELDS_MISMATCH' && String(e.detail.savedResult.erpFid) === '77');
@@ -186,9 +189,12 @@ test('queries only expense payment bills whose every bank entry succeeded', asyn
     if (path.includes('DynamicFormService.ExecuteBillQuery')) {
       const query = JSON.parse(JSON.parse(String(options.body)).data);
       assert.equal(query.FormId, 'AP_PAYBILL');
+      assert.equal(query.FilterString, "FPAYORGID.FNumber = '892'");
+      assert.deepEqual(query.FieldKeys.split(',').slice(-4), ['FLastFinishTime', 'FFinishTime', 'FSRCBILLNO', 'FPAYBILLENTRY_FEntryID']);
       return jsonResponse([
-        [1, 'FKD0001', 'SGBXD', '费用报销付款单', '2026-08-01', 'X001', '测试员工', 100, 100, '', '', '', 'C', '', '', 40, 'R1'],
-        [1, 'FKD0001', 'SGBXD', '费用报销付款单', '2026-08-01', 'X001', '测试员工', 100, 100, '', '', '', 'C', '', '', 60, 'R2'],
+        [1, 'FKD0001', 'SGBXD', '费用报销付款单', '2026-08-01', 'X001', '测试员工', 100, 100, '', '', '', 'C', '', '', 40, 'R1', null, '2026-08-02T10:30:00', 'SRC-1', 91],
+        [1, 'FKD0001', 'SGBXD', '费用报销付款单', '2026-08-01', 'X001', '测试员工', 100, 100, '', '', '', 'C', '', '', 40, 'R1', null, '2026-08-02T10:30:00', 'SRC-2', 91],
+        [1, 'FKD0001', 'SGBXD', '费用报销付款单', '2026-08-01', 'X001', '测试员工', 100, 100, '', '', '', 'C', '', '', 60, 'R2', null, '2026-08-02T02:31:45.000Z', 'SRC-2', 92],
         [2, 'FKD0002', 'SGBXD', '费用报销付款单', '2026-08-01', 'X002', '未成功员工', 50, 50, '', '', '', 'A', '处理中', '', 50, 'R3'],
         [3, 'FKD0003', 'OTHER', '其他付款单', '2026-08-01', 'X003', '其他员工', 20, 20, '', '', '', 'C', '', '', 20, 'R4']
       ]);
@@ -202,6 +208,8 @@ test('queries only expense payment bills whose every bank entry succeeded', asyn
     assert.equal(bills[0].billTypeName, '费用报销付款单');
     assert.equal(bills[0].bankStatusName, '银行交易成功');
     assert.equal(bills[0].entryPaymentAmount, 100);
+    assert.equal(bills[0].paymentTime, '2026-08-02 10:31:45');
+    assert.deepEqual(bills[0].sourceBillNumbers, ['SRC-1', 'SRC-2']);
     assert.equal(bills[0].entries.length, 2);
   } finally {
     globalThis.fetch = previousFetch;
@@ -806,6 +814,162 @@ test('save classifies an application date before the Kingdee organization enable
   }
 });
 
+test('requires individual receipts, leaves a missing buyer blank and resolves the invoice type from Kingdee', async () => {
+  const restore = forceKingdeeEnv({
+    KINGDEE_RECEIPT_INVOICE_TYPES: '{}'
+  });
+  const previousFetch = globalThis.fetch;
+  let savedReceipt;
+  let savedReimbursement;
+  let receiptSaves = 0;
+  const invoice = {
+    code: 'TEST-CODE', number: '26000000000000000001', typeName: '电子发票（增值税普通发票）', issuedDate: '2026-10-23',
+    sellerName: '测试销方', buyerName: '', taxAmount: 0, excludingTaxAmount: 100, totalAmount: 100
+  };
+  const payload = { Model: { FBillNo: 'TEST-REIMB', FOrgID: { FNumber: '886' }, FExpAmountSum: 100 } };
+  const status = { IsSuccess: true };
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    if (path.includes('ValidateUser')) return jsonResponse({ LoginResultType: 1 }, { 'Set-Cookie': 'session=test' });
+    if (path.includes('SwitchOrg')) return jsonResponse({ Result: { ResponseStatus: status } });
+    const wrapper = JSON.parse(String(options.body));
+    const data = JSON.parse(wrapper.data);
+    if (path.includes('QueryBusinessInfo')) {
+      return jsonResponse({ Result: { NeedReturnData: { Entrys: [{ Fields: [{
+        Key: 'FINVOICETYPE', Extends: [{ Caption: '全电普通发票', Value: '26', Invalid: false }]
+      }] }] } } });
+    }
+    if (path.includes('ExecuteBillQuery')) {
+      if (data.FormId !== 'IV_ReceivedInvoice') return jsonResponse(savedReimbursement ? [[102, 'TEST-REIMB']] : []);
+      const fields = data.FieldKeys.split(',').slice(2);
+      return jsonResponse(savedReceipt ? [[101, '886', ...fields.map((field) => savedReceipt[field])]] : []);
+    }
+    if (path.includes('DynamicFormService.Save')) {
+      if (wrapper.formid === 'IV_ReceivedInvoice') {
+        receiptSaves += 1;
+        savedReceipt = data.Model;
+        assert.equal(savedReceipt.FINVOICETYPE, '26');
+        assert.equal(Object.hasOwn(savedReceipt, 'FPURNAME'), false);
+        assert.equal(savedReceipt.FSUMTAXAMOUNT, 0);
+        return jsonResponse({ Result: { ResponseStatus: status, Id: 101 } });
+      }
+      assert.deepEqual(data.Model.FRecInvInfo, [{ FRecInv: { FID: 101 } }]);
+      savedReimbursement = data.Model;
+      return jsonResponse({ Result: { ResponseStatus: status, Id: 102, Number: data.Model.FBillNo } });
+    }
+    if (path.includes('DynamicFormService.View')) {
+      return jsonResponse({ Result: { ResponseStatus: status, Result: {
+        ...savedReimbursement,
+        FID: 102,
+        RecInvInfo: (savedReimbursement.FRecInvInfo || []).map((row) => ({ RecInv_Id: row.FRecInv.FID }))
+      } } });
+    }
+    throw new Error(`unexpected test operation: ${path}`);
+  };
+  try {
+    await assert.rejects(saveKingdeeExpenseReimbursement(payload, { receiptInvoices: [
+      invoice, { ...invoice, number: 'TEST-MISSING-SELLER', sellerName: '' }
+    ] }), (error) => error.code === 'KINGDEE_RECEIPT_DATA_INCOMPLETE' && /销售方名称/.test(error.message));
+    assert.equal(receiptSaves, 0);
+    assert.equal(savedReimbursement, undefined);
+    const options = { receiptInvoices: [invoice, { ...invoice }] };
+    const result = await saveKingdeeExpenseReimbursement(payload, options);
+    assert.equal(result.erpFid, '102');
+    assert.deepEqual(result.receiptWarnings, []);
+    const replay = await saveKingdeeExpenseReimbursement(payload, options);
+    assert.equal(replay.recoveredExistingBill, true);
+    assert.deepEqual(replay.receiptWarnings, result.receiptWarnings);
+    assert.equal(receiptSaves, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restore();
+  }
+});
+
+test('saves a reimbursement with combined invoice numbers and recovers an identical original without another write', async () => {
+  const restore = forceKingdeeEnv();
+  const previousFetch = globalThis.fetch;
+  const status = { IsSuccess: true };
+  const entry = { FExpenseAmount: 100, FExpSubmitAmount: 100, FExpenseDeptEntryID: null };
+  const payload = { Model: { FID: 0, FBillNo: 'MERGED-REIMB', FOrgID: { FNumber: '886' }, FExpAmountSum: 100, FEntity: [entry] } };
+  const receiptInvoices = [{ number: '0001 / 0002' }, { number: '0003' }];
+  let writeCount = 0;
+  globalThis.fetch = async (url, options = {}) => {
+    const path = String(url);
+    if (path.includes('ValidateUser')) return jsonResponse({ LoginResultType: 1 }, { 'Set-Cookie': 'session=test' });
+    if (path.includes('SwitchOrg')) return jsonResponse({ Result: { ResponseStatus: status } });
+    if (path.includes('ExecuteBillQuery')) {
+      const wrapper = JSON.parse(String(options.body));
+      assert.equal(JSON.parse(wrapper.data).FormId, 'ER_ExpReimbursement');
+      return jsonResponse(writeCount ? [[102, 'MERGED-REIMB']] : []);
+    }
+    if (path.includes('DynamicFormService.Save')) {
+      const wrapper = JSON.parse(String(options.body));
+      assert.equal(wrapper.formid, 'ER_ExpReimbursement');
+      assert.equal(Object.hasOwn(JSON.parse(wrapper.data).Model, 'FRecInvInfo'), false);
+      writeCount += 1;
+      return jsonResponse({ Result: { Id: 102, Number: 'MERGED-REIMB', ResponseStatus: status } });
+    }
+    if (path.includes('DynamicFormService.View')) return jsonResponse({ Result: { ResponseStatus: status, Result: {
+      ...payload.Model, Id: 102, BillNo: 'MERGED-REIMB', DocumentStatus: 'A',
+      ER_ExpenseReimbEntry: [{ ...entry, TaxSubmitAmt: 100, ExpenseDeptEntryID: { Number: 'DEPT-01' } }]
+    } } });
+    throw new Error(`unexpected test operation: ${path}`);
+  };
+  try {
+    const result = await saveKingdeeExpenseReimbursement(payload, { receiptInvoices });
+    assert.equal(result.erpFid, '102');
+    assert.match(result.receiptWarnings[0], /收票信息待补/);
+    const replay = await saveKingdeeExpenseReimbursement(payload, { receiptInvoices });
+    assert.equal(replay.recoveredExistingBill, true);
+    assert.deepEqual(replay.receiptWarnings, result.receiptWarnings);
+    const retry = await saveKingdeeExpenseReimbursement(
+      { Model: { ...payload.Model, FID: 102 } }, { receiptInvoices, receiptOnly: true }
+    );
+    assert.equal(retry.erpFid, '102');
+    assert.deepEqual(retry.receiptWarnings, result.receiptWarnings);
+    assert.equal(writeCount, 1);
+    await assert.rejects(saveKingdeeExpenseReimbursement({
+      Model: { ...payload.Model, FEntity: [{ ...entry, FTaxSubmitAmt: 99 }] }
+    }, { receiptInvoices }), { code: 'KINGDEE_EXISTING_BILL_MISMATCH' });
+    assert.equal(writeCount, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restore();
+  }
+});
+
+test('checks for a same-number replacement before confirming a deleted reimbursement', async () => {
+  const restore = forceKingdeeEnv();
+  const previousFetch = globalThis.fetch;
+  let lookup = [[102, 'TEST-REIMB']];
+  globalThis.fetch = async (url) => {
+    const path = String(url);
+    if (path.includes('ValidateUser')) return jsonResponse({ LoginResultType: 1 }, { 'Set-Cookie': 'session=test' });
+    if (path.includes('SwitchOrg')) return jsonResponse({ Result: { ResponseStatus: { IsSuccess: true } } });
+    if (path.includes('DynamicFormService.View')) {
+      return jsonResponse({ Result: { ResponseStatus: {
+        IsSuccess: false, Errors: [{ Message: '数据在系统中不存在，可能已经被删除 [TableName=t_ER_ExpenseReimb]' }]
+      } } });
+    }
+    if (path.includes('ExecuteBillQuery')) return jsonResponse(lookup);
+    assert.fail('核对原单只能调用只读接口');
+  };
+  try {
+    const options = { orgNumber: '886' };
+    assert.equal(await kingdeeExpenseReimbursementExists('101', 'TEST-REIMB', options), true);
+    lookup = { unexpected: true };
+    await assert.rejects(kingdeeExpenseReimbursementExists('101', 'TEST-REIMB', options), {
+      code: 'KINGDEE_BILL_QUERY_RESPONSE_INVALID'
+    });
+    lookup = [];
+    assert.equal(await kingdeeExpenseReimbursementExists('101', 'TEST-REIMB', options), false);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restore();
+  }
+});
+
 function jsonResponse(body, headers = {}) {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json', ...headers } });
 }
@@ -888,7 +1052,8 @@ function networkConflictFetch({ purpose }) {
 }
 
 function forceKingdeeEnv(overrides = {}) {
-  const names = ['KINGDEE_MODE', 'KINGDEE_BASE_URL', 'KINGDEE_ACCT_ID', 'KINGDEE_USERNAME', 'KINGDEE_PASSWORD'];
+  const names = ['KINGDEE_MODE', 'KINGDEE_BASE_URL', 'KINGDEE_ACCT_ID', 'KINGDEE_USERNAME', 'KINGDEE_PASSWORD',
+    ...Object.keys(overrides)];
   const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   Object.assign(process.env, {
     KINGDEE_MODE: 'real',

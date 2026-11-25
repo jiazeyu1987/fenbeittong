@@ -59,8 +59,8 @@ export function getAppConfig() {
       autoPushErp: readBoolean('SCHEDULER_AUTO_PUSH_ERP', false)
     },
     paymentStatusSync: {
-      enabled: readBoolean('PAYMENT_STATUS_SYNC_ENABLED', true),
-      orgNumber: process.env.PAYMENT_STATUS_SYNC_ORG_NUMBER || '892'
+      enabled: false,
+      orgNumber: process.env.PAYMENT_STATUS_SYNC_ORG_NUMBER?.trim() || ''
     }
   };
 }

@@ -1,22 +1,16 @@
 import { createServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { handleApi } from '../backend/src/routes.js';
 import { resetRepository } from '../backend/src/repository.js';
 
-function startApiServer() {
-  const server = createServer(handleApi);
-  return new Promise((resolve) => {
-    server.listen(3001, '127.0.0.1', () => resolve(server));
-  });
-}
-function startFrontendServer() {
+function startTestServer() {
   const root = new URL('../frontend/src/', import.meta.url);
   const server = createServer(async (request, response) => {
     const pathname = new URL(request.url, 'http://localhost').pathname;
+    if (pathname.startsWith('/api/')) return handleApi(request, response, { standalone: true });
     const path = pathname === '/' ? 'index.html' : pathname.slice(1);
     try {
       const file = await import('node:fs/promises');
@@ -34,30 +28,37 @@ function startFrontendServer() {
     }
   });
   return new Promise((resolve) => {
-    server.listen(5173, '127.0.0.1', () => resolve(server));
+    server.listen(0, '127.0.0.1', () => {
+      resolve({ server, baseUrl: `http://127.0.0.1:${server.address().port}` });
+    });
   });
 }
 
 test('finance toolbar controls each produce observable E2E effects', async () => {
   const restoreEnv = forceMockExternalEnv();
-  const restoreFetch = stubKingdeeFetch();
+  const removedErpIds = new Set();
+  const restoreFetch = stubKingdeeFetch(removedErpIds);
   resetRepository();
-  await stopKnownDevServers();
-  const apiServer = await startApiServer();
-  const frontendServer = await startFrontendServer();
+  const { server, baseUrl } = await startTestServer();
+  const processUrl = `${baseUrl}/api/fenbeitong-expense-reimbursement/process`;
+  const ledgerTotal = 201;
   let browser;
 
   try {
     browser = await launchTestBrowser();
     const page = await browser.newPage({ acceptDownloads: true });
-    await page.goto('http://127.0.0.1:5173');
+    page.setDefaultTimeout(8000);
+    await page.addInitScript(() => {
+      Object.defineProperty(window, 'showSaveFilePicker', { value: undefined });
+    });
+    await page.goto(baseUrl);
     await page.waitForSelector('#syncFenbeitongButton');
     await page.waitForSelector('#kingdeeAccountSelect');
     assert.equal(await page.locator('#kingdeeAccountSelect option').count(), 1);
     await page.selectOption('#kingdeeAccountSelect', 'current');
 
     await page.click('#syncFenbeitongButton');
-    await expectTotal(page, 'Total 101');
+    await expectTotal(page, `Total ${ledgerTotal}`);
     assert.equal(await rowCount(page), 20);
     assert.equal(await page.locator('th[data-column-key="operationPanel"]').innerText(), '\u64cd\u4f5c\u9762\u677f');
     assert.equal(await page.locator('button.row-generate-expense-reimbursement').count(), 20);
@@ -67,7 +68,7 @@ test('finance toolbar controls each produce observable E2E effects', async () =>
     const singleRowSourceId = await singleRowAction.getAttribute('data-source-id');
     await singleRowAction.click();
     await waitForApiCondition(
-      'http://127.0.0.1:3001/api/fenbeitong-expense-reimbursement/process',
+      processUrl,
       (body) => body.data.filter((record) => record.processStage === 'EXPENSE_REIMBURSEMENT_PREPARED').length === 1
         && body.data.some((record) => record.sourceId === singleRowSourceId && record.processStage === 'EXPENSE_REIMBURSEMENT_PREPARED')
     );
@@ -80,12 +81,49 @@ test('finance toolbar controls each produce observable E2E effects', async () =>
     assert.equal(await page.locator('input.row-checkbox:checked').count(), selectedBeforeRowAction);
 
     const requester = await firstCellText(page, 'requester');
+    const requesterInput = page.locator('#requesterFilterInput');
+    const requesterOptions = page.locator('#requesterSuggestions');
+    const viewport = page.viewportSize();
+    await page.setViewportSize({ width: 1920, height: 900 });
+    await requesterInput.focus();
+    assert.ok(await requesterOptions.isHidden());
+    await requesterInput.fill([...requester][0]);
+    await expectTotal(page, `Total ${ledgerTotal}`);
+    const matchedNames = await requesterOptions.locator('[role="option"]').allTextContents();
+    assert.ok(matchedNames.includes(requester));
+    assert.ok(matchedNames.every((name) => name.includes([...requester][0])));
+    const firstOption = requesterOptions.getByRole('option').first();
+    assert.equal(await firstOption.evaluate((option) => {
+      const box = option.getBoundingClientRect();
+      return [0.15, 0.5, 0.85].every((fraction) =>
+        option.contains(document.elementFromPoint(box.left + box.width * 0.5, box.top + box.height * fraction)));
+    }), true);
+    await requesterOptions.getByRole('option', { name: requester, exact: true }).click();
+    await page.setViewportSize(viewport);
+    await waitForTotalNot(page, ledgerTotal);
+    assert.ok((await columnTexts(page, 'requester')).every((value) => value === requester));
+    assert.ok(await requesterOptions.isHidden());
+    assert.equal(await requesterInput.getAttribute('list'), null);
+    await page.click('#resetButton');
+    const expenseDate = (await columnTexts(page, 'time')).find(value => /^\d{4}-\d{2}-\d{2}/.test(value)).slice(0, 10);
+    await page.fill('#dateFilterStart', expenseDate);
+    await page.fill('#dateFilterEnd', expenseDate);
+    await expectTotal(page, `Total ${ledgerTotal}`);
+    await page.click('#applyDateFilterButton');
+    await waitForTotalNot(page, ledgerTotal);
+    assert.ok((await columnTexts(page, 'time')).every((value) => value.startsWith(expenseDate)));
+    await page.fill('#dateFilterEnd', '2000-01-01');
+    await page.click('#applyDateFilterButton');
+    assert.equal(await page.locator('#dateFilterEnd').evaluate(input => input.validity.customError), true);
+    assert.ok((await columnTexts(page, 'time')).every((value) => value.startsWith(expenseDate)));
+    await page.click('#resetButton');
+
     await page.selectOption('#searchFieldSelect', 'requester');
     await page.selectOption('#matchModeSelect', 'contains');
     await page.fill('#sourceSearchInput', requester);
     await page.click('#queryLedgerButton');
-    const containsTotal = await waitForTotalNot(page, 101);
-    assert.ok(containsTotal > 0 && containsTotal < 101);
+    const containsTotal = await waitForTotalNot(page, ledgerTotal);
+    assert.ok(containsTotal > 0 && containsTotal < ledgerTotal);
     assert.ok((await columnTexts(page, 'requester')).every((value) => value.includes(requester)));
 
     await page.selectOption('#matchModeSelect', 'equals');
@@ -98,11 +136,11 @@ test('finance toolbar controls each produce observable E2E effects', async () =>
     await page.selectOption('#matchModeSelect', 'notEquals');
     await page.fill('#sourceSearchInput', requester);
     await page.click('#queryLedgerButton');
-    await expectTotal(page, `Total ${101 - equalsTotal}`);
+    await expectTotal(page, `Total ${ledgerTotal - equalsTotal}`);
     assert.ok((await columnTexts(page, 'requester')).every((value) => value !== requester));
 
     await page.click('#resetButton');
-    await expectTotal(page, 'Total 101');
+    await expectTotal(page, `Total ${ledgerTotal}`);
     assert.equal(await page.inputValue('#sourceSearchInput'), '');
     assert.equal(await page.locator('#searchFieldSelect').inputValue(), 'sourceCode');
     assert.equal(await page.locator('#matchModeSelect').inputValue(), 'contains');
@@ -122,19 +160,22 @@ test('finance toolbar controls each produce observable E2E effects', async () =>
     assert.equal(await page.locator('th[data-column-key="requester"]').isVisible(), true);
 
     await clearCheckedRows(page);
-    await page.locator('input.row-checkbox').nth(2).check();
-    await page.locator('input.row-checkbox').nth(3).check();
-    assert.equal(await page.locator('input.row-checkbox:checked').count(), 2);
+    const offlineRows = page.locator('#sourceQueueBody tr').filter({ hasText: '线下报销' });
+    const offlineIds = await offlineRows.locator('input.row-checkbox').evaluateAll((checkboxes) =>
+      [...new Set(checkboxes.map((checkbox) => checkbox.dataset.sourceId))]
+    );
+    const selectedSourceIds = offlineIds.filter((id) => id !== singleRowSourceId).slice(0, 2);
+    assert.equal(selectedSourceIds.length, 2);
+    for (const sourceId of selectedSourceIds) {
+      await page.locator(`input.row-checkbox[data-source-id="${sourceId}"]`).first().check();
+    }
     await page.waitForFunction(() => document.querySelector('#resultSummary')?.textContent.includes('已选择 2 张来源单据'));
 
     assert.equal(await page.locator('#generateVoucherButton').innerText(), '生成费用报销单');
     assert.equal(await page.locator('#saveErpButton').innerText(), '保存费用报销单');
-    const selectedSourceIds = await page.locator('input.row-checkbox:checked').evaluateAll((checkboxes) =>
-      checkboxes.map((checkbox) => checkbox.dataset.sourceId)
-    );
     await page.click('#generateVoucherButton');
     await waitForApiCondition(
-      'http://127.0.0.1:3001/api/fenbeitong-expense-reimbursement/process',
+      processUrl,
       (body) => selectedSourceIds.every((sourceId) =>
         body.data.some((record) => record.sourceId === sourceId && record.processStage === 'EXPENSE_REIMBURSEMENT_PREPARED')
       )
@@ -142,48 +183,62 @@ test('finance toolbar controls each produce observable E2E effects', async () =>
     await page.waitForSelector('#operationFeedback:not([hidden])');
     assert.match(await page.locator('#operationFeedback').innerText(), /已按员工和月份生成 2 张待保存费用报销单/);
     await waitForApiCondition(
-      'http://127.0.0.1:3001/api/fenbeitong-expense-reimbursement/process',
+      processUrl,
       (body) => body.data.filter((record) => record.processStage === 'EXPENSE_REIMBURSEMENT_PREPARED').length === 3
     );
     await page.click('#saveErpButton');
     await waitForApiCondition(
-      'http://127.0.0.1:3001/api/fenbeitong-expense-reimbursement/process',
+      processUrl,
       (body) => selectedSourceIds.every((sourceId) =>
         body.data.some((record) => record.sourceId === sourceId && record.processStage === 'ERP_EXPENSE_REIMBURSEMENT_SAVED')
       )
     );
-    await page.waitForFunction(() => document.querySelector('#operationFeedback')?.textContent === '保存成功');
-    assert.equal(await page.locator('#operationFeedback').innerText(), '保存成功');
-    const pushedRecords = await fetchJson('http://127.0.0.1:3001/api/fenbeitong-expense-reimbursement/process');
+    await page.waitForFunction(() => document.querySelector('#resultSummary')?.textContent === '全部 2 张费用报销单保存成功');
+    assert.equal(await page.locator('#resultSummary').innerText(), '全部 2 张费用报销单保存成功');
+    const pushedRecords = await fetchJson(processUrl);
     assert.equal(pushedRecords.data.filter((record) => record.processStage === 'ERP_EXPENSE_REIMBURSEMENT_SAVED').length, 2);
 
     await page.click('#viewVoucherButton');
     await page.waitForFunction(() => document.querySelector('#resultOutput')?.textContent.includes('ERP_EXPENSE_REIMBURSEMENT_SAVED'));
 
-    await page.click('#exportButton');
-    await page.waitForFunction(() =>
-      document.querySelector('#resultSummary')?.textContent.includes('文件位置：')
-    );
+    const [download] = await Promise.all([page.waitForEvent('download'), page.click('#exportButton')]);
+    assert.match(download.suggestedFilename(), /\.csv$/);
+    const localPath = await download.path();
+    assert.equal(existsSync(localPath), true);
+    assert.match(readFileSync(localPath, 'utf8'), /"=""MOCK-BX-001"""/);
     const exportResult = JSON.parse(await page.locator('#resultOutput').innerText());
-    assert.match(exportResult.filename, /\.csv$/);
-    assert.equal(existsSync(exportResult.localPath), true);
-    assert.match(readFileSync(exportResult.localPath, 'utf8'), /"=""MOCK-BX-001"""/);
+    assert.equal(exportResult.filename, download.suggestedFilename());
+    assert.equal(exportResult.destination, 'browser-download');
 
     await page.locator('#selectAllRowsCheckbox').check();
     assert.equal(await page.locator('input.row-checkbox:checked').count(), 20);
     assert.equal(
       await page.locator('#operationFeedback').innerText(),
-      '已全选当前筛选结果，共 101 张来源单据。'
+      `已全选当前筛选结果，共 ${ledgerTotal} 张来源单据。`
     );
     await page.click('#nextPageButton');
     assert.equal(await page.locator('input.row-checkbox:checked').count(), 20);
     assert.equal(await page.locator('#selectAllRowsCheckbox').isChecked(), true);
+
+    const savedFilter = page.locator('#saveStatusFilterSelect');
+    await savedFilter.selectOption('saved');
+    const savedStatuses = await columnTexts(page, 'status');
+    assert.ok(savedStatuses.length >= 2 && savedStatuses.every((text) => text === '已保存ERP'));
+    const beforeDeletion = await rowCount(page);
+    const removed = pushedRecords.data.find(record => record.processStage === 'ERP_EXPENSE_REIMBURSEMENT_SAVED');
+    removedErpIds.add(String(removed.erpFid));
+    await page.reload();
+    await page.waitForSelector('#sourceQueueBody input.row-checkbox');
+    await savedFilter.selectOption('saved');
+    assert.ok(await rowCount(page) < beforeDeletion);
+    await savedFilter.selectOption('unsaved');
+    assert.ok((await columnTexts(page, 'status')).every((text) => text !== '已保存ERP'));
+    assert.ok((await fetchJson(processUrl)).data.some(record => record.erpFid === removed.erpFid));
   } finally {
     if (browser) {
       await browser.close();
     }
-    await new Promise((resolve) => apiServer.close(resolve));
-    await new Promise((resolve) => frontendServer.close(resolve));
+    await new Promise((resolve) => server.close(resolve));
     restoreFetch();
     restoreEnv();
   }
@@ -285,7 +340,6 @@ function assertNumberSorted(values, direction) {
 function forceMockExternalEnv() {
   const previous = {
     APP_DATA_DIR: process.env.APP_DATA_DIR,
-    EXPORT_DOWNLOAD_DIR: process.env.EXPORT_DOWNLOAD_DIR,
     FENBEITONG_MODE: process.env.FENBEITONG_MODE,
     KINGDEE_MODE: process.env.KINGDEE_MODE,
     KINGDEE_BASE_URL: process.env.KINGDEE_BASE_URL,
@@ -298,15 +352,9 @@ function forceMockExternalEnv() {
     KINGDEE_ACCOUNT_JIAZEYU_PASSWORD: process.env.KINGDEE_ACCOUNT_JIAZEYU_PASSWORD
   };
   process.env.APP_DATA_DIR = 'runtime-data/e2e-ui-toolbar';
-  process.env.EXPORT_DOWNLOAD_DIR = join(
-    process.cwd(),
-    'runtime-data',
-    'e2e-ui-toolbar',
-    'exports'
-  );
   process.env.FENBEITONG_MODE = 'mock';
   process.env.KINGDEE_MODE = 'real';
-  process.env.KINGDEE_BASE_URL = 'http://172.30.30.8';
+  process.env.KINGDEE_BASE_URL = 'http://kingdee.test';
   process.env.KINGDEE_ACCT_ID = '6977227150362f';
   process.env.KINGDEE_USERNAME = 'test-user';
   process.env.KINGDEE_PASSWORD = 'test-password';
@@ -325,7 +373,7 @@ function forceMockExternalEnv() {
   };
 }
 
-function stubKingdeeFetch() {
+function stubKingdeeFetch(removedErpIds) {
   const previousFetch = globalThis.fetch;
   let nextId = 100033;
   const savedModels = new Map();
@@ -353,6 +401,21 @@ function stubKingdeeFetch() {
         }
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
+    if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.ExecuteBillQuery.common.kdsvc')) {
+      const query = JSON.parse(JSON.parse(String(options.body)).data);
+      if (query.FormId === 'BD_Empinfo') {
+        return Response.json([[5093315, 'PH022', query.FilterString?.[0]?.Value, '886']]);
+      }
+      if (query.FormId === 'BD_Department') {
+        return Response.json([[6001, 'BM000006', query.FilterString?.[0]?.Value || '销售部', '886']]);
+      }
+      assert.equal(query.FormId, 'ER_ExpReimbursement');
+      if (typeof query.FilterString === 'string' && query.FilterString.startsWith('FID in (')) {
+        const fids = query.FilterString.slice(8, -1).split(',');
+        return Response.json(fids.filter(id => savedModels.has(id) && !removedErpIds.has(id)).map(id => [id, id]));
+      }
+      return Response.json([]);
+    }
     if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.Save.common.kdsvc')) {
       assert.equal(options.headers.Cookie, 'kdservice-sessionid=e2eui123');
       const body = JSON.parse(String(options.body));
@@ -372,6 +435,12 @@ function stubKingdeeFetch() {
     }
     if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.DynamicFormService.View.common.kdsvc')) {
       const body = JSON.parse(String(options.body));
+      if (body.formid === 'BD_Empinfo') {
+        return Response.json({ Result: {
+          ResponseStatus: { IsSuccess: true, Errors: [] },
+          Result: { EmpinfoBank: [{ OpenBankName: '测试银行', BankHolder: '测试员工', BankCode: '6222000000000000' }] }
+        } });
+      }
       assert.equal(body.formid, 'ER_ExpReimbursement');
       const id = JSON.parse(body.data).Id;
       const model = savedModels.get(String(id));
@@ -386,32 +455,27 @@ function stubKingdeeFetch() {
             FRequestDeptID: model.FRequestDeptID,
             FBillTypeID: model.FBillTypeID,
             FExpAmountSum: model.FExpAmountSum,
+            F_ora_Text_qtr: model.F_ora_Text_qtr,
+            FRequestType: model.FRequestType,
+            FRealPay: model.FRealPay,
+            BankBranchT: model.FBankBranchT,
+            BankAccountNameT: model.FBankAccountNameT,
+            BankAccountT: model.FBankAccountT,
+            ER_ExpenseReimbEntry: model.FEntity.map((entry) => ({
+              ...entry,
+              BankBranch: entry.FBankBranch,
+              BankAccountName: entry.FBankAccountName,
+              BankAccount: entry.FBankAccount
+            })),
             FDocumentStatus: 'Z'
           }
         }
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
+    if (new URL(text).hostname === 'kingdee.test') throw new Error(`Unexpected Kingdee endpoint: ${text}`);
     return previousFetch(url, options);
   };
   return () => {
     globalThis.fetch = previousFetch;
   };
-}
-
-async function stopKnownDevServers() {
-  if (process.platform !== 'win32') {
-    return;
-  }
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const execFileAsync = promisify(execFile);
-  const script = [
-    '$connections = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |',
-    '  Where-Object { $_.LocalAddress -eq "127.0.0.1" -and ($_.LocalPort -eq 3001 -or $_.LocalPort -eq 5173) }',
-    'foreach ($connection in $connections) {',
-    '  try { Stop-Process -Id $connection.OwningProcess -Force } catch {}',
-    '}',
-    'Start-Sleep -Milliseconds 500'
-  ].join('\n');
-  await execFileAsync('powershell.exe', ['-NoProfile', '-Command', script]);
 }

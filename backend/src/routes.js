@@ -3,17 +3,13 @@ import { readJson, sendError, sendJson } from './http-utils.js';
 import { AppError } from './errors.js';
 import { createCsvDownload } from './export-downloads.js';
 import { getSchedulerStatus, runSchedulerOnce } from './services/scheduler.js';
-import {
-  getPaymentStatusSchedulerStatus,
-  runPaymentStatusSyncOnce
-} from './services/payment-status-scheduler.js';
-import { previewPaymentStatusSync } from './services/payment-status-sync.js';
 import { getReadinessStatus, getSystemStatus } from './services/system-status.js';
 import {
   prepareExpenseReimbursement,
   previewExpenseReimbursement,
   saveExpenseReimbursementToErp,
-  syncFenbeitongDocuments
+  syncFenbeitongDocuments,
+  verifyExpenseReimbursementSaveStatus
 } from './services/expense-reimbursement-workflow.js';
 import { listFenbeitongTenants, saveFenbeitongTenantCredentials } from './tenant-store.js';
 import {
@@ -35,13 +31,19 @@ import {
   processRecordResponse
 } from './process-record-response.js';
 
-export async function handleApi(request, response) {
+export async function handleApi(request, response, { standalone = false } = {}) {
   if (request.method === 'OPTIONS') {
     return sendJson(response, 204, {});
   }
 
   const url = new URL(request.url, 'http://localhost');
   try {
+    if (standalone && request.method === 'GET' && url.pathname === '/api/assistant/session') {
+      return sendJson(response, 200, {
+        success: true,
+        data: { permissions: ['erp:fenbeitong-voucher:query'] }
+      });
+    }
     if (request.method === 'GET' && url.pathname === '/api/health') {
       return sendJson(response, 200, { success: true, status: 'ok' });
     }
@@ -94,18 +96,6 @@ export async function handleApi(request, response) {
     if (request.method === 'POST' && url.pathname === '/api/scheduler/run-once') {
       return sendJson(response, 200, { success: true, data: await runSchedulerOnce('manual') });
     }
-    if (request.method === 'GET' && url.pathname === '/api/payment-status-sync/status') {
-      return sendJson(response, 200, { success: true, data: getPaymentStatusSchedulerStatus() });
-    }
-    if (request.method === 'GET' && url.pathname === '/api/payment-status-sync/preview') {
-      return sendJson(response, 200, { success: true, data: await previewPaymentStatusSync({
-        tenantKey: url.searchParams.get('tenantKey') || undefined,
-        orgNumber: url.searchParams.get('orgNumber') || undefined
-      }) });
-    }
-    if (request.method === 'POST' && url.pathname === '/api/payment-status-sync/run') {
-      return sendJson(response, 200, { success: true, data: await runPaymentStatusSyncOnce('manual') });
-    }
     if (request.method === 'GET' && url.pathname === '/api/fenbeitong-expense-reimbursement/config/default-template') {
       return sendJson(response, 200, { success: true, data: buildConfigTemplate() });
     }
@@ -157,9 +147,11 @@ export async function handleApi(request, response) {
       return sendJson(response, 200, { success: true, data: processRecordResponse(record) });
     }
     if (request.method === 'GET' && url.pathname === '/api/fenbeitong-expense-reimbursement/process') {
+      const acctIdKey = url.searchParams.get('verifyErpAcctId');
+      const records = listProcessRecords();
       return sendJson(response, 200, {
         success: true,
-        data: processRecordListResponse(listProcessRecords())
+        data: processRecordListResponse(acctIdKey ? await verifyExpenseReimbursementSaveStatus(records, acctIdKey) : records)
       });
     }
     if (request.method === 'GET' && url.pathname.startsWith('/api/fenbeitong-expense-reimbursement/process/')) {
