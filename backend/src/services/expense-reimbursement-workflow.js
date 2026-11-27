@@ -4,8 +4,8 @@ import {
   findKingdeeEmployeeNumberByName,
   findKingdeeOtherContactUnitByName,
   getKingdeeEmployeeBankDetails,
-  kingdeeExpenseReimbursementExists,
   queryKingdeeExpenseReimbursementHeaders,
+  resolveKingdeeExpenseReimbursementFid,
   saveKingdeeExpenseReimbursement,
   validateExpensePaymentBankFields,
   viewKingdeeExpenseReimbursement,
@@ -22,6 +22,7 @@ import {
   findPreparedRecord,
   findSyncedDocument,
   finishSyncBatch,
+  getConfig,
   getIntegrationSelection,
   getKingdeeAcctIdSelection,
   isRealPushedRecord,
@@ -55,6 +56,7 @@ export async function syncFenbeitongDocuments(options = {}) {
       mockReplacement: result.mockReplacement,
       mockReason: result.mockReason,
       tenantKey: result.tenantKey,
+      coveredOnlineBillNumbers: result.coveredOnlineBillNumbers,
       employeeBankDetailsByRequester
     });
     const requesters = saveFenbeitongRequesterCatalog(result.requesters, result.tenantKey);
@@ -132,16 +134,20 @@ export async function prepareExpenseReimbursement(input) {
   const acctIdKey = input.kingdeeAcctIdKey || getKingdeeAcctIdSelection();
   const previous = listPreparedKingdeeTargets(preview, acctIdKey);
   for (const record of previous) {
-    const org = JSON.parse(record.expenseReimbursementPayload || '{}').Model?.FOrgID;
-    const orgNumber = requiredText(org?.FNumber, 'saved Kingdee organization number');
-    if (await kingdeeExpenseReimbursementExists(record.erpFid, record.erpNumber, {
-      accountKey: REQUIRED_KINGDEE_ACCOUNT_KEY, acctIdKey, orgNumber
-    })) {
+    if (await resolveSavedKingdeeTarget(record, acctIdKey)) {
       throw new AppError('KINGDEE_REIMBURSEMENT_STILL_EXISTS',
         `金蝶仍存在费用报销单 ${record.erpNumber}，请使用“保存/更新费用报销单”处理原单。`, 409);
     }
   }
   return savePreparedRecord(preview, { kingdeeAcctIdKey: acctIdKey, confirmedDeletedRecords: previous });
+}
+
+function resolveSavedKingdeeTarget(record, acctIdKey) {
+  const org = JSON.parse(record.expenseReimbursementPayload || '{}').Model?.FOrgID;
+  const orgNumber = requiredText(org?.FNumber, 'saved Kingdee organization number');
+  return resolveKingdeeExpenseReimbursementFid(record.erpFid, record.erpNumber, {
+    accountKey: REQUIRED_KINGDEE_ACCOUNT_KEY, acctIdKey, orgNumber
+  });
 }
 
 export function saveExpenseReimbursementToErp(input) {
@@ -208,11 +214,36 @@ async function saveExpenseReimbursementToErpUnlocked(input) {
   const resolvedInput = resolveInput(input);
   const preview = await buildPreviewWithResolvedEmployee(resolvedInput);
   const kingdeeAcctIdKey = input.kingdeeAcctIdKey || getKingdeeAcctIdSelection();
+  const linkedTargets = listPreparedKingdeeTargets(preview, kingdeeAcctIdKey);
+  let confirmedDeletedRecords;
+  if (linkedTargets.length && getAppConfig().kingdee.mode === 'real') {
+    const currentFids = await Promise.all(linkedTargets.map((record) =>
+      resolveSavedKingdeeTarget(record, kingdeeAcctIdKey)));
+    if (currentFids.every((fid) => !fid)) confirmedDeletedRecords = linkedTargets;
+    if (linkedTargets.length === 1 && currentFids[0] && currentFids[0] !== Number(linkedTargets[0].erpFid)) {
+      if (input.requireReceiptOnly) {
+        throw new AppError('KINGDEE_RECEIPT_ONLY_TARGET_CHANGED', '金蝶原单已重新建档，请重新核对后再补录收票。', 409);
+      }
+      // Recheck the same-number bill before replacing the local link. Ordinary saves must not overwrite it.
+      const payload = structuredClone(preview.payload);
+      payload.Model.FID = 0;
+      payload.Model.FBillNo = linkedTargets[0].erpNumber;
+      const erpResult = await saveKingdeeExpenseReimbursement(payload, {
+        accountKey: REQUIRED_KINGDEE_ACCOUNT_KEY,
+        acctIdKey: kingdeeAcctIdKey,
+        receiptInvoices: preview.receiptInvoices,
+        requiredExistingFid: currentFids[0],
+        allowExistingBillOverwrite: Boolean(input.forceRetry)
+      });
+      savePreparedRecord({ ...preview, payload }, { kingdeeAcctIdKey, confirmedDeletedRecords: linkedTargets });
+      return markPushedToErp(preview.sourceId, erpResult, { kingdeeAcctIdKey });
+    }
+  }
   const associatedRecords = [...new Map((preview.sourceIds || [sourceId])
     .map((item) => findPreparedRecord(item))
     .filter(Boolean)
     .map((record) => [record.sourceId, record])).values()];
-  const savedRecords = associatedRecords.filter((record) =>
+  const savedRecords = confirmedDeletedRecords ? [] : associatedRecords.filter((record) =>
     isRealPushedRecord(record) && record.kingdeeAcctIdKey === kingdeeAcctIdKey);
   if (savedRecords.length > 1) {
     throw new Error(`当前来源单据组已有 ${savedRecords.length} 张逐单费用报销单，已停止合并以避免重复；请先在金蝶中处理旧暂存单。`);
@@ -220,7 +251,7 @@ async function saveExpenseReimbursementToErpUnlocked(input) {
   const candidateRecord = savedRecords[0]
     || findPreparedRecord(preview.sourceId)
     || findPreparedRecord(sourceId);
-  const existingRecord = candidateRecord?.kingdeeAcctIdKey === kingdeeAcctIdKey
+  const existingRecord = !confirmedDeletedRecords && candidateRecord?.kingdeeAcctIdKey === kingdeeAcctIdKey
     ? candidateRecord
     : null;
   const migratingExistingBill = Boolean(
@@ -295,6 +326,7 @@ async function saveExpenseReimbursementToErpUnlocked(input) {
     savePreparedRecord(preview, {
       forceRetry,
       kingdeeAcctIdKey,
+      confirmedDeletedRecords,
       previousRecord: migratingExistingBill ? existingRecord : undefined
     });
     const erpResult = await saveKingdeeExpenseReimbursement(preview.payload, {
@@ -307,7 +339,7 @@ async function saveExpenseReimbursementToErpUnlocked(input) {
       // locked).  In that orphaned-state case there is no existingRecord, but
       // an explicit retry must still be allowed to update the same bill number
       // instead of leaving the UI permanently out of sync with Kingdee.
-      allowExistingBillOverwrite: forceRetry || Boolean(input.forceRetry)
+      allowExistingBillOverwrite: !confirmedDeletedRecords && (forceRetry || Boolean(input.forceRetry))
     });
     if (replaceOnlineDraft) {
       try {
@@ -403,9 +435,13 @@ export function replaySavedExpenseReimbursementForTest(existingRecord, preview) 
   return replaySavedExpenseReimbursement(existingRecord, preview);
 }
 
-function resolveInput(input) {
-  const sourceId = String(input.sourceId || '').trim();
+function resolveInput(request) {
+  const sourceId = String(request.sourceId || '').trim();
   const synced = sourceId ? findSyncedDocument(sourceId) : null;
+  // An open workbench tab can still send the mappings it loaded before a configuration change.
+  const input = synced?.sourceMode === 'real'
+    ? { ...request, config: getConfig() || request.config }
+    : request;
   if (synced?.sourceType === 'ONLINE_MONTHLY_BILL') {
     return buildOnlineMonthlyGroupInput(input, synced);
   }
@@ -415,7 +451,7 @@ function resolveInput(input) {
   if (synced) {
     return {
       ...input,
-      fixedJson: input.fixedJson || synced.fixedJson,
+      fixedJson: synced.sourceMode === 'real' ? synced.fixedJson : input.fixedJson || synced.fixedJson,
       // The synchronized source number is authoritative.  It must not be
       // replaced by an embedded detail value or a locally generated suffix.
       sourceCodeValue: requiredText(synced.sourceCode, 'synchronized source document number'),
@@ -425,12 +461,14 @@ function resolveInput(input) {
       sourceTypeValue: synchronizedSourceTypeValue(synced)
     };
   }
+  if (sourceId) {
+    throw new AppError('FENBEITONG_SOURCE_NOT_CURRENT', '该报销单已不在当前同步结果中，请重新查询工作台列表。', 409, { sourceId });
+  }
   if (input.fixedJson) {
     assertVerifiedOnlineSettlement(input.fixedJson);
     return input;
   }
-  if (!sourceId) requiredText(input.sourceId, 'sourceId');
-  throw new Error(`synced Fenbeitong document is missing for ${sourceId}`);
+  requiredText(input.sourceId, 'sourceId');
 }
 
 function buildOnlineMonthlyGroupInput(input, selected) {

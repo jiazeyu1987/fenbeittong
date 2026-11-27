@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { buildMockTemplate } from '../src/mock-template.js';
 import { buildExpenseReimbursementPreview } from '../src/expense-reimbursement-mapper.js';
+import { resolveExpenseReimbursementInputForTest } from '../src/services/expense-reimbursement-workflow.js';
 
 const buildVoucherPreview = ({ voucherDate, ...input }) => buildExpenseReimbursementPreview({
   ...input,
@@ -30,6 +31,7 @@ import {
   renameStateFileWithRetryForTest,
   resetRepository,
   restoreErpPushAfterRetryFailure,
+  saveConfig,
   saveFenbeitongRequesterCatalog,
   savePreparedRecord,
   saveIntegrationSelection,
@@ -118,6 +120,40 @@ after(() => {
       process.env[name] = value;
     }
   }
+});
+
+test('a synchronized real reimbursement uses the latest source data and mappings even when an open tab sends old values', () => {
+  resetRepository();
+  const template = buildMockTemplate();
+  const source = saveSyncedDocument(JSON.parse(template.mockFixedJson), '', { sourceMode: 'real' });
+  const oldConfig = { expenseItemNumberMappings: {}, departmentDetailNumberMappings: {} };
+  const savedConfig = {
+    expenseItemNumberMappings: { 10047: 'CI016' },
+    departmentDetailNumberMappings: { 3206075902462: 'BM000003' }
+  };
+  saveConfig(savedConfig);
+  const oldDocument = JSON.parse(template.mockFixedJson);
+  oldDocument.data.reimb_reason = '旧页面事由';
+  const input = resolveExpenseReimbursementInputForTest({
+    sourceId: source.sourceId, config: oldConfig, fixedJson: JSON.stringify(oldDocument)
+  });
+  assert.deepEqual(input.config, savedConfig);
+  assert.equal(input.fixedJson, source.fixedJson);
+});
+
+test('a removed reimbursement cannot be resolved from an open tab with cached data', () => {
+  resetRepository();
+  const template = buildMockTemplate();
+  const source = saveSyncedDocument(JSON.parse(template.mockFixedJson), '', { sourceMode: 'real' });
+  saveSyncedDocuments([], 'UPDATED-SYNC', { sourceMode: 'real', tenantKey: 'puhui' });
+
+  assert.equal(findSyncedDocument(source.sourceId), null);
+  assert.throws(() => resolveExpenseReimbursementInputForTest({
+    sourceId: source.sourceId, fixedJson: source.fixedJson, config: template
+  }), { code: 'FENBEITONG_SOURCE_NOT_CURRENT', statusCode: 409 });
+  assert.equal(resolveExpenseReimbursementInputForTest({
+    fixedJson: template.mockFixedJson, config: template
+  }).fixedJson, template.mockFixedJson);
 });
 
 test('prepare stores a local prepared record without ERP identifiers', () => {
@@ -307,7 +343,7 @@ test('real Fenbeitong mode hides online documents not verified as settlement bil
   }
 });
 
-test('real full sync removes every stale online row not returned by issued bills', () => {
+test('real sync prunes stale details only for online bills whose details were fetched', () => {
   resetRepository();
   const onlineDocument = (id, billNumber, orderId, amount) => ({
     code: 0,
@@ -336,16 +372,20 @@ test('real full sync removes every stale online row not returned by issued bills
   const options = { sourceMode: 'real', tenantKey: 'puhui' };
   saveSyncedDocuments([
     onlineDocument('OLD-CURRENT-BILL', 'BILL-CURRENT', 'ORDER-OLD', 10),
-    onlineDocument('OTHER-BILL', 'BILL-OTHER', 'ORDER-OTHER', 20)
+    onlineDocument('OTHER-BILL', 'BILL-OTHER', 'ORDER-OTHER', 20),
+    onlineDocument('EMPTY-BILL', 'BILL-EMPTY', 'ORDER-EMPTY', 40)
   ], 'BATCH-1', options);
 
   saveSyncedDocuments([
     onlineDocument('NEW-CURRENT-BILL', 'BILL-CURRENT', 'ORDER-NEW', 30)
-  ], 'BATCH-2', options);
+  ], 'BATCH-2', { ...options, coveredOnlineBillNumbers: ['BILL-CURRENT', 'BILL-EMPTY'] });
 
   assert.equal(findSyncedDocument('OLD-CURRENT-BILL'), null);
   assert.equal(findSyncedDocument('NEW-CURRENT-BILL').reimbursementAmount, 30);
-  assert.equal(findSyncedDocument('OTHER-BILL'), null);
+  assert.equal(findSyncedDocument('OTHER-BILL').reimbursementAmount, 20);
+  assert.equal(findSyncedDocument('EMPTY-BILL'), null);
+  saveSyncedDocuments([], 'OFFLINE-ONLY', options);
+  assert.equal(findSyncedDocument('NEW-CURRENT-BILL').reimbursementAmount, 30);
 });
 
 test('payment status fields from one monthly ERP voucher are copied to every source row', () => {

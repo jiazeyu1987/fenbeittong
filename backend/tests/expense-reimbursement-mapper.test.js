@@ -599,6 +599,12 @@ test('maps the expense department independently for each detail row', () => {
     preview.payload.Model.FEntity.map((entry) => entry.FExpenseDeptEntryID.FNumber),
     ['ERP-DEPT-1', 'ERP-DEPT-2']
   );
+  delete config.departmentDetailNumberMappings['SOURCE-DEPT-1'];
+  assert.throws(() => buildExpenseReimbursementPreview({
+    fixedJson: JSON.stringify(source), documentDate: '2026-07-11', config
+  }), { code: 'KINGDEE_DEPARTMENT_MAPPING_MISSING', detail: {
+    departmentCode: 'SOURCE-DEPT-1', departmentName: '来源部门一'
+  } });
 });
 
 test('maps the confirmed Fenbeitong sales department id to Kingdee BM000006', () => {
@@ -674,10 +680,11 @@ test('maps a detailed sales hierarchy to the configured top-level sales departme
   assert.equal(preview.payload.Model.FEntity[0].FExpenseDeptEntryID.FNumber, 'BM000006');
 });
 
-test('falls back to the application department when an expense attribution contains an organization name', () => {
+test('falls back to the application department when the attribution is the document company name without a department code', () => {
   const config = buildMockTemplate();
   const source = JSON.parse(config.mockFixedJson);
   source.data.user.department_name = '销售部/中大区/华东战区';
+  source.data.company = { name: '上海璞慧医疗器械有限公司' };
   source.data.expenses[0].cost_attributions = [{
     type: 1,
     details: [{ name: '上海璞慧医疗器械有限公司', amount: 108 }]

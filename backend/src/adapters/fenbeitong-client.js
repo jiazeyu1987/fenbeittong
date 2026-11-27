@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { Agent, request as httpsRequest } from 'node:https';
+import { isIPv4 } from 'node:net';
 import { resolve } from 'node:path';
 import { getAppConfig, getRootDir, validateFenbeitongConfig } from '../config.js';
 import { dependencyError } from '../errors.js';
@@ -11,6 +13,7 @@ import {
 
 const APPROVED_REIMBURSEMENT_STATE = 4;
 const REIMBURSEMENT_PAYMENT_UPDATE_PATH = '/openapi/reimbursement/v1/update_state';
+let directApiAgent;
 
 export function clearFenbeitongTokenCacheForTest() {
   const tenant = getFenbeitongTenant('puhui', { includeSecrets: true });
@@ -55,7 +58,7 @@ export async function pullFenbeitongReimbursements(options = {}) {
     ...config.listPayloadOverrides
   };
   const summaries = await pullAllReimbursementSummaries(tenant, accessToken, listPayload);
-  const detailedReimbursements = await mapWithConcurrency(summaries, 16, async (summary) => {
+  const detailedReimbursements = await mapWithConcurrency(summaries, config.reimbursementDetailConcurrency, async (summary) => {
     const detailPayload = buildDetailRequestPayload(summary);
     const detailBody = await postFenbeitongApi(tenant, tenant.detailPath, accessToken, detailPayload);
     return {
@@ -105,6 +108,7 @@ export async function pullFenbeitongReimbursements(options = {}) {
     mockReason: '',
     documents,
     requesters,
+    coveredOnlineBillNumbers: onlineResult.billNumbers,
     sourceWarnings: [...expenseFilterWarnings, ...onlineResult.warnings]
   };
 }
@@ -262,7 +266,7 @@ async function pullSettlementBillDocuments(tenant, accessToken) {
   if (documents.length === 0 && bills.length > 0) {
     warnings.push('分贝通结算入账账单中没有包含企业支付金额的明细');
   }
-  return { documents, warnings };
+  return { documents, warnings, billNumbers: bills.map(settlementBillNumber) };
 }
 
 async function pullAllSettlementBills(tenant, accessToken, range) {
@@ -1254,7 +1258,7 @@ async function fetchFenbeitongJson(url, options, maxAttempts = 3) {
   let lastError;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      const response = await fetch(url, {
+      const response = await fetchFenbeitongResponse(url, {
         ...options,
         signal: AbortSignal.timeout(30_000)
       });
@@ -1277,6 +1281,33 @@ async function fetchFenbeitongJson(url, options, maxAttempts = 3) {
     maxAttempts === 1 ? '未收到分贝通写入响应。' : `无法连接分贝通服务，尝试 ${maxAttempts} 次均失败。`,
     { cause: String(lastError?.message || lastError || '') }
   );
+}
+
+function fetchFenbeitongResponse(url, options) {
+  const address = process.env.FENBEITONG_API_IPV4?.trim();
+  if (!address || url.origin !== 'https://openapi.fenbeitong.com') return fetch(url, options);
+  if (!isIPv4(address)) throw new Error('FENBEITONG_API_IPV4 must be an IPv4 address');
+  directApiAgent ??= new Agent({
+    keepAlive: true,
+    lookup(_host, lookupOptions, callback) {
+      if (lookupOptions.all) callback(null, [{ address, family: 4 }]);
+      else callback(null, address, 4);
+    }
+  });
+  return new Promise((resolve, reject) => {
+    const request = httpsRequest(url, { ...options, agent: directApiAgent }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('error', reject);
+      response.on('end', () => {
+        const status = response.statusCode;
+        resolve({ status, ok: status >= 200 && status < 300,
+          json: () => JSON.parse(Buffer.concat(chunks).toString('utf8')) });
+      });
+    });
+    request.on('error', reject);
+    request.end(options.body);
+  });
 }
 
 function isRetryableHttpStatus(status) {

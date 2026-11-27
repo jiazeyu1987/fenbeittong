@@ -334,7 +334,8 @@ function pruneStaleOfflineDocuments(state, incomingRecords, options) {
 }
 
 function pruneStaleOnlineDocuments(state, incomingRecords, options) {
-  if (options.sourceMode !== 'real') return 0;
+  const coveredBillNumbers = new Set(options.coveredOnlineBillNumbers || []);
+  if (options.sourceMode !== 'real' || coveredBillNumbers.size === 0) return 0;
   const onlineRecords = incomingRecords.filter((record) => record.sourceType === 'ONLINE_MONTHLY_BILL');
   const tenantKey = options.tenantKey || 'puhui';
   const incomingIds = new Set(onlineRecords.map((record) => record.sourceId));
@@ -344,6 +345,7 @@ function pruneStaleOnlineDocuments(state, incomingRecords, options) {
       record.sourceMode === 'real'
       && record.tenantKey === tenantKey
       && record.sourceType === 'ONLINE_MONTHLY_BILL'
+      && coveredBillNumbers.has(record.sourceCode)
       && !incomingIds.has(sourceId)
     ) {
       delete state.syncedDocuments[sourceId];

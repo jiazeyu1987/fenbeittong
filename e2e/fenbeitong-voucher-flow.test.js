@@ -14,7 +14,7 @@ function startServer() {
 }
 test('user path previews and saves a Kingdee expense reimbursement', async () => {
   const restoreEnv = forceMockExternalEnv();
-  const restoreFetch = stubKingdeeFetch();
+  const { restore: restoreFetch, deleteSavedBill, replaceSavedBill } = stubKingdeeFetch();
   resetRepository();
   const { server, baseUrl } = await startServer();
   try {
@@ -132,6 +132,32 @@ test('user path previews and saves a Kingdee expense reimbursement', async () =>
     const logsResponse = await fetch(`${baseUrl}/api/operations/logs`);
     const logsBody = await logsResponse.json();
     assert.ok(logsBody.data.some((log) => log.action === 'ERP_EXPENSE_REIMBURSEMENT_SAVE'));
+
+    for (const [index, forceRetry] of [false, true].entries()) {
+      deleteSavedBill();
+      const recreated = await postJson(`${baseUrl}/api/fenbeitong-expense-reimbursement/save-erp`, {
+        sourceId,
+        documentDate: template.mockDocumentDate,
+        config: template,
+        forceRetry
+      });
+      assert.equal(recreated.success, true, JSON.stringify(recreated));
+      assert.equal(recreated.data.erpFid, String(100034 + index));
+      assert.equal(recreated.data.erpNumber, '23');
+      assert.equal(recreated.data.processStage, 'ERP_EXPENSE_REIMBURSEMENT_SAVED');
+    }
+
+    const retryRequest = { sourceId, documentDate: template.mockDocumentDate, config: template };
+    replaceSavedBill();
+    const relinked = await postJson(`${baseUrl}/api/fenbeitong-expense-reimbursement/save-erp`, retryRequest);
+    assert.equal(relinked.success, true, JSON.stringify(relinked));
+    assert.equal(relinked.data.erpFid, '100036');
+
+    replaceSavedBill(1);
+    const mismatch = await postJson(`${baseUrl}/api/fenbeitong-expense-reimbursement/save-erp`, retryRequest);
+    assert.equal(mismatch.error?.code || mismatch.code, 'KINGDEE_EXISTING_BILL_MISMATCH', JSON.stringify(mismatch));
+    const kept = await (await fetch(`${baseUrl}/api/fenbeitong-expense-reimbursement/process/${sourceId}`)).json();
+    assert.equal(kept.data.erpFid, '100036');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     restoreFetch();
@@ -191,6 +217,8 @@ function forceMockExternalEnv() {
 function stubKingdeeFetch() {
   const previousFetch = globalThis.fetch;
   let savedModel;
+  let savedFid;
+  let nextFid = 100033;
   globalThis.fetch = async (url, options = {}) => {
     const text = String(url);
     if (text.endsWith('/Kingdee.BOS.WebApi.ServicesStub.AuthService.ValidateUser.common.kdsvc')) {
@@ -224,7 +252,7 @@ function stubKingdeeFetch() {
       } else if (query.FormId === 'BD_Department') {
         rows = [[6001, 'BM000006', query.FilterString?.[0]?.Value || '销售部', '886']];
       } else if (query.FormId === 'ER_ExpReimbursement') {
-        rows = [];
+        rows = savedFid && query.FilterString?.[0]?.Value === '23' ? [[savedFid, '23']] : [];
       } else {
         throw new Error(`unexpected Kingdee query form: ${query.FormId}`);
       }
@@ -238,12 +266,14 @@ function stubKingdeeFetch() {
       const body = JSON.parse(String(options.body));
       assert.equal(body.formid, 'ER_ExpReimbursement');
       const payload = JSON.parse(body.data);
+      assert.equal(Number(payload.Model.FID || 0), 0);
       savedModel = payload.Model;
+      savedFid = nextFid++;
       assert.equal(payload.Model.FOrgID.FNumber, '886');
       assert.ok(payload.Model.FEntity.length >= 2);
       return new Response(JSON.stringify({
         Result: {
-          Id: '100033',
+          Id: String(savedFid),
           Number: '23',
           ResponseStatus: { IsSuccess: true, Errors: [] }
         }
@@ -267,12 +297,18 @@ function stubKingdeeFetch() {
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       assert.equal(body.formid, 'ER_ExpReimbursement');
-      assert.equal(JSON.parse(body.data).Id, '100033');
+      if (JSON.parse(body.data).Id !== String(savedFid)) {
+        return new Response(JSON.stringify({
+          Result: { ResponseStatus: { IsSuccess: false, Errors: [{
+            Message: '数据在系统中不存在，可能已经被删除 [TableName=t_ER_ExpenseReimb]'
+          }] } }
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
       return new Response(JSON.stringify({
         Result: {
           ResponseStatus: { IsSuccess: true, Errors: [] },
           Result: {
-            FID: 100033,
+            FID: savedFid,
             FBillNo: '23',
             FOrgID: savedModel.FOrgID,
             FProposerID: savedModel.FProposerID,
@@ -299,7 +335,16 @@ function stubKingdeeFetch() {
     if (new URL(text).hostname === 'kingdee.test') throw new Error(`Unexpected Kingdee endpoint: ${text}`);
     return previousFetch(url, options);
   };
-  return () => {
-    globalThis.fetch = previousFetch;
+  return {
+    restore() {
+      globalThis.fetch = previousFetch;
+    },
+    deleteSavedBill() {
+      savedFid = undefined;
+    },
+    replaceSavedBill(amountDifference = 0) {
+      savedFid = nextFid++;
+      savedModel.FExpAmountSum += amountDifference;
+    }
   };
 }

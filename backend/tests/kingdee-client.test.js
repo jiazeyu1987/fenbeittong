@@ -5,7 +5,7 @@ import {
   clearKingdeeEmployeeNumberCacheForTest,
   findKingdeeDepartmentNumberByName,
   findKingdeeEmployeeNumberByName,
-  kingdeeExpenseReimbursementExists,
+  resolveKingdeeExpenseReimbursementFid,
   extractKingdeeEmployeeBankDetails,
   queryKingdeeSuccessfulExpensePaymentBills,
   expenseReimbursementWithoutRequestPaymentForTest,
@@ -822,6 +822,7 @@ test('requires individual receipts, leaves a missing buyer blank and resolves th
   let savedReceipt;
   let savedReimbursement;
   let receiptSaves = 0;
+  let receiptIdQueries = 0;
   const invoice = {
     code: 'TEST-CODE', number: '26000000000000000001', typeName: '电子发票（增值税普通发票）', issuedDate: '2026-10-23',
     sellerName: '测试销方', buyerName: '', taxAmount: 0, excludingTaxAmount: 100, totalAmount: 100
@@ -842,6 +843,11 @@ test('requires individual receipts, leaves a missing buyer blank and resolves th
     if (path.includes('ExecuteBillQuery')) {
       if (data.FormId !== 'IV_ReceivedInvoice') return jsonResponse(savedReimbursement ? [[102, 'TEST-REIMB']] : []);
       const fields = data.FieldKeys.split(',').slice(2);
+      if (data.FilterString.startsWith('FID = ')) {
+        assert.equal(data.FilterString, "FID = '101'");
+        receiptIdQueries += 1;
+        if (receiptIdQueries === 1) return jsonResponse([]);
+      }
       return jsonResponse(savedReceipt ? [[101, '886', ...fields.map((field) => savedReceipt[field])]] : []);
     }
     if (path.includes('DynamicFormService.Save')) {
@@ -867,19 +873,19 @@ test('requires individual receipts, leaves a missing buyer blank and resolves th
     throw new Error(`unexpected test operation: ${path}`);
   };
   try {
-    await assert.rejects(saveKingdeeExpenseReimbursement(payload, { receiptInvoices: [
-      invoice, { ...invoice, number: 'TEST-MISSING-SELLER', sellerName: '' }
-    ] }), (error) => error.code === 'KINGDEE_RECEIPT_DATA_INCOMPLETE' && /销售方名称/.test(error.message));
-    assert.equal(receiptSaves, 0);
-    assert.equal(savedReimbursement, undefined);
-    const options = { receiptInvoices: [invoice, { ...invoice }] };
+    const options = { receiptInvoices: [
+      invoice, { ...invoice }, { number: '0001 / 0002' },
+      { ...invoice, number: 'TEST-MISSING-SELLER', sellerName: '' }
+    ] };
     const result = await saveKingdeeExpenseReimbursement(payload, options);
     assert.equal(result.erpFid, '102');
-    assert.deepEqual(result.receiptWarnings, []);
+    assert.match(result.receiptWarnings[0], /收票信息待补/);
+    assert.match(result.receiptWarnings[1], /销售方名称/);
     const replay = await saveKingdeeExpenseReimbursement(payload, options);
     assert.equal(replay.recoveredExistingBill, true);
     assert.deepEqual(replay.receiptWarnings, result.receiptWarnings);
     assert.equal(receiptSaves, 1);
+    assert.equal(receiptIdQueries, 2);
   } finally {
     globalThis.fetch = previousFetch;
     restore();
@@ -957,13 +963,13 @@ test('checks for a same-number replacement before confirming a deleted reimburse
   };
   try {
     const options = { orgNumber: '886' };
-    assert.equal(await kingdeeExpenseReimbursementExists('101', 'TEST-REIMB', options), true);
+    assert.equal(await resolveKingdeeExpenseReimbursementFid('101', 'TEST-REIMB', options), 102);
     lookup = { unexpected: true };
-    await assert.rejects(kingdeeExpenseReimbursementExists('101', 'TEST-REIMB', options), {
+    await assert.rejects(resolveKingdeeExpenseReimbursementFid('101', 'TEST-REIMB', options), {
       code: 'KINGDEE_BILL_QUERY_RESPONSE_INVALID'
     });
     lookup = [];
-    assert.equal(await kingdeeExpenseReimbursementExists('101', 'TEST-REIMB', options), false);
+    assert.equal(await resolveKingdeeExpenseReimbursementFid('101', 'TEST-REIMB', options), 0);
   } finally {
     globalThis.fetch = previousFetch;
     restore();

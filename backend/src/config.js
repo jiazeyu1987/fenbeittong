@@ -50,6 +50,7 @@ export function getAppConfig() {
       offlineOnly: readBoolean('FENBEITONG_OFFLINE_ONLY', false),
       defaultTenantKey: process.env.FENBEITONG_TENANT_KEY || 'puhui',
       credentialStore: 'sqlite',
+      reimbursementDetailConcurrency: readPositiveInteger('FENBEITONG_REIMBURSEMENT_DETAIL_CONCURRENCY', 16),
       listPayloadOverrides: buildFenbeitongListPayload()
     },
     kingdee,

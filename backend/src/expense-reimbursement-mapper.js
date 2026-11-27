@@ -677,10 +677,7 @@ function resolveExpenseDepartmentNumber(config, document, expense) {
   const candidates = [
     expense.attributionDepartmentCode,
     expense.attributionDepartmentName,
-    ...departmentHierarchyParts(expense.attributionDepartmentName),
-    document.departmentCode,
-    document.departmentName,
-    ...departmentHierarchyParts(document.departmentName)
+    ...departmentHierarchyParts(expense.attributionDepartmentName)
   ];
   const number = candidates.map((candidate) => (
     REQUIRED_DEPARTMENT_NUMBERS[candidate]
@@ -689,6 +686,9 @@ function resolveExpenseDepartmentNumber(config, document, expense) {
       || ''
   )).find(Boolean);
   if (number) return number;
+  // A bare company name is a source placeholder, not a different expense department.
+  if (!expense.attributionDepartmentCode && [document.requestOrganizationName, document.expenseOrganizationName]
+    .includes(expense.attributionDepartmentName)) return resolveDepartmentNumber(config, document);
   throw departmentMappingError(
     expense.attributionDepartmentCode,
     expense.attributionDepartmentName
